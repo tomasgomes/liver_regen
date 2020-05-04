@@ -75,6 +75,7 @@ Conditions
 
 ```{r}
 load("data/Conditions/Donor_1/prepared_liv_reg1.rdata")
+load("data/Conditions/Donor_1/prepared_seurat_Reg1Hep_N_R_reseq.rdata")
 load("data/Conditions/Donor_2/prepared_liv_hepRandN_2d.rdata")
 load("data/Conditions/Donor_2/prepared_liv_NPC_RandN_2d.rdata")
 load("data/Conditions/Donor_3/prepared_liv_hepE_3d.rdata")
@@ -127,12 +128,27 @@ Adding metadata and running a "quick" UMAP to visualise scrublet scores
 ```{r}
 basicSeurat = function(obj, npcs = 10){
   # scores
-  obj= PercentageFeatureSet(obj, pattern = "^MT-", col.name = "percent.mt")
-  obj = PercentageFeatureSet(obj, col.name = "percent.rb", 
+  obj = PercentageFeatureSet(obj, pattern = "^MT-", col.name = "percent.mt", assay = "RNA")
+  obj = PercentageFeatureSet(obj, col.name = "percent.rb", assay = "RNA", 
                              features = c(rpl_genes$Approved.symbol,
                                           rps_genes$Approved.symbol))
-  obj = CellCycleScoring(obj, s.features = cc.genes$s.genes, nbin = 20,
-                         g2m.features = cc.genes$g2m.genes, set.ident = F)
+  
+  # cell cycle scoring
+  # might have trouble with bins so running iteratively until it works
+  bins = 24
+  while(T){
+    objwsc = tryCatch({CellCycleScoring(obj, s.features = cc.genes$s.genes, nbin = bins, 
+                                        assay = "RNA", g2m.features = cc.genes$g2m.genes,
+                                        set.ident = F)},
+                   error = function(e){print(bins)})
+    
+    if(is.numeric(objwsc)){
+      bins = bins-2
+    } else{
+      obj = objwsc
+      break
+    }
+  }
   
   # normalise and PCA-UMAP
   obj = suppressWarnings(SCTransform(obj, do.correct.umi = T, vars.to.regress = "nCount_RNA",
@@ -149,9 +165,13 @@ for(obj in names(cond_srat)){cond_srat[[obj]] = basicSeurat(cond_srat[[obj]])}
 for(obj in names(frozen_srat)){frozen_srat[[obj]] = basicSeurat(frozen_srat[[obj]])}
 ```
 
+Save Seurat objects
 
-
-
+```{r}
+saveRDS(healthy_srat, "data/processed/healthy_srat_beforeDoublet.RDS")
+saveRDS(cond_srat, "data/processed/cond_srat_beforeDoublet.RDS.RDS")
+saveRDS(frozen_srat, "data/processed/frozen_srat_beforeDoublet.RDS.RDS")
+```
 
 
 
