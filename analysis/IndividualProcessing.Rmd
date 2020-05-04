@@ -4,27 +4,76 @@ output: html_notebook
 ---
 
 
+# General Setup
+Setup chunk
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 8)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_knit$get("root.dir")
+```
+
+Setup reticulate
+
+```{r}
+library(reticulate)
+knitr::knit_engines$set(python = reticulate::eng_python)
+py_available(initialize = FALSE)
+use_python(Sys.which("python"))
+py_config()
+```
 
 Load libraries
 
 ```{r}
 library(Seurat)
+library(DoubletFinder)
 ```
 
-Load all prepared matrices, create lists of Seurat objects
+
+
+# Load data
+Load gene lists
 
 ```{r}
-# Healthy
+rpl_genes = read.csv("../../gene_refs/human/RPL_genes.csv", stringsAsFactors = F)
+rps_genes = read.csv("../../gene_refs/human/RPS_genes.csv", stringsAsFactors = F)
+```
+
+Load all prepared matrices, create lists of Seurat objects  
+For each matrix, we'll be running scrublet before deleting it  
+Start scrublet
+
+```{r}
+scr = import("scrublet", as = "scr")
+runScrublet = function(mat, ncomp = 30L){
+  scrub = scr$Scrublet(Matrix::t(mat), n_neighbors=round(sqrt(ncol(mat))))
+  doub_df = data.frame(row.names = colnames(mat), 
+                       scrub$scrub_doublets(verbose=F,n_prin_comps=ncomp))
+  colnames(doub_df) = c("scrublet_score", "scrublet_isDoublet")
+  return(doub_df)
+}
+```
+
+Healthy
+
+```{r}
 load("data/Healthy/1d_prepared.rdata")
 load("data/Healthy/2d_prepared.rdata")
 load("data/Healthy/3d_prepared.rdata")
 healthy_srat = list()
 for(obj in ls()[grepl(".data", ls())]){
-  healthy_srat[[obj]] = CreateSeuratObject(get(obj), project = obj)
+  doub_df = tryCatch({runScrublet(get(obj))}, 
+                     error = function(e){runScrublet(get(obj), ncomp = 20L)}, 
+                    finally = {print(obj)})
+  healthy_srat[[obj]] = CreateSeuratObject(get(obj), project = obj, meta.data = doub_df)
   rm(list = obj)
 }
+```
 
-# Conditions
+Conditions
+
+```{r}
 load("data/Conditions/Donor_1/prepared_liv_reg1.rdata")
 load("data/Conditions/Donor_2/prepared_liv_hepRandN_2d.rdata")
 load("data/Conditions/Donor_2/prepared_liv_NPC_RandN_2d.rdata")
@@ -44,28 +93,68 @@ load("data/Conditions/Donor_7/Data.Reg7_HepE.rdata")
 load("data/Conditions/Donor_7/Data.Reg7_HepR.rdata")
 load("data/Conditions/Donor_7/Data.Reg7_npcE.rdata")
 load("data/Conditions/Donor_7/Data.Reg7_npcR.rdata")
-conditions_srat = list()
+cond_srat = list()
 for(obj in ls()[grepl("ata", ls())]){
-  conditions_srat[[obj]] = CreateSeuratObject(get(obj), project = obj)
+  doub_df = tryCatch({runScrublet(get(obj))}, 
+                     error = function(e){runScrublet(get(obj), ncomp = 20L)}, 
+                    finally = {print(obj)})
+  cond_srat[[obj]] = CreateSeuratObject(get(obj), project = obj, meta.data = doub_df)
   rm(list = obj)
 }
+```
 
-# Frozen (nuclei)
+Frozen (nuclei)
+
+```{r}
 load("data/Frozen_sn_Healthy/sn_H1.rdata")
 load("data/Frozen_sn_Healthy/sn_H3.rdata")
 load("data/Frozen_sn_Healthy/sn_H4.rdata")
 frozen_srat = list()
 for(obj in c("H1", "H3", "H4")){
   load(paste0("data/Frozen_sn_Healthy/sn_", obj, ".rdata"))
-  frozen_srat[[obj]] = CreateSeuratObject(mat, project = paste0("sn_", obj))
+  doub_df = tryCatch({runScrublet(mat)}, 
+                     error = function(e){runScrublet(mat, ncomp = 20L)}, 
+                    finally = {print(obj)})
+  frozen_srat[[obj]] = CreateSeuratObject(mat, project = paste0("sn_", obj), 
+                                          meta.data = doub_df)
   rm(mat)
 }
 gc()
 ```
 
-
+Adding metadata and running a "quick" UMAP to visualise scrublet scores
 
 ```{r}
+basicSeurat = function(obj, npcs = 10){
+  # scores
+  obj= PercentageFeatureSet(obj, pattern = "^MT-", col.name = "percent.mt")
+  obj = PercentageFeatureSet(obj, col.name = "percent.rb", 
+                             features = c(rpl_genes$Approved.symbol,
+                                          rps_genes$Approved.symbol))
+  obj = CellCycleScoring(obj, s.features = cc.genes$s.genes, nbin = 20,
+                         g2m.features = cc.genes$g2m.genes, set.ident = F)
+  
+  # normalise and PCA-UMAP
+  obj = suppressWarnings(SCTransform(obj, do.correct.umi = T, vars.to.regress = "nCount_RNA",
+                                     verbose = F, variable.features.rv.th = 1,
+                                     variable.features.n = NULL, seed.use = 1))
+  obj = RunPCA(obj, verbose = F)
+  obj = RunUMAP(obj, dims = 1:npcs, verbose = F)
+  
+  return(obj)
+}
 
+for(obj in names(healthy_srat)){healthy_srat[[obj]] = basicSeurat(healthy_srat[[obj]])}
+for(obj in names(cond_srat)){cond_srat[[obj]] = basicSeurat(cond_srat[[obj]])}
+for(obj in names(frozen_srat)){frozen_srat[[obj]] = basicSeurat(frozen_srat[[obj]])}
 ```
+
+
+
+
+
+
+
+
+
 
