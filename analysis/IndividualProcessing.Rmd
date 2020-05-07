@@ -27,7 +27,8 @@ Load libraries
 
 ```{r}
 library(Seurat)
-library(DoubletFinder)
+library(ggplot2)
+library(ggridges)
 ```
 
 
@@ -107,9 +108,6 @@ for(obj in ls()[grepl("ata", ls())]){
 Frozen (nuclei)
 
 ```{r}
-load("data/Frozen_sn_Healthy/sn_H1.rdata")
-load("data/Frozen_sn_Healthy/sn_H3.rdata")
-load("data/Frozen_sn_Healthy/sn_H4.rdata")
 frozen_srat = list()
 for(obj in c("H1", "H3", "H4")){
   load(paste0("data/Frozen_sn_Healthy/sn_", obj, ".rdata"))
@@ -168,13 +166,424 @@ for(obj in names(frozen_srat)){frozen_srat[[obj]] = basicSeurat(frozen_srat[[obj
 Save Seurat objects
 
 ```{r}
-saveRDS(healthy_srat, "data/processed/healthy_srat_beforeDoublet.RDS")
-saveRDS(cond_srat, "data/processed/cond_srat_beforeDoublet.RDS.RDS")
-saveRDS(frozen_srat, "data/processed/frozen_srat_beforeDoublet.RDS.RDS")
+save(healthy_srat, file = "data/processed/healthy_srat_beforeDoublet.RData")
+save(cond_srat, file = "data/processed/cond_srat_beforeDoublet.RData")
+save(frozen_srat, file = "data/processed/frozen_srat_beforeDoublet.RData")
 ```
 
+Define matches between matrices and metadata
 
+```{r}
+dat_matches = c("EKS.data", "sc_H1", "HD1", "EKS","cells","healthy", "Exp1","No",
+                "NPC.data", "sc_H1", "HD1", "NPC", "cells", "healthy", "Exp1","No",
+                "HEP.data", "sc_H1", "HD1", "HEP", "cells", "healthy", "Exp1","No",
+                "Hep.2d.data", "sc_H2", "HD2", "HEP", "cells", "healthy", "Exp1","No",
+                "NPC.2d.data", "sc_H2", "HD2", "NPC", "cells", "healthy", "Exp1","No",
+                "Hep.3d.data", "sc_H3", "HD3", "HEP", "cells", "healthy", "Exp1","No",
+                "NPC.3d.data", "sc_H3", "HD3", "NPC", "cells", "healthy", "Exp1","No",
+                
+                "data.Reg1.NHep", "sc_E1", "DD1", "HEP", "cells", "embolised", "Exp1","No",
+                "data.Reg1.RHep","sc_R1", "DD1", "HEP", "cells", "regenerating", "Exp1","No",
+                "Hep1N.data", "sc_E1", "DD1", "HEP", "cells", "embolised", "Exp1","No",
+                "Hep1R.data", "sc_R1", "DD1", "HEP", "cells", "regenerating", "Exp1","No",
+                "Hep2N.data", "sc_E1", "DD1", "HEP", "cells", "embolised", "Exp2","No",
+                "Hep2R.data", "sc_R1", "DD1", "HEP", "cells", "regenerating", "Exp2","No",
+                "HepRn.2d.data", "sc_E2", "DD2", "HEP", "cells", "embolised", "Exp1","No",
+                "HepRr.2d.data", "sc_R2", "DD2", "HEP", "cells", "regenerating", "Exp1","No",
+                "NPC.Rn.2d.data", "sc_E2", "DD2", "NPC", "cells", "embolised", "Exp1","No",
+                "NPC.Rr.2d.data","sc_R2", "DD2", "NPC", "cells", "regenerating", "Exp1","No",
+                "NPCn.data", "sc_E1", "DD1", "NPC", "cells", "embolised", "Exp1","No",
+                "NPCr.data", "sc_R1", "DD1", "NPC", "cells", "regenerating", "Exp1","No",
+                "HepRe.3d.data", "sc_E3", "DD3", "HEP", "cells", "embolised", "Exp1","No",
+                "HepRr.3d.data", "sc_R3", "DD3", "HEP", "cells", "regenerating", "Exp1","No",
+                "NPC.Re.3d.data", "sc_E3", "DD3", "NPC", "cells", "embolised", "Exp1","No",
+                "NPC.Rr.3d.data","sc_R3", "DD3", "NPC", "cells", "regenerating", "Exp1","No",
+                "Data.Reg5_HepE", "sc_E5", "DD5", "HEP", "cells", "embolised", "Exp1","No",
+                "Data.Reg5_HepR","sc_R5", "DD5", "HEP", "cells", "regenerating", "Exp1","No",
+                "Data.Reg5_npcE", "sc_E5", "DD5", "NPC", "cells", "embolised", "Exp1","No",
+                "Data.Reg5_npcR","sc_R5", "DD5", "NPC", "cells", "regenerating", "Exp1","No",
+                "Data.Reg6_HepE", "sc_E6", "DD6", "HEP", "cells", "embolised", "Exp1","No",
+                "Data.Reg6_HepR","sc_R6", "DD6", "HEP", "cells", "regenerating", "Exp1","No",
+                "Data.Reg6_npcE","sc_E6", "DD6", "NPC", "cells", "embolised", "Exp1","No",
+                "Data.Reg6_npcR","sc_R6", "DD6", "NPC", "cells", "regenerating", "Exp1","No",
+                "Data.Reg7_HepE", "sc_E7", "DD7", "HEP", "cells", "embolised", "Exp1","No",
+                "Data.Reg7_HepR","sc_R7", "DD7", "HEP", "cells", "regenerating", "Exp1","No",
+                "Data.Reg7_npcE","sc_E7","DD7","NPC","cells","embolised","Exp1","No",
+                "Data.Reg7_npcR","sc_R7", "DD7", "NPC", "cells", "regenerating", "Exp1","No",
+                
+                "sn_H1", "sn_H1", "HD1", "all", "nuclei", "healthy", "Exp1","No",
+                "sn_H3", "sn_H1", "HD3", "all", "nuclei", "healthy", "Exp1","No",
+                "sn_H4", "sn_H1", "HD4", "all", "nuclei", "healthy", "Exp1","No")
 
+dat_matches = matrix(dat_matches, ncol = 8, byrow = T)
+colnames(dat_matches) = c("mat_id", "Name", "Donor", "Fraction", "Isolation", 
+                          "Condition", "Experiment", "Reseq")
+dat_matches = data.frame(dat_matches, stringsAsFactors = F)
+write.csv(dat_matches, "data/processed/matrix_metadata_matches.csv", 
+          col.names = T, row.names = T, quote = F)
+```
 
+Fix/simplify metadata
 
+```{r}
+col_dat_matches = c("Name", "Donor", "Fraction", "Isolation",
+                    "Condition", "Experiment", "Reseq")
+for(n in names(healthy_srat)){
+  dat = merge(healthy_srat[[n]]@meta.data, dat_matches, by = 1)[,col_dat_matches]
+  rownames(dat) = rownames(healthy_srat[[n]]@meta.data)
+  healthy_srat[[n]] = AddMetaData(healthy_srat[[n]], dat)
+}
+for(n in names(cond_srat)){
+  dat = merge(cond_srat[[n]]@meta.data, dat_matches, by = 1)[,col_dat_matches]
+  rownames(dat) = rownames(cond_srat[[n]]@meta.data)
+  cond_srat[[n]] = AddMetaData(cond_srat[[n]], dat)
+}
+for(n in names(frozen_srat)){
+  dat = merge(frozen_srat[[n]]@meta.data, dat_matches, by = 1)[,col_dat_matches]
+  rownames(dat) = rownames(frozen_srat[[n]]@meta.data)
+  frozen_srat[[n]] = AddMetaData(frozen_srat[[n]], dat)
+}
+```
+
+Plot doublet score distributions
+
+```{r}
+plotDoubScore = function(l){
+  plot_df = data.frame()
+  thr = c()
+  for(n in names(l)){
+    plot_df = rbind(plot_df, l[[n]]@meta.data[,c("scrublet_score","orig.ident",
+                                                 "Fraction","Name")])
+    thr = c(thr, tapply(l[[n]]@meta.data$scrublet_score,
+                        l[[n]]@meta.data$scrublet_isDoublet,
+                        max)["FALSE"])
+    
+  }
+  line_df = data.frame("orig.ident" = names(l),
+                       "threshold" = thr)
+  plt = ggplot(plot_df, aes(x = scrublet_score, y = orig.ident, 
+                            group = orig.ident))+
+    ggridges::geom_density_ridges(size = 0.25, mapping = aes(fill = Fraction))+
+    #geom_vline(data = line_df, mapping = aes(xintercept = threshold, y = orig.ident))+
+    geom_segment(data = line_df, aes(x = threshold, xend = threshold, 
+                                     y = as.numeric(orig.ident),
+                                     yend = as.numeric(orig.ident) + 1))+
+    scale_x_continuous(expand = c(0,0), limits = c(-.01,1.01))+
+    theme_bw()
+
+  return(plt)
+}
+
+pdf("results/initial_stats/doublet_Score_distributions.pdf", 
+    height = 7, width = 8, useDingbats = F)
+plotDoubScore(healthy_srat)
+plotDoubScore(cond_srat)
+plotDoubScore(frozen_srat)
+dev.off()
+```
+
+Plot doublet score UMAP
+
+```{r}
+plotUMAPFeat = function(l ,f){
+  return(lapply(names(l), 
+                function(x) FeaturePlot(object = l[[x]], reduction = "umap",
+                                        features = f)+
+                  labs(title = x)+
+                  theme(aspect.ratio = 1)))
+}
+
+pdf("results/initial_stats/healthy_doublet_Score_UMAP.pdf", 
+    height = 10, width = 6, useDingbats = F)
+plt_list = plotUMAPFeat(healthy_srat, "scrublet_score") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 4, ncol = 2)
+dev.off()
+
+pdf("results/initial_stats/cond_doublet_Score_UMAP.pdf", 
+    height = 16, width = 13, useDingbats = F)
+plt_list = plotUMAPFeat(cond_srat, "scrublet_score") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 7, ncol = 4)
+dev.off()
+
+pdf("results/initial_stats/frozen_doublet_Score_UMAP.pdf", 
+    height = 6, width = 6, useDingbats = F)
+plt_list = plotUMAPFeat(frozen_srat, "scrublet_score") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2)
+dev.off()
+```
+
+Plot cell cycle classification UMAP
+
+```{r}
+plotUMAPDim = function(l ,f){
+  return(lapply(names(l), 
+                function(x) DimPlot(object = l[[x]], reduction = "umap",
+                                        group.by = f)+
+                  labs(title = x)+
+                  theme(aspect.ratio = 1)))
+}
+
+pdf("results/initial_stats/healthy_ccPhase_UMAP.pdf", 
+    height = 10, width = 6, useDingbats = F)
+plt_list = plotUMAPDim(healthy_srat, "Phase") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 4, ncol = 2)
+dev.off()
+
+pdf("results/initial_stats/cond_ccPhase_UMAP.pdf", 
+    height = 16, width = 13, useDingbats = F)
+plt_list = plotUMAPDim(cond_srat, "Phase") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 7, ncol = 4)
+dev.off()
+
+pdf("results/initial_stats/frozen_ccPhase_UMAP.pdf", 
+    height = 6, width = 6, useDingbats = F)
+plt_list = plotUMAPDim(frozen_srat, "Phase") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2)
+dev.off()
+```
+
+Plot MT% UMAP
+
+```{r}
+pdf("results/initial_stats/healthy_percmt_UMAP.pdf", 
+    height = 10, width = 6, useDingbats = F)
+plt_list = plotUMAPFeat(healthy_srat, "percent.mt") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 4, ncol = 2)
+dev.off()
+
+pdf("results/initial_stats/cond_percmt_UMAP.pdf", 
+    height = 16, width = 13, useDingbats = F)
+plt_list = plotUMAPFeat(cond_srat, "percent.mt") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 7, ncol = 4)
+dev.off()
+
+pdf("results/initial_stats/frozen_percmt_UMAP.pdf", 
+    height = 6, width = 6, useDingbats = F)
+plt_list = plotUMAPFeat(frozen_srat, "percent.mt") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2)
+dev.off()
+```
+
+Plot MT% violin
+
+```{r}
+plotViolinFeat = function(l ,f){
+  return(lapply(names(l), 
+                function(x) VlnPlot(object = l[[x]], features = f, pt.size = 0.15)+
+                  labs(title = x)+
+                  theme(legend.position = "none",
+                        axis.text.x = element_blank())))
+}
+
+pdf("results/initial_stats/healthy_percmt_vio.pdf", 
+    height = 10, width = 4, useDingbats = F)
+plt_list = plotViolinFeat(healthy_srat, "percent.mt") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 4, ncol = 2)
+dev.off()
+
+pdf("results/initial_stats/cond_percmt_vio.pdf", 
+    height = 24, width = 9, useDingbats = F)
+plt_list = plotViolinFeat(cond_srat, "percent.mt") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 7, ncol = 4)
+dev.off()
+
+pdf("results/initial_stats/frozen_percmt_vio.pdf", 
+    height = 3, width = 6, useDingbats = F)
+plt_list = plotViolinFeat(frozen_srat, "percent.mt") 
+cowplot::plot_grid(plotlist = plt_list, ncol = 3)
+dev.off()
+```
+
+Plot ribosomal% UMAP
+
+```{r}
+pdf("results/initial_stats/healthy_percrb_UMAP.pdf", 
+    height = 10, width = 6, useDingbats = F)
+plt_list = plotUMAPFeat(healthy_srat, "percent.rb") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 4, ncol = 2)
+dev.off()
+
+pdf("results/initial_stats/cond_percrb_UMAP.pdf", 
+    height = 16, width = 13, useDingbats = F)
+plt_list = plotUMAPFeat(cond_srat, "percent.rb") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 7, ncol = 4)
+dev.off()
+
+pdf("results/initial_stats/frozen_percrb_UMAP.pdf", 
+    height = 6, width = 6, useDingbats = F)
+plt_list = plotUMAPFeat(frozen_srat, "percent.rb") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2)
+dev.off()
+```
+
+Plot ribosomal% violin
+
+```{r}
+pdf("results/initial_stats/healthy_percrb_vio.pdf", 
+    height = 10, width = 4, useDingbats = F)
+plt_list = plotViolinFeat(healthy_srat, "percent.rb") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 4, ncol = 2)
+dev.off()
+
+pdf("results/initial_stats/cond_percrb_vio.pdf", 
+    height = 24, width = 9, useDingbats = F)
+plt_list = plotViolinFeat(cond_srat, "percent.rb") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 7, ncol = 4)
+dev.off()
+
+pdf("results/initial_stats/frozen_percrb_vio.pdf", 
+    height = 3, width = 6, useDingbats = F)
+plt_list = plotViolinFeat(frozen_srat, "percent.rb") 
+cowplot::plot_grid(plotlist = plt_list, ncol = 3)
+dev.off()
+```
+
+Plot total counts UMAP
+
+```{r}
+pdf("results/initial_stats/healthy_counts_UMAP.pdf", 
+    height = 10, width = 6, useDingbats = F)
+plt_list = plotUMAPFeat(healthy_srat, "nCount_RNA") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 4, ncol = 2)
+dev.off()
+
+pdf("results/initial_stats/cond_counts_UMAP.pdf", 
+    height = 16, width = 13, useDingbats = F)
+plt_list = plotUMAPFeat(cond_srat, "nCount_RNA") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 7, ncol = 4)
+dev.off()
+
+pdf("results/initial_stats/frozen_counts_UMAP.pdf", 
+    height = 6, width = 6, useDingbats = F)
+plt_list = plotUMAPFeat(frozen_srat, "nCount_RNA") 
+cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2)
+dev.off()
+```
+
+Number of genes vs number of UMI
+
+```{r}
+plotCountsVsGenes = function(l){
+  plt_l = list()
+  for(x in names(l)){
+      plot_df = data.frame("nUMI" = l[[x]]$nCount_RNA,
+                           "nGene" = l[[x]]$nFeature_RNA)
+      
+      plt_l[[x]] = ggplot(plot_df, aes(x = nGene, y = nUMI))+
+        geom_hex(bins = 65)+
+        scale_y_log10()+
+        labs(title = x)+
+        theme_bw()+
+        theme(aspect.ratio = 1)
+  }
+  
+  return(plt_l)
+}
+
+pdf("results/initial_stats/healthy_counts_genes.pdf", 
+    height = 10, width = 6, useDingbats = F)
+plt_list = plotCountsVsGenes(healthy_srat) 
+cowplot::plot_grid(plotlist = plt_list, nrow = 4, ncol = 2)
+dev.off()
+
+pdf("results/initial_stats/cond_counts_genes.pdf", 
+    height = 16, width = 13, useDingbats = F)
+plt_list = plotCountsVsGenes(cond_srat) 
+cowplot::plot_grid(plotlist = plt_list, nrow = 7, ncol = 4)
+dev.off()
+
+pdf("results/initial_stats/frozen_counts_genes.pdf", 
+    height = 6, width = 6, useDingbats = F)
+plt_list = plotCountsVsGenes(frozen_srat) 
+cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2)
+dev.off()
+```
+
+Filter cells  
+We'll be doing a very fine clustering to identify groups of cells with excessive doublet scores/MT%/high or low counts
+
+```{r}
+getClusters = function(obj){
+  obj <- FindNeighbors(obj, dims = 1:20, verbose = FALSE)
+  obj <- FindClusters(obj, algorithm = 2, verbose = F, resolution = 10)
+  return(obj)
+}
+
+healthy_srat = lapply(healthy_srat, getClusters)
+cond_srat = lapply(cond_srat, getClusters)
+frozen_srat = lapply(frozen_srat, getClusters)
+#DimPlot(xxx, reduction = "umap", group.by = "SCT_snn_res.10")
+```
+
+Now we calculate those mean stats per cluster and define the thresholds
+
+```{r}
+calcMeanClust = function(l, v){
+  a = lapply(l, function(x) tapply(x@meta.data[,v], x$SCT_snn_res.10, mean))
+  res = reshape2::melt(a)
+  a = lapply(l, function(x) table(x$SCT_snn_res.10))
+  res2 = reshape2::melt(a)
+  res = cbind(res, res2)[,-c(4,6)]
+  colnames(res) = c("cluster", "mean_value", "sample", "n_cells")
+  return(res)
+}
+
+var_list = list()
+for(v in c("scrublet_score", "percent.mt", "percent.rb", "nCount_RNA")){
+  var_list[[v]] = list("healthy" = calcMeanClust(healthy_srat, v),
+                       "cond" = calcMeanClust(cond_srat, v),
+                       "frozen" = calcMeanClust(frozen_srat, v))
+}
+
+plotMeanClust = function(var_l, l){
+  plt_list = list()
+  for(n in names(var_l)){
+    plt_list[[n]] = ggplot(var_l[[n]][[l]], aes(x = n_cells, y = mean_value, 
+                                                colour = sample))+
+      geom_point()+
+      theme_bw()+
+      labs(title = n)+
+      theme(aspect.ratio = 1,
+            legend.position = "bottom",
+            legend.key.size = unit(0.5, "cm"))
+    
+    if(n=="nCount_RNA") plt_list[[n]] = plt_list[[n]] + scale_y_log10()
+    
+    leg = cowplot::get_legend(plt_list[[n]])
+    plt_list[[n]] = plt_list[[n]]+theme(legend.position = "none")
+  }
+  
+  plt_list$legend = leg
+  
+  all_plt = cowplot::plot_grid(cowplot::plot_grid(plotlist = plt_list[1:4], 
+                                                  ncol = 2, nrow = 2),
+                               plt_list[[5]], nrow = 2, rel_heights = c(0.85, 0.2))
+  return(all_plt)
+}
+
+pdf("results/initial_stats/mean_qc_microclusters.pdf", 
+    height = 7, width = 6, useDingbats = F)
+plotMeanClust(var_list, "healthy")
+plotMeanClust(var_list, "cond")
+plotMeanClust(var_list, "frozen")
+dev.off()
+```
+
+Remove cells (doublets, low counts)
+
+```{r}
+
+```
+
+Re-run scTransform, PCA and UMAP on filtered data
+
+```{r}
+
+```
+
+Save objects
+
+```{r}
+
+```
 
