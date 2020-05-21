@@ -29,6 +29,9 @@ Load libraries
 library(Seurat)
 library(ggplot2)
 library(ggridges)
+library(mixtools)
+library(dplyr)
+library(SoupX)
 ```
 
 
@@ -171,6 +174,10 @@ save(cond_srat, file = "data/processed/cond_srat_beforeDoublet.RData")
 save(frozen_srat, file = "data/processed/frozen_srat_beforeDoublet.RData")
 ```
 
+
+
+# Filtering
+## Deciding on filtering thresholds
 Define matches between matrices and metadata
 
 ```{r}
@@ -182,8 +189,8 @@ dat_matches = c("EKS.data", "sc_H1", "HD1", "EKS","cells","healthy", "Exp1","No"
                 "Hep.3d.data", "sc_H3", "HD3", "HEP", "cells", "healthy", "Exp1","No",
                 "NPC.3d.data", "sc_H3", "HD3", "NPC", "cells", "healthy", "Exp1","No",
                 
-                "data.Reg1.NHep", "sc_E1", "DD1", "HEP", "cells", "embolised", "Exp1","No",
-                "data.Reg1.RHep","sc_R1", "DD1", "HEP", "cells", "regenerating", "Exp1","No",
+                "data.Reg1.NHep", "sc_E1", "DD1", "HEP", "cells", "embolised", "Exp2","Yes",
+                "data.Reg1.RHep","sc_R1", "DD1", "HEP", "cells", "regenerating", "Exp2","Yes",
                 "Hep1N.data", "sc_E1", "DD1", "HEP", "cells", "embolised", "Exp1","No",
                 "Hep1R.data", "sc_R1", "DD1", "HEP", "cells", "regenerating", "Exp1","No",
                 "Hep2N.data", "sc_E1", "DD1", "HEP", "cells", "embolised", "Exp2","No",
@@ -212,8 +219,8 @@ dat_matches = c("EKS.data", "sc_H1", "HD1", "EKS","cells","healthy", "Exp1","No"
                 "Data.Reg7_npcR","sc_R7", "DD7", "NPC", "cells", "regenerating", "Exp1","No",
                 
                 "sn_H1", "sn_H1", "HD1", "all", "nuclei", "healthy", "Exp1","No",
-                "sn_H3", "sn_H1", "HD3", "all", "nuclei", "healthy", "Exp1","No",
-                "sn_H4", "sn_H1", "HD4", "all", "nuclei", "healthy", "Exp1","No")
+                "sn_H3", "sn_H3", "HD3", "all", "nuclei", "healthy", "Exp1","No",
+                "sn_H4", "sn_H4", "HD4", "all", "nuclei", "healthy", "Exp1","No")
 
 dat_matches = matrix(dat_matches, ncol = 8, byrow = T)
 colnames(dat_matches) = c("mat_id", "Name", "Donor", "Fraction", "Isolation", 
@@ -245,6 +252,72 @@ for(n in names(frozen_srat)){
 }
 ```
 
+Compare technical replicates
+
+```{r, fig.height=5, fig.width=6}
+pdf("results/initial_stats/tech_replicates_comparison.pdf",
+    useDingbats = F, width = 6, height = 7)
+# global correlation
+cor_E = cor(as.matrix(cond_srat$Hep2N.data@assays$RNA@counts),
+            as.matrix(cond_srat$data.Reg1.NHep@assays$RNA@counts))
+common_cells = intersect(rownames(cor_E), colnames(cor_E))
+plot_df = data.frame("cor" = diag(cor_E[common_cells, common_cells]))
+plt1 = ggplot(plot_df, aes(y = cor, x = "cells"))+
+  ggbeeswarm::geom_quasirandom()+
+  labs(y = "Pearson correlation", title = "Embolised")+
+  theme_bw()
+
+cor_R = cor(as.matrix(cond_srat$Hep2R.data@assays$RNA@counts),
+            as.matrix(cond_srat$data.Reg1.RHep@assays$RNA@counts))
+common_cells = intersect(rownames(cor_R), colnames(cor_R))
+plot_df = data.frame("cor" = diag(cor_R[common_cells, common_cells]))
+plt2 = ggplot(plot_df, aes(y = cor, x = "cells"))+
+  ggbeeswarm::geom_quasirandom()+
+  labs(y = "Pearson correlation", title = "Regenerating")+
+  theme_bw()
+
+cowplot::plot_grid(plt1, plt2, ncol = 2)
+
+# compare number of genes
+par(mfrow = c(2,1))
+common_cells = intersect(rownames(cor_E), colnames(cor_E))
+plot(cond_srat$Hep2N.data@meta.data[common_cells,"nFeature_RNA"],
+     cond_srat$data.Reg1.NHep@meta.data[common_cells,"nFeature_RNA"],
+     xlab = "# genes (rep1)", ylab = "# genes (rep2)",
+     main = "# genes = Regenerating")
+common_cells = intersect(rownames(cor_R), colnames(cor_R))
+plot(cond_srat$Hep2R.data@meta.data[common_cells,"nFeature_RNA"],
+     cond_srat$data.Reg1.RHep@meta.data[common_cells,"nFeature_RNA"],
+     xlab = "# genes (rep1)", ylab = "# genes (rep2)", 
+     main = "# genes = Regenerating")
+
+# compare shared expressed genes
+par(mfrow = c(2,1))
+common_cells = intersect(rownames(cor_E), colnames(cor_E))
+giE_l = list()
+for(cc in common_cells){
+  g1 = rownames(cond_srat$Hep2N.data@assays$RNA@counts)[cond_srat$Hep2N.data@assays$RNA@counts[,cc]>0]
+  g2 = rownames(cond_srat$data.Reg1.NHep@assays$RNA@counts)[cond_srat$data.Reg1.NHep@assays$RNA@counts[,cc]>0]
+  
+  giE_l[[cc]] = length(intersect(g1, g2))/length(union(g1,g2))*100
+}
+plot(unlist(giE_l)[order(unlist(giE_l))], ylab = "% shared genes", xlab = "cells",
+     main = "Replicate shared genes - Embolised")
+
+common_cells = intersect(rownames(cor_R), colnames(cor_R))
+giR_l = list()
+for(cc in common_cells){
+  g1 = rownames(cond_srat$Hep2R.data@assays$RNA@counts)[cond_srat$Hep2R.data@assays$RNA@counts[,cc]>0]
+  g2 = rownames(cond_srat$data.Reg1.RHep@assays$RNA@counts)[cond_srat$data.Reg1.RHep@assays$RNA@counts[,cc]>0]
+  
+  giR_l[[cc]] = length(intersect(g1, g2))/length(union(g1,g2))*100
+}
+plot(unlist(giR_l)[order(unlist(giR_l))], ylab = "% shared genes", xlab = "cells",
+     main = "Replicate shared genes - Regenerating")
+
+dev.off()
+```
+
 Plot doublet score distributions
 
 ```{r}
@@ -256,7 +329,7 @@ plotDoubScore = function(l){
                                                  "Fraction","Name")])
     thr = c(thr, tapply(l[[n]]@meta.data$scrublet_score,
                         l[[n]]@meta.data$scrublet_isDoublet,
-                        max)["FALSE"])
+                        min)["TRUE"])
     
   }
   line_df = data.frame("orig.ident" = names(l),
@@ -285,12 +358,22 @@ dev.off()
 Plot doublet score UMAP
 
 ```{r}
-plotUMAPFeat = function(l ,f){
+plotUMAPFeat = function(l, f, log_f = F){
+  if(log_f){
   return(lapply(names(l), 
-                function(x) FeaturePlot(object = l[[x]], reduction = "umap",
-                                        features = f)+
-                  labs(title = x)+
-                  theme(aspect.ratio = 1)))
+                  function(x) FeaturePlot(object = l[[x]], reduction = "umap",
+                                          features = f,pt.size = 0.8)+
+                  scale_color_gradientn(trans = "log10", guide = "colourbar",
+                                        colours = viridis::cividis(150))+
+                    labs(title = x)+
+                    theme(aspect.ratio = 1)))
+  } else{
+    return(lapply(names(l), 
+                  function(x) FeaturePlot(object = l[[x]], reduction = "umap",
+                                          features = f, pt.size = 0.8)+
+                    labs(title = x)+
+                    theme(aspect.ratio = 1)))
+  }
 }
 
 pdf("results/initial_stats/healthy_doublet_Score_UMAP.pdf", 
@@ -309,6 +392,66 @@ pdf("results/initial_stats/frozen_doublet_Score_UMAP.pdf",
     height = 6, width = 6, useDingbats = F)
 plt_list = plotUMAPFeat(frozen_srat, "scrublet_score") 
 cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2)
+dev.off()
+```
+
+Testing GMMs to clean doublets  
+The scrublet score threshold is based on the assumption that there is a bimodal score distribution, which is dependent on cell diversity
+
+```{r}
+plotDoubletGMM = function(l){
+  plot_df = data.frame()
+  for(n in names(l)){
+    plot_df = rbind(plot_df, l[[n]]@meta.data[,c("scrublet_score","orig.ident",
+                                                 "Fraction","Name")])
+  }
+  
+  cond_scores = getDoubletScores(l)
+  gmm_cond = tapply(cond_scores$scrublet_score, cond_scores$orig.ident, 
+                    normalmixEM, k = 2)
+  
+  plot_mix_comps <- function(x, mu, sigma, lam) {
+    lam * dnorm(x, mu, sigma)
+  }
+  
+  plt_list = list()
+  for(n in names(gmm_cond)){
+    mixmdl = gmm_cond[[n]]
+    plt_list[[n]] = data.frame(x = mixmdl$x) %>%
+      ggplot() +
+      geom_histogram(aes(x, ..density..), binwidth = 0.01, colour = "black", 
+                     fill = "white") +
+      stat_function(geom = "line", fun = plot_mix_comps,
+                    args = list(mixmdl$mu[1], mixmdl$sigma[1], lam = mixmdl$lambda[1]),
+                    colour = "red", lwd = 0.9) +
+      stat_function(geom = "line", fun = plot_mix_comps,
+                    args = list(mixmdl$mu[2], mixmdl$sigma[2], lam = mixmdl$lambda[2]),
+                    colour = "blue", lwd = 0.9) +
+      ylab("Density")+
+      labs(title = n)+
+      theme_bw()
+  }
+  
+  return(plt_list)
+}
+
+healthy_scores = plotDoubletGMM(healthy_srat)
+cond_scores = plotDoubletGMM(cond_srat)
+frozen_scores = plotDoubletGMM(frozen_srat)
+
+pdf("results/initial_stats/healthy_doublet_scores_gmm.pdf", 
+    height = 4, width = 8, useDingbats = F)
+cowplot::plot_grid(plotlist = healthy_scores, nrow = 2, ncol = 4)
+dev.off()
+
+pdf("results/initial_stats/cond_doublet_scores_gmm.pdf", 
+    height = 6, width = 12, useDingbats = F)
+cowplot::plot_grid(plotlist = cond_scores, nrow = 4, ncol = 7)
+dev.off()
+
+pdf("results/initial_stats/frozen_doublet_scores_gmm.pdf", 
+    height = 2, width = 6, useDingbats = F)
+cowplot::plot_grid(plotlist = frozen_scores, ncol = 3)
 dev.off()
 ```
 
@@ -443,19 +586,41 @@ Plot total counts UMAP
 ```{r}
 pdf("results/initial_stats/healthy_counts_UMAP.pdf", 
     height = 10, width = 6, useDingbats = F)
-plt_list = plotUMAPFeat(healthy_srat, "nCount_RNA") 
+plt_list = plotUMAPFeat(healthy_srat, "nCount_RNA", log_f = T)
 cowplot::plot_grid(plotlist = plt_list, nrow = 4, ncol = 2)
 dev.off()
 
 pdf("results/initial_stats/cond_counts_UMAP.pdf", 
     height = 16, width = 13, useDingbats = F)
-plt_list = plotUMAPFeat(cond_srat, "nCount_RNA") 
+plt_list = plotUMAPFeat(cond_srat, "nCount_RNA", log_f = T) 
 cowplot::plot_grid(plotlist = plt_list, nrow = 7, ncol = 4)
 dev.off()
 
 pdf("results/initial_stats/frozen_counts_UMAP.pdf", 
     height = 6, width = 6, useDingbats = F)
-plt_list = plotUMAPFeat(frozen_srat, "nCount_RNA") 
+plt_list = plotUMAPFeat(frozen_srat, "nCount_RNA", log_f = T) 
+cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2)
+dev.off()
+```
+
+Plot total genes UMAP
+
+```{r}
+pdf("results/initial_stats/healthy_genes_UMAP.pdf", 
+    height = 10, width = 6, useDingbats = F)
+plt_list = plotUMAPFeat(healthy_srat, "nFeature_RNA", log_f = T)
+cowplot::plot_grid(plotlist = plt_list, nrow = 4, ncol = 2)
+dev.off()
+
+pdf("results/initial_stats/cond_genes_UMAP.pdf", 
+    height = 16, width = 13, useDingbats = F)
+plt_list = plotUMAPFeat(cond_srat, "nFeature_RNA", log_f = T) 
+cowplot::plot_grid(plotlist = plt_list, nrow = 7, ncol = 4)
+dev.off()
+
+pdf("results/initial_stats/frozen_genes_UMAP.pdf", 
+    height = 6, width = 6, useDingbats = F)
+plt_list = plotUMAPFeat(frozen_srat, "nFeature_RNA", log_f = T) 
 cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2)
 dev.off()
 ```
@@ -499,7 +664,25 @@ cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2)
 dev.off()
 ```
 
-Filter cells  
+Plot number of read distribution
+
+```{r}
+all_meta = Reduce(rbind, lapply(cond_srat, function(x) x@meta.data))
+all_meta$frac_exp_tec = paste(all_meta$Fraction, all_meta$Experiment, 
+                              all_meta$Reseq, sep = "_")
+
+pdf("results/initial_stats/violin_number_reads.pdf", 
+    width = 7, height = 6, useDingbats = F)
+ggplot(all_meta, aes(x = Name, y = nCount_RNA, fill = frac_exp_tec))+
+  geom_violin()+
+  scale_y_log10()+
+  labs(x = "Donor and Condition", y = "log10(UMI)", fill = "Fraction_Exp_Reseq")+
+  theme_bw()+
+  theme(legend.position = "bottom")
+dev.off()
+```
+
+## Filter cells  
 We'll be doing a very fine clustering to identify groups of cells with excessive doublet scores/MT%/high or low counts
 
 ```{r}
@@ -513,6 +696,23 @@ healthy_srat = lapply(healthy_srat, getClusters)
 cond_srat = lapply(cond_srat, getClusters)
 frozen_srat = lapply(frozen_srat, getClusters)
 #DimPlot(xxx, reduction = "umap", group.by = "SCT_snn_res.10")
+```
+
+Compare some samples to understand the low count cells
+
+```{r}
+sub_cond = cond_srat[c("data.Reg1.NHep","Data.Reg6_HepE","Hep2N.data", 
+                       "Data.Reg5_HepE","Data.Reg7_HepR","Data.Reg6_npcR")]
+
+markers_sub = list()
+for(n in names(sub_cond)){
+  sub_cond[[n]] = FindClusters(sub_cond[[n]], algorithm = 2, verbose = F, resolution = 0.6)
+  markers_sub[[n]] = quickMarkers(sub_cond[[n]]@assays$RNA@counts,
+                                  sub_cond[[n]]@meta.data$SCT_snn_res.0.6, 
+                                  N = 20, FDR = 0.05)
+}
+DimPlot(sub_cond$Data.Reg6_npcR, reduction = "umap", group.by = "SCT_snn_res.0.6")
+FeaturePlot(sub_cond$Data.Reg6_HepE, features = c("FGA", "FGB"))
 ```
 
 Now we calculate those mean stats per cluster and define the thresholds
@@ -569,21 +769,234 @@ plotMeanClust(var_list, "frozen")
 dev.off()
 ```
 
-Remove cells (doublets, low counts)
+Since  different samples can have very different qualities, we have chosen to define individual filtering thresholds for each sample, which are summarised in the follwing table
 
 ```{r}
+filt_names = c("scrublet_score_all", "scrublet_score_clusters", 
+               "mt_percentage", "min_nUMI", "min_nGenes", "max_nUMI", "max_nGenes")
 
+dat_filt = list("EKS.data" = c(0.25, 0.3, 15, 1000, 800, 40000, 6000),
+             "NPC.data" = c(0.25, 0.3, 15, 1000, 800, 40000, 6000),
+             "HEP.data" = c(0.3, 0.3, 40, 1000, 800, 40000, 6000),
+             "Hep.2d.data" = c(0.3, 0.3, 40, 1000, 800, 40000, 6000),
+             "NPC.2d.data" = c(0.25, 0.3, 15, 1000, 800, 40000, 6000),
+             "Hep.3d.data" = c(0.3, 0.3, 40, 1000, 800, 40000, 6000),
+             "NPC.3d.data" = c(0.25, 0.3, 15, 1000, 800, 40000, 6000),
+                
+             "data.Reg1.NHep" = c(0.4, 0.35, 20, 1000, 800, 40000,6000),
+             "data.Reg1.RHep" = c(0.4, 0.35, 20, 1000, 800, 40000,6000),
+             "Hep1N.data" = c(0.3, 0.35, 25, 1000, 800, 40000,6000),
+             "Hep1R.data" = c(0.4, 0.35, 25, 1000, 800, 40000,6000),
+             "Hep2N.data" = c(0.4, 0.35, 20, 1000, 800, 40000,6000),
+             "Hep2R.data" = c(0.4, 0.35, 20, 1000, 800, 40000,6000),
+             "HepRn.2d.data" = c(0.3, 0.35, 20, 1000, 800, 40000,6000),
+             "HepRr.2d.data" = c(0.5, 0.35, 20, 1000, 800, 40000,6000),
+             "NPC.Rn.2d.data" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
+             "NPC.Rr.2d.data" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
+             "NPCn.data" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
+             "NPCr.data" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
+             "HepRe.3d.data" = c(0.3, 0.35, 30, 1000, 800, 40000,6000),
+             "HepRr.3d.data" = c(0.3, 0.35, 30, 1000, 800, 40000,6000),
+             "NPC.Re.3d.data" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
+             "NPC.Rr.3d.data" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
+             "Data.Reg5_HepE" = c(0.4, 0.35, 40, 1000, 450, 40000,6000),
+             "Data.Reg5_HepR" = c(0.4, 0.35, 40, 1000, 750, 40000,6000),
+             "Data.Reg5_npcE" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
+             "Data.Reg5_npcR" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
+             "Data.Reg6_HepE" = c(0.4, 0.35, 25, 1000, 750, 40000,6000),
+             "Data.Reg6_HepR" = c(0.4, 0.35, 25, 1000, 750, 40000,6000),
+             "Data.Reg6_npcE" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
+             "Data.Reg6_npcR" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
+             "Data.Reg7_HepE" = c(0.4, 0.35, 25, 1000, 750, 40000,6000),
+             "Data.Reg7_HepR" = c(0.4, 0.35, 25, 1000, 700, 40000,6000),
+             "Data.Reg7_npcE" = c(0.25, 0.35, 25,1000,800,40000,6000),
+             "Data.Reg7_npcR" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
+                
+             "H1" = c(0.3, 0.3, 5, 400, 300, 40000, 6000),
+             "H3" = c(0.3, 0.3, 5, 400, 300, 40000, 6000),
+             "H4" = c(0.3, 0.3, 5, 400, 300, 40000, 6000))
+
+dat_filt = t(data.frame(dat_filt, stringsAsFactors = F))
+colnames(dat_filt) = filt_names
+write.csv(dat_filt, "./data/processed/filtering_thresholds_data.csv", 
+          col.names = T, row.names = T, quote = F)
 ```
 
-Re-run scTransform, PCA and UMAP on filtered data
+Apply filters
 
 ```{r}
+clust_list = data.frame()
+for(n in names(var_list$scrublet_score)){
+  f = var_list$scrublet_score[[n]]$mean_value<dat_filt[var_list$scrublet_score[[n]]$sample,2]
+  clust_list = rbind(clust_list, var_list$scrublet_score[[n]][f,c("cluster", "sample")])
+}
 
+filt_perc = data.frame("sample" = "A", "filter" = "A", "perc" = 0)
+
+filt_list = list()
+for(n in names(healthy_srat)){
+  sub_filts = list(
+    cl = healthy_srat[[n]]$SCT_snn_res.10 %in% clust_list$cluster[clust_list$sample==n],
+    dou = healthy_srat[[n]]$scrublet_score<dat_filt[n,"scrublet_score_all"],
+    mt = healthy_srat[[n]]$percent.mt<dat_filt[n,"mt_percentage"],
+    min_umi = healthy_srat[[n]]$nCount_RNA>=dat_filt[n,"min_nUMI"],
+    min_gene = healthy_srat[[n]]$nFeature_RNA>=dat_filt[n,"min_nGenes"],
+    max_umi = healthy_srat[[n]]$nCount_RNA<=dat_filt[n,"max_nUMI"],
+    max_gene = healthy_srat[[n]]$nFeature_RNA<=dat_filt[n,"max_nGenes"]
+  )
+  
+  percs = unlist(lapply(sub_filts, function(x) sum(x)/length(x)*100))
+  tot = sum(Reduce("&", sub_filts))/length(Reduce("&", sub_filts))*100
+  filt_perc = rbind(filt_perc, data.frame("sample" = n, "filter" = c(names(percs), "total"),
+                                          "perc" = c(percs, tot)))
+  
+  filt_list[[n]] = colnames(healthy_srat[[n]])[Reduce("&", sub_filts)]
+}
+for(n in names(cond_srat)){
+  sub_filts = list(
+    cl = cond_srat[[n]]$SCT_snn_res.10 %in% clust_list$cluster[clust_list$sample==n],
+    dou = cond_srat[[n]]$scrublet_score<dat_filt[n,"scrublet_score_all"],
+    mt = cond_srat[[n]]$percent.mt<dat_filt[n,"mt_percentage"],
+    min_umi = cond_srat[[n]]$nCount_RNA>=dat_filt[n,"min_nUMI"],
+    min_gene = cond_srat[[n]]$nFeature_RNA>=dat_filt[n,"min_nGenes"],
+    max_umi = cond_srat[[n]]$nCount_RNA<=dat_filt[n,"max_nUMI"],
+    max_gene = cond_srat[[n]]$nFeature_RNA<=dat_filt[n,"max_nGenes"]
+  )
+  
+  percs = unlist(lapply(sub_filts, function(x) sum(x)/length(x)*100))
+  tot = sum(Reduce("&", sub_filts))/length(Reduce("&", sub_filts))*100
+  filt_perc = rbind(filt_perc, data.frame("sample" = n, "filter" = c(names(percs), "total"),
+                                          "perc" = c(percs, tot)))
+  
+  filt_list[[n]] = colnames(cond_srat[[n]])[Reduce("&", sub_filts)]
+}
+for(n in names(frozen_srat)){
+  sub_filts = list(
+    cl = frozen_srat[[n]]$SCT_snn_res.10 %in% clust_list$cluster[clust_list$sample==n],
+    dou = frozen_srat[[n]]$scrublet_score<dat_filt[n,"scrublet_score_all"],
+    mt = frozen_srat[[n]]$percent.mt<dat_filt[n,"mt_percentage"],
+    min_umi = frozen_srat[[n]]$nCount_RNA>=dat_filt[n,"min_nUMI"],
+    min_gene = frozen_srat[[n]]$nFeature_RNA>=dat_filt[n,"min_nGenes"],
+    max_umi = frozen_srat[[n]]$nCount_RNA<=dat_filt[n,"max_nUMI"],
+    max_gene = frozen_srat[[n]]$nFeature_RNA<=dat_filt[n,"max_nGenes"]
+  )
+  
+  percs = unlist(lapply(sub_filts, function(x) sum(x)/length(x)*100))
+  tot = sum(Reduce("&", sub_filts))/length(Reduce("&", sub_filts))*100
+  filt_perc = rbind(filt_perc, data.frame("sample" = n, "filter" = c(names(percs), "total"),
+                                          "perc" = c(percs, tot)))
+  
+  filt_list[[n]] = colnames(frozen_srat[[n]])[Reduce("&", sub_filts)]
+}
+filt_perc = filt_perc[-1,]
+
+# add filter column to meta data
+for(n in names(healthy_srat)){
+  filt_df = data.frame(row.names = colnames(healthy_srat[[n]]),
+                       "keep_allfilt" = colnames(healthy_srat[[n]]) %in% filt_list[[n]])
+  healthy_srat[[n]] = AddMetaData(healthy_srat[[n]], filt_df)
+}
+for(n in names(cond_srat)){
+  filt_df = data.frame(row.names = colnames(cond_srat[[n]]),
+                       "keep_allfilt" = colnames(cond_srat[[n]]) %in% filt_list[[n]])
+  cond_srat[[n]] = AddMetaData(cond_srat[[n]], filt_df)
+}
+for(n in names(frozen_srat)){
+  filt_df = data.frame(row.names = colnames(frozen_srat[[n]]),
+                       "keep_allfilt" = colnames(frozen_srat[[n]]) %in% filt_list[[n]])
+  frozen_srat[[n]] = AddMetaData(frozen_srat[[n]], filt_df)
+}
+```
+
+Plot percentage of removed cells
+
+```{r}
+filt_perc$filter = factor(filt_perc$filter, 
+                          levels = c("cl", "dou", "mt", "min_umi", "min_gene", 
+                                     "max_umi", "max_gene", "total"))
+
+pdf("results/initial_stats/percent_cells_filtered.pdf", 
+    width = 12, height = 10, useDingbats = F)
+ggplot(filt_perc, aes(x = sample, y = perc, fill = filter))+
+  facet_wrap(~sample, scales = "free_x")+
+  geom_bar(stat="identity", position = "dodge")+
+  theme_bw()+
+  theme(axis.text.x = element_blank(),
+        strip.text = element_text(size = 6.8))
+dev.off()
+```
+
+Plot number of cells (removed or not)
+
+```{r}
+plotFilteredCells = function(l){
+  all_meta = Reduce(rbind, lapply(l, function(x) x@meta.data))
+  all_meta$frac_exp_tec = paste(all_meta$Fraction, all_meta$Experiment, 
+                                all_meta$Reseq, sep = "_")
+  
+  plt = ggplot(all_meta, aes(x = frac_exp_tec,fill = keep_allfilt))+
+    geom_bar(position = "dodge")+
+    facet_wrap(~Name, scales = "free_y")+
+    theme_bw()+
+    theme(legend.position = "bottom",
+          axis.text.x = element_text(angle = 40, hjust = 1, vjust = 1))
+  return(plt)
+}
+
+pdf("results/initial_stats/healthy_number_cells_filtered.pdf", 
+    width = 7, height = 5, useDingbats = F)
+plotFilteredCells(healthy_srat)
+dev.off()
+pdf("results/initial_stats/cond_number_cells_filtered.pdf", 
+    width = 7, height = 5, useDingbats = F)
+plotFilteredCells(cond_srat)
+dev.off()
+pdf("results/initial_stats/frozen_number_cells_filtered.pdf", 
+    width = 7, height = 5, useDingbats = F)
+plotFilteredCells(frozen_srat)
+dev.off()
+```
+
+Save Seurat object lists before filtering
+
+```{r}
+save(healthy_srat, file = "data/processed/healthy_srat_beforeFiltering.RData")
+save(cond_srat, file = "data/processed/cond_srat_beforeFiltering.RData")
+save(frozen_srat, file = "data/processed/frozen_srat_beforeFiltering.RData")
+```
+
+Remove cells
+
+```{r}
+filtSeurat = function(srat, filt_col){
+  cells = rownames(srat@meta.data)[srat@meta.data$keep_allfilt]
+  res = SubsetData(srat, cells = cells)
+  
+  return(res)
+}
+```
+
+## Saving final objects
+Re-run scTransform, PCA, and nearest-neighbours on filtered data
+
+```{r}
+basicSeurat2 = function(obj, npcs = 10){
+  # normalise and PCA-UMAP
+  obj = suppressWarnings(SCTransform(obj, do.correct.umi = T, verbose = F,
+                                     vars.to.regress = "nCount_RNA",
+                                     variable.features.rv.th = 1,
+                                     variable.features.n = NULL, seed.use = 1))
+  obj = RunPCA(obj, npcs = 60, verbose = F)
+  ElbowPlot(obj, ndims = 50)
+  return(obj)
+}
 ```
 
 Save objects
 
 ```{r}
-
+save(healthy_srat, file = "data/processed/healthy_srat.RData")
+save(cond_srat, file = "data/processed/cond_srat.RData")
+save(frozen_srat, file = "data/processed/frozen_srat.RData")
 ```
 
