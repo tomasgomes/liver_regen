@@ -1,7 +1,8 @@
 ---
-title: "R Notebook"
+title: "Individual Processing"
 output: html_notebook
 ---
+
 
 
 # General Setup
@@ -974,24 +975,13 @@ filtSeurat = function(srat, filt_col){
   
   return(res)
 }
+
+healthy_srat = lapply(healthy_srat, filtSeurat)
+cond_srat = lapply(cond_srat, filtSeurat)
+frozen_srat = lapply(frozen_srat, filtSeurat)
 ```
 
 ## Saving final objects
-Re-run scTransform, PCA, and nearest-neighbours on filtered data
-
-```{r}
-basicSeurat2 = function(obj, npcs = 10){
-  # normalise and PCA-UMAP
-  obj = suppressWarnings(SCTransform(obj, do.correct.umi = T, verbose = F,
-                                     vars.to.regress = "nCount_RNA",
-                                     variable.features.rv.th = 1,
-                                     variable.features.n = NULL, seed.use = 1))
-  obj = RunPCA(obj, npcs = 60, verbose = F)
-  ElbowPlot(obj, ndims = 50)
-  return(obj)
-}
-```
-
 Save objects
 
 ```{r}

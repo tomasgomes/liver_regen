@@ -1,0 +1,255 @@
+---
+title: "Data Integration"
+output: html_notebook
+---
+
+
+
+# General Setup
+Setup chunk
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 8)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_knit$get("root.dir")
+```
+
+Setup reticulate
+
+```{r}
+library(reticulate)
+knitr::knit_engines$set(python = reticulate::eng_python)
+py_available(initialize = FALSE)
+use_python(Sys.which("python"))
+py_config()
+```
+
+Load libraries
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(ggridges)
+library(mixtools)
+library(dplyr)
+library(SoupX)
+```
+
+
+
+# Load data
+Load prepared Seurat objects
+
+```{r}
+save(healthy_srat, file = "data/processed/healthy_srat.RData")
+save(cond_srat, file = "data/processed/cond_srat.RData")
+save(frozen_srat, file = "data/processed/frozen_srat.RData")
+```
+
+
+
+# Individual analysis
+Analysing each dataset individually is important to understand what each contains  
+Re-run scTransform, PCA, and nearest-neighbours on filtered data
+
+```{r}
+basicSeurat2 = function(obj, npcs = 60){
+  # normalise and PCA-UMAP
+  obj = suppressWarnings(SCTransform(obj, do.correct.umi = T, verbose = F,
+                                     vars.to.regress = "nCount_RNA",
+                                     variable.features.rv.th = 1,
+                                     return.only.var.genes = F,
+                                     variable.features.n = NULL, seed.use = 1))
+  obj = RunPCA(obj, npcs = npcs, verbose = F)
+  return(obj)
+}
+
+healthy_srat = lapply(healthy_srat, basicSeurat2)
+cond_srat = lapply(cond_srat, basicSeurat2)
+frozen_srat = lapply(frozen_srat, basicSeurat2)
+
+healthy_elb = lapply(names(healthy_srat), 
+                     function(x) ElbowPlot(healthy_srat[[x]], ndims = 50)+labs(title=x))
+cond_elb = lapply(names(cond_srat), 
+                     function(x) ElbowPlot(cond_srat[[x]], ndims = 50)+labs(title=x))
+frozen_elb = lapply(names(frozen_srat), 
+                     function(x) ElbowPlot(frozen_srat[[x]], ndims = 50)+labs(title=x))
+
+pdf("results/clust_indiv/healthy_elbowplot.pdf", 
+    height = 10, width = 8, useDingbats = F)
+cowplot::plot_grid(plotlist = healthy_elb, nrow = 4, ncol = 2)
+dev.off()
+
+pdf("results/clust_indiv/cond_elbowplot.pdf", 
+    height = 16, width = 16, useDingbats = F)
+cowplot::plot_grid(plotlist = cond_elb, nrow = 7, ncol = 4)
+dev.off()
+
+pdf("results/clust_indiv/frozen_elbowplot.pdf", 
+    height = 6, width = 6, useDingbats = F)
+cowplot::plot_grid(plotlist = frozen_elb, nrow = 2, ncol = 2)
+dev.off()
+```
+
+Check association of number of UMI and genes with PCA
+
+```{r}
+getPCcor = function(l){
+  df_cor = data.frame("PC" = "A", "sample" = "A", "cor_gene" = 0, "cor_umi" = 0)
+  for(n in names(l)){
+    cor_gene = cor(l[[n]]$nFeature_RNA,
+                   l[[n]]@reductions$pca@cell.embeddings)
+    cor_umi = cor(l[[n]]$nCount_RNA,
+                  l[[n]]@reductions$pca@cell.embeddings)
+    df_cor = rbind(df_cor, data.frame("PC" = colnames(cor_gene),
+                                      "sample" = n,
+                                      "cor_gene" = cor_gene[1,],
+                                      "cor_umi" = cor_umi[1,]))
+  }
+  df_cor = df_cor[-1,]
+  df_cor$PC = factor(df_cor$PC, levels = paste0("PC_", 1:60))
+  
+  return(df_cor)
+}
+plotCors = function(df, var = "cor_gene", ncol = 7){
+  plt = ggplot(df[df$PC %in% paste0("PC_", 1:50),], 
+               aes_string(x = "PC", y = var))+
+    facet_wrap(~sample, ncol = ncol)+
+    geom_point(size = 0.8)+
+    scale_y_continuous(labels = round(seq(-.6,.6,.2), 1), breaks = seq(-.6,.6,.2),
+                       limits = c(-.65, .65))+
+    theme_bw()+
+    theme(axis.text.x = element_blank())
+  
+  return(plt)
+}
+
+df_cor_healthy = getPCcor(healthy_srat)
+df_cor_cond = getPCcor(cond_srat)
+df_cor_frozen = getPCcor(frozen_srat)
+
+pdf("results/clust_indiv/healthy_pc_corNgenes.pdf", 
+    height = 4, width = 7, useDingbats = F)
+plotCors(df_cor_healthy, ncol = 4)
+dev.off()
+
+pdf("results/clust_indiv/cond_pc_corNgenes.pdf", 
+    height = 9, width = 15, useDingbats = F)
+plotCors(df_cor_cond)
+dev.off()
+
+pdf("results/clust_indiv/frozen_pc_corNgenes.pdf", 
+    height = 2.5, width = 6, useDingbats = F)
+plotCors(df_cor_frozen, ncol = 3)
+dev.off()
+```
+
+Define number of PCs for each dataset (based on the elbow plot and data exploration)
+
+```{r}
+healthy_npcs = ifelse(grepl("hep", tolower(names(healthy_srat))), 15, 25)
+names(healthy_npcs) = names(healthy_srat)
+
+cond_npcs = c("data.Reg1.NHep" = 22, "data.Reg1.RHep" = 20, "Data.Reg5_HepE" = 15,
+              "Data.Reg5_HepR" = 22, "Data.Reg5_npcE" = 25, "Data.Reg5_npcR" = 30,
+              "Data.Reg6_HepE" = 15, "Data.Reg6_HepR" = 25, "Data.Reg6_npcE" = 25,
+              "Data.Reg6_npcR" = 20, "Data.Reg7_HepE" = 15, "Data.Reg7_HepR" = 15,
+              "Data.Reg7_npcE" = 25, "Data.Reg7_npcR" = 25, "Hep1N.data" = 15, 
+              "Hep1R.data" = 20, "Hep2N.data" = 15, "Hep2R.data" = 15, "HepRe.3d.data" = 15,
+              "HepRn.2d.data" = 20, "HepRr.2d.data" = 20, "HepRr.3d.data" = 15, 
+              "NPC.Re.3d.data" = 20, "NPC.Rn.2d.data" = 25, "NPC.Rr.2d.data" = 25,
+              "NPC.Rr.3d.data" = 25, "NPCn.data" = 25, "NPCr.data" = 25)
+
+frozen_npcs = rep(20, 3)
+names(frozen_npcs) = names(frozen_srat)
+```
+
+Run FindNeighbors, UMAP, and FindClusters
+
+```{r}
+runSeuratClust = function(obj, npcs){
+  obj = FindNeighbors(obj, dims = 1:npcs, force.recalc = T, verbose = F)
+  obj = RunUMAP(obj, dims = 1:npcs, verbose = F)
+  # resolution 10 is included to update the "very fine" clustering done in QC
+  obj = FindClusters(obj, algorithm = 2, verbose = F, 
+                     resolution = c(0.2, 0.5, seq(0.7, 1.1, 0.1), 1.5, 2, 10))
+  
+  return(obj)
+}
+
+healthy_srat = lapply(names(healthy_srat), 
+                      function(x) runSeuratClust(healthy_srat[[x]], healthy_npcs[x]))
+names(healthy_srat) = as.character(unlist(lapply(healthy_srat, function(x) x$orig.ident[1])))
+cond_srat = lapply(names(cond_srat),
+                   function(x) runSeuratClust(cond_srat[[x]], cond_npcs[x]))
+names(cond_srat) = as.character(unlist(lapply(cond_srat, function(x) x$orig.ident[1])))
+frozen_srat = lapply(names(frozen_srat), 
+                     function(x) runSeuratClust(frozen_srat[[x]], frozen_npcs[x]))
+names(frozen_srat) = as.character(unlist(lapply(frozen_srat, function(x) x$orig.ident[1])))
+```
+
+Plot all resolutions on UMAP
+
+```{r}
+plotUMAPDim = function(obj, s){
+  plt_list = list()
+  cl_names = colnames(obj@meta.data)[grepl("SCT_snn", colnames(obj@meta.data))][-1]
+  # doesn't include res = 10
+  for(cl in cl_names){
+  plt_list[[cl]] = DimPlot(object = obj, reduction = "umap",
+                           group.by = cl, pt.size = 0.7)+
+    labs(title = s, subtitle = cl)+
+    theme(aspect.ratio = 1,
+          title = element_text(size = 9),
+          legend.position = "right")
+  }
+  
+  plt = cowplot::plot_grid(plotlist = plt_list, ncol = 3, nrow = 3)
+  return(plt)
+}
+
+for(n in names(healthy_srat)){
+  pdf(paste0("results/clust_indiv/clustExp_UMAP/healthy_", n, "_clustExp_UMAP.pdf"), 
+      height = 15, width = 16, useDingbats = F)
+  print(plotUMAPDim(healthy_srat[[n]], n))
+  dev.off()
+}
+
+for(n in names(cond_srat)){
+  pdf(paste0("results/clust_indiv/clustExp_UMAP/cond_", n, "_clustExp_UMAP.pdf"), 
+      height = 15, width = 16, useDingbats = F)
+  print(plotUMAPDim(cond_srat[[n]], n))
+  dev.off()
+}
+
+for(n in names(frozen_srat)){
+  pdf(paste0("results/clust_indiv/clustExp_UMAP/frozen_", n, "_clustExp_UMAP.pdf"), 
+      height = 15, width = 16, useDingbats = F)
+  print(plotUMAPDim(frozen_srat[[n]], n))
+  dev.off()
+}
+```
+
+Choose the best resolution for each sample
+
+```{r}
+healthy_cl_use = c()
+cond_cl_use = c()
+frozen_cl_use = c()
+```
+
+Get markers for those clusters. Will also be coparing FindMarkers with quickMarkers
+
+```{r}
+for(n in names(healthy_cl_use)){
+  healthy_srat[[n]] = SetIdent(healthy_srat[[n]], value = healthy_cl_use[n])
+  seurat_mk = FindAllMarkers(healthy_srat[[n]], test.use = "negbinom", 
+                             pseudocount.use = 0.1, logfc.threshold = 0.1)
+  soupx_mk = quickMarkers(healthy_srat[[n]]@assays$SCT@counts,
+                          healthy_srat[[n]]@meta.data[,healthy_cl_use[n]],
+                          N = 500, FDR = 0.05)
+}
+```
+
+
+
