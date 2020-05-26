@@ -41,9 +41,9 @@ library(SoupX)
 Load prepared Seurat objects
 
 ```{r}
-save(healthy_srat, file = "data/processed/healthy_srat.RData")
-save(cond_srat, file = "data/processed/cond_srat.RData")
-save(frozen_srat, file = "data/processed/frozen_srat.RData")
+load(file = "data/processed/healthy_srat.RData")
+load(file = "data/processed/cond_srat.RData")
+load(file = "data/processed/frozen_srat.RData")
 ```
 
 
@@ -150,15 +150,15 @@ Define number of PCs for each dataset (based on the elbow plot and data explorat
 healthy_npcs = ifelse(grepl("hep", tolower(names(healthy_srat))), 15, 25)
 names(healthy_npcs) = names(healthy_srat)
 
-cond_npcs = c("data.Reg1.NHep" = 22, "data.Reg1.RHep" = 20, "Data.Reg5_HepE" = 15,
-              "Data.Reg5_HepR" = 22, "Data.Reg5_npcE" = 25, "Data.Reg5_npcR" = 30,
-              "Data.Reg6_HepE" = 15, "Data.Reg6_HepR" = 25, "Data.Reg6_npcE" = 25,
-              "Data.Reg6_npcR" = 20, "Data.Reg7_HepE" = 15, "Data.Reg7_HepR" = 15,
-              "Data.Reg7_npcE" = 25, "Data.Reg7_npcR" = 25, "Hep1N.data" = 15, 
-              "Hep1R.data" = 20, "Hep2N.data" = 15, "Hep2R.data" = 15, "HepRe.3d.data" = 15,
-              "HepRn.2d.data" = 20, "HepRr.2d.data" = 20, "HepRr.3d.data" = 15, 
-              "NPC.Re.3d.data" = 20, "NPC.Rn.2d.data" = 25, "NPC.Rr.2d.data" = 25,
-              "NPC.Rr.3d.data" = 25, "NPCn.data" = 25, "NPCr.data" = 25)
+cond_npcs = c("sc_E1.HEP.Exp2" = 25, "sc_R1.HEP.Exp2" = 20, "sc_E5.HEP.Exp1" = 15,
+              "sc_R5.HEP.Exp1" = 22, "sc_E5.NPC.Exp1" = 25, "sc_R5.NPC.Exp1" = 30,
+              "sc_E6.HEP.Exp1" = 15, "sc_R6.HEP.Exp1" = 25, "sc_E6.NPC.Exp1" = 25,
+              "sc_R6.NPC.Exp1" = 20, "sc_E7.HEP.Exp1" = 15, "sc_R7.HEP.Exp1" = 15,
+              "sc_E7.NPC.Exp1" = 25, "sc_R7.NPC.Exp1" = 25, "sc_E1.HEP.Exp1" = 15, 
+              "sc_R1.HEP.Exp1" = 20, "sc_E3.HEP.Exp1" = 15,
+              "sc_E2.HEP.Exp1" = 20, "sc_R2.HEP.Exp1" = 20, "sc_R3.HEP.Exp1" = 15, 
+              "sc_E3.NPC.Exp1" = 20, "sc_E2.NPC.Exp1" = 25, "sc_R2.NPC.Exp1" = 25,
+              "sc_R3.NPC.Exp1" = 25, "sc_E1.NPC.Exp1" = 25, "sc_R1.NPC.Exp1" = 25)
 
 frozen_npcs = rep(20, 3)
 names(frozen_npcs) = names(frozen_srat)
@@ -177,15 +177,15 @@ runSeuratClust = function(obj, npcs){
   return(obj)
 }
 
-healthy_srat = lapply(names(healthy_srat), 
-                      function(x) runSeuratClust(healthy_srat[[x]], healthy_npcs[x]))
-names(healthy_srat) = as.character(unlist(lapply(healthy_srat, function(x) x$orig.ident[1])))
-cond_srat = lapply(names(cond_srat),
-                   function(x) runSeuratClust(cond_srat[[x]], cond_npcs[x]))
-names(cond_srat) = as.character(unlist(lapply(cond_srat, function(x) x$orig.ident[1])))
-frozen_srat = lapply(names(frozen_srat), 
-                     function(x) runSeuratClust(frozen_srat[[x]], frozen_npcs[x]))
-names(frozen_srat) = as.character(unlist(lapply(frozen_srat, function(x) x$orig.ident[1])))
+for(n in names(healthy_srat)){
+  healthy_srat[[n]] = runSeuratClust(healthy_srat[[n]], healthy_npcs[n])
+}
+for(n in names(cond_srat)){
+  cond_srat[[n]] = runSeuratClust(cond_srat[[n]], cond_npcs[n])
+}
+for(n in names(frozen_srat)){
+  frozen_srat[[n]] = runSeuratClust(frozen_srat[[n]], frozen_npcs[n])
+}
 ```
 
 Plot all resolutions on UMAP
@@ -233,23 +233,86 @@ for(n in names(frozen_srat)){
 Choose the best resolution for each sample
 
 ```{r}
-healthy_cl_use = c()
-cond_cl_use = c()
-frozen_cl_use = c()
+healthy_cl_use = c("sc_H1.EKS.Exp1" = 0.7, "sc_H2.HEP.Exp1" = 0.7, "sc_H3.HEP.Exp1" = 0.5,
+                   "sc_H1.HEP.Exp1" = 0.5,"sc_H2.NPC.Exp1" = 0.7, "sc_H3.NPC.Exp1" = 0.5,
+                   "sc_H1.NPC.Exp1" = 0.7)
+cond_cl_use = c("sc_E5.HEP.Exp1" = 0.5, "sc_R5.HEP.Exp1" = 0.5, "sc_E5.NPC.Exp1" = 0.7,
+                "sc_R5.NPC.Exp1" = 0.5, "sc_E6.HEP.Exp1" = 0.7, "sc_R6.HEP.Exp1" = 0.5,
+                "sc_E6.NPC.Exp1" = 0.7, "sc_R6.NPC.Exp1" = 0.5, "sc_E7.HEP.Exp1" = 0.5,
+                "sc_R7.HEP.Exp1" = 0.5, "sc_E7.NPC.Exp1" = 0.8, "sc_R7.NPC.Exp1" = 0.5,
+                "sc_E1.HEP.Exp1" = 0.5, "sc_R1.HEP.Exp1" = 0.5, "sc_E3.HEP.Exp1" = 0.5,
+                "sc_E2.HEP.Exp1" = 0.5, "sc_R2.HEP.Exp1" = 0.5, "sc_R3.HEP.Exp1" = 0.5,
+                "sc_E3.NPC.Exp1" = 0.9, "sc_E2.NPC.Exp1" = 0.5, "sc_R2.NPC.Exp1" = 0.5,
+                "sc_R3.NPC.Exp1" = 0.5, "sc_E1.NPC.Exp1" = 0.5, "sc_R1.NPC.Exp1" = 0.7,
+                "sc_E1.HEP.Exp2" = 0.5, "sc_R1.HEP.Exp2" = 0.5)
+frozen_cl_use = c("sn_H1.all.Exp1" = 0.8, "sn_H3.all.Exp1" = 0.9, "sn_H4.all.Exp1" = 0.7)
 ```
 
-Get markers for those clusters. Will also be coparing FindMarkers with quickMarkers
+Get markers for those clusters. Will also be comparing FindMarkers with quickMarkers
+(this whole block takes approx. 10h)
 
 ```{r}
-for(n in names(healthy_cl_use)){
-  healthy_srat[[n]] = SetIdent(healthy_srat[[n]], value = healthy_cl_use[n])
-  seurat_mk = FindAllMarkers(healthy_srat[[n]], test.use = "negbinom", 
-                             pseudocount.use = 0.1, logfc.threshold = 0.1)
-  soupx_mk = quickMarkers(healthy_srat[[n]]@assays$SCT@counts,
-                          healthy_srat[[n]]@meta.data[,healthy_cl_use[n]],
-                          N = 500, FDR = 0.05)
+getMarkersComp = function(l, v_cl){
+  for(n in names(v_cl)){
+    cat(paste0(n, " "))
+    name_cl = paste0("SCT_snn_res.", v_cl[n])
+    l[[n]] = SetIdent(l[[n]], value = name_cl)
+    
+    seurat_mk = FindAllMarkers(l[[n]], test.use = "wilcox", 
+                               pseudocount.use = 0.1, logfc.threshold = 0.2, verbose = F)
+    write.csv(seurat_mk, file = paste0("results/clust_indiv/clustExp_markers/", 
+                                       n, "_", name_cl, "_wilcoxMarkers.csv"), 
+              col.names = T, row.names = T, quote = F)
+    
+    soupx_mk = quickMarkers(l[[n]]@assays$SCT@counts,
+                            l[[n]]@meta.data[,name_cl],
+                            N = 300, FDR = 0.05)
+    write.csv(soupx_mk, file = paste0("results/clust_indiv/clustExp_markers/", 
+                                       n, "_", name_cl, "_tfidfMarkers.csv"), 
+              col.names = T, row.names = T, quote = F)
+  }
 }
+
+getMarkersComp(healthy_srat, healthy_cl_use)
+getMarkersComp(cond_srat, cond_cl_use)
+getMarkersComp(frozen_srat, frozen_cl_use)
+```
+
+## Saving final objects
+Save objects
+
+```{r}
+save(healthy_srat, file = "data/processed/healthy_srat_indivclust.RData")
+save(cond_srat, file = "data/processed/cond_srat_indivclust.RData")
+save(frozen_srat, file = "data/processed/frozen_srat_indivclust.RData")
 ```
 
 
+
+# Integrate datasets
+## Integrate all datasets
+Using Seurat for integration
+
+```{r}
+all_cell_srat = c(healthy_srat, cond_srat)
+# find features variable across all individual datasets
+integr_feat = SelectIntegrationFeatures(all_cell_srat, nfeatures = 5000)
+# calculate possible missing Pearson residuals for SCTransform
+all_cell_srat = PrepSCTIntegration(all_cell_srat, anchor.features = integr_feat, verbose = T)
+# finding the anchors for integration - in this case 30 dims should be a good default
+all_cell_anchors = FindIntegrationAnchors(all_cell_srat, normalization.method = "SCT", 
+                                          anchor.features = integr_feat, verbose = T)
+# actual data integration
+all_cell_integr = IntegrateData(all_cell_anchors, normalization.method = "SCT", verbose = F)
+# lets see how it looks
+all_cell_integr = RunPCA(all_cell_integr, verbose = F)
+all_cell_integr = RunUMAP(all_cell_integr, dims = 1:30)
+```
+
+
+
+
+```{r}
+library(harmony)
+```
 

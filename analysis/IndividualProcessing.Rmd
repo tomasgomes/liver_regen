@@ -80,7 +80,9 @@ Conditions
 
 ```{r}
 load("data/Conditions/Donor_1/prepared_liv_reg1.rdata")
-load("data/Conditions/Donor_1/prepared_seurat_Reg1Hep_N_R_reseq.rdata")
+rm(Hep2N.data, Hep2R.data)
+load("data/Conditions/Donor_1/sc_E1_mergedHep2.rdata")
+load("data/Conditions/Donor_1/sc_R1_mergedHep2.rdata")
 load("data/Conditions/Donor_2/prepared_liv_hepRandN_2d.rdata")
 load("data/Conditions/Donor_2/prepared_liv_NPC_RandN_2d.rdata")
 load("data/Conditions/Donor_3/prepared_liv_hepE_3d.rdata")
@@ -182,50 +184,48 @@ save(frozen_srat, file = "data/processed/frozen_srat_beforeDoublet.RData")
 Define matches between matrices and metadata
 
 ```{r}
-dat_matches = c("EKS.data", "sc_H1", "HD1", "EKS","cells","healthy", "Exp1","No",
-                "NPC.data", "sc_H1", "HD1", "NPC", "cells", "healthy", "Exp1","No",
-                "HEP.data", "sc_H1", "HD1", "HEP", "cells", "healthy", "Exp1","No",
-                "Hep.2d.data", "sc_H2", "HD2", "HEP", "cells", "healthy", "Exp1","No",
-                "NPC.2d.data", "sc_H2", "HD2", "NPC", "cells", "healthy", "Exp1","No",
-                "Hep.3d.data", "sc_H3", "HD3", "HEP", "cells", "healthy", "Exp1","No",
-                "NPC.3d.data", "sc_H3", "HD3", "NPC", "cells", "healthy", "Exp1","No",
+dat_matches = c("EKS.data", "sc_H1", "HD1", "EKS","cells","healthy", "Exp1","V2",
+                "NPC.data", "sc_H1", "HD1", "NPC", "cells", "healthy", "Exp1","V2",
+                "HEP.data", "sc_H1", "HD1", "HEP", "cells", "healthy", "Exp1","V2",
+                "Hep.2d.data", "sc_H2", "HD2", "HEP", "cells", "healthy", "Exp1","V2",
+                "NPC.2d.data", "sc_H2", "HD2", "NPC", "cells", "healthy", "Exp1","V2",
+                "Hep.3d.data", "sc_H3", "HD3", "HEP", "cells", "healthy", "Exp1","V2",
+                "NPC.3d.data", "sc_H3", "HD3", "NPC", "cells", "healthy", "Exp1","V2",
                 
-                "data.Reg1.NHep", "sc_E1", "DD1", "HEP", "cells", "embolised", "Exp2","Yes",
-                "data.Reg1.RHep","sc_R1", "DD1", "HEP", "cells", "regenerating", "Exp2","Yes",
-                "Hep1N.data", "sc_E1", "DD1", "HEP", "cells", "embolised", "Exp1","No",
-                "Hep1R.data", "sc_R1", "DD1", "HEP", "cells", "regenerating", "Exp1","No",
-                "Hep2N.data", "sc_E1", "DD1", "HEP", "cells", "embolised", "Exp2","No",
-                "Hep2R.data", "sc_R1", "DD1", "HEP", "cells", "regenerating", "Exp2","No",
-                "HepRn.2d.data", "sc_E2", "DD2", "HEP", "cells", "embolised", "Exp1","No",
-                "HepRr.2d.data", "sc_R2", "DD2", "HEP", "cells", "regenerating", "Exp1","No",
-                "NPC.Rn.2d.data", "sc_E2", "DD2", "NPC", "cells", "embolised", "Exp1","No",
-                "NPC.Rr.2d.data","sc_R2", "DD2", "NPC", "cells", "regenerating", "Exp1","No",
-                "NPCn.data", "sc_E1", "DD1", "NPC", "cells", "embolised", "Exp1","No",
-                "NPCr.data", "sc_R1", "DD1", "NPC", "cells", "regenerating", "Exp1","No",
-                "HepRe.3d.data", "sc_E3", "DD3", "HEP", "cells", "embolised", "Exp1","No",
-                "HepRr.3d.data", "sc_R3", "DD3", "HEP", "cells", "regenerating", "Exp1","No",
-                "NPC.Re.3d.data", "sc_E3", "DD3", "NPC", "cells", "embolised", "Exp1","No",
-                "NPC.Rr.3d.data","sc_R3", "DD3", "NPC", "cells", "regenerating", "Exp1","No",
-                "Data.Reg5_HepE", "sc_E5", "DD5", "HEP", "cells", "embolised", "Exp1","No",
-                "Data.Reg5_HepR","sc_R5", "DD5", "HEP", "cells", "regenerating", "Exp1","No",
-                "Data.Reg5_npcE", "sc_E5", "DD5", "NPC", "cells", "embolised", "Exp1","No",
-                "Data.Reg5_npcR","sc_R5", "DD5", "NPC", "cells", "regenerating", "Exp1","No",
-                "Data.Reg6_HepE", "sc_E6", "DD6", "HEP", "cells", "embolised", "Exp1","No",
-                "Data.Reg6_HepR","sc_R6", "DD6", "HEP", "cells", "regenerating", "Exp1","No",
-                "Data.Reg6_npcE","sc_E6", "DD6", "NPC", "cells", "embolised", "Exp1","No",
-                "Data.Reg6_npcR","sc_R6", "DD6", "NPC", "cells", "regenerating", "Exp1","No",
-                "Data.Reg7_HepE", "sc_E7", "DD7", "HEP", "cells", "embolised", "Exp1","No",
-                "Data.Reg7_HepR","sc_R7", "DD7", "HEP", "cells", "regenerating", "Exp1","No",
-                "Data.Reg7_npcE","sc_E7","DD7","NPC","cells","embolised","Exp1","No",
-                "Data.Reg7_npcR","sc_R7", "DD7", "NPC", "cells", "regenerating", "Exp1","No",
+                "Hep1N.data", "sc_E1", "DD1", "HEP", "cells", "embolised", "Exp1","V2",
+                "Hep1R.data", "sc_R1", "DD1", "HEP", "cells", "regenerating", "Exp1","V2",
+                "sc_E1_mergedHep2.data", "sc_E1", "DD1", "HEP", "cells", "embolised", "Exp2","V2",
+                "sc_R1_mergedHep2.data", "sc_R1", "DD1", "HEP", "cells", "regenerating", "Exp2","V2",
+                "NPCn.data", "sc_E1", "DD1", "NPC", "cells", "embolised", "Exp1","V2",
+                "NPCr.data", "sc_R1", "DD1", "NPC", "cells", "regenerating", "Exp1","V2",
+                "HepRn.2d.data", "sc_E2", "DD2", "HEP", "cells", "embolised", "Exp1","V2",
+                "HepRr.2d.data", "sc_R2", "DD2", "HEP", "cells", "regenerating", "Exp1","V2",
+                "NPC.Rn.2d.data", "sc_E2", "DD2", "NPC", "cells", "embolised", "Exp1","V2",
+                "NPC.Rr.2d.data","sc_R2", "DD2", "NPC", "cells", "regenerating", "Exp1","V2",
+                "HepRe.3d.data", "sc_E3", "DD3", "HEP", "cells", "embolised", "Exp1","V2",
+                "HepRr.3d.data", "sc_R3", "DD3", "HEP", "cells", "regenerating", "Exp1","V2",
+                "NPC.Re.3d.data", "sc_E3", "DD3", "NPC", "cells", "embolised", "Exp1","V2",
+                "NPC.Rr.3d.data","sc_R3", "DD3", "NPC", "cells", "regenerating", "Exp1","V2",
+                "Data.Reg5_HepE", "sc_E5", "DD5", "HEP", "cells", "embolised", "Exp1","V3",
+                "Data.Reg5_HepR","sc_R5", "DD5", "HEP", "cells", "regenerating", "Exp1","V3",
+                "Data.Reg5_npcE", "sc_E5", "DD5", "NPC", "cells", "embolised", "Exp1","V3",
+                "Data.Reg5_npcR","sc_R5", "DD5", "NPC", "cells", "regenerating", "Exp1","V3",
+                "Data.Reg6_HepE", "sc_E6", "DD6", "HEP", "cells", "embolised", "Exp1","V3",
+                "Data.Reg6_HepR","sc_R6", "DD6", "HEP", "cells", "regenerating", "Exp1","V3",
+                "Data.Reg6_npcE","sc_E6", "DD6", "NPC", "cells", "embolised", "Exp1","V3",
+                "Data.Reg6_npcR","sc_R6", "DD6", "NPC", "cells", "regenerating", "Exp1","V3",
+                "Data.Reg7_HepE", "sc_E7", "DD7", "HEP", "cells", "embolised", "Exp1","V3",
+                "Data.Reg7_HepR","sc_R7", "DD7", "HEP", "cells", "regenerating", "Exp1","V3",
+                "Data.Reg7_npcE","sc_E7","DD7","NPC","cells","embolised","Exp1","V3",
+                "Data.Reg7_npcR","sc_R7", "DD7", "NPC", "cells", "regenerating", "Exp1","V3",
                 
-                "sn_H1", "sn_H1", "HD1", "all", "nuclei", "healthy", "Exp1","No",
-                "sn_H3", "sn_H3", "HD3", "all", "nuclei", "healthy", "Exp1","No",
-                "sn_H4", "sn_H4", "HD4", "all", "nuclei", "healthy", "Exp1","No")
+                "sn_H1", "sn_H1", "HD1", "all", "nuclei", "healthy", "Exp1","V3",
+                "sn_H3", "sn_H3", "HD3", "all", "nuclei", "healthy", "Exp1","V3",
+                "sn_H4", "sn_H4", "HD4", "all", "nuclei", "healthy", "Exp1","V3")
 
 dat_matches = matrix(dat_matches, ncol = 8, byrow = T)
 colnames(dat_matches) = c("mat_id", "Name", "Donor", "Fraction", "Isolation", 
-                          "Condition", "Experiment", "Reseq")
+                          "Condition", "Experiment","ProtocolVersion")
 dat_matches = data.frame(dat_matches, stringsAsFactors = F)
 write.csv(dat_matches, "data/processed/matrix_metadata_matches.csv", 
           col.names = T, row.names = T, quote = F)
@@ -235,7 +235,7 @@ Fix/simplify metadata
 
 ```{r}
 col_dat_matches = c("Name", "Donor", "Fraction", "Isolation",
-                    "Condition", "Experiment", "Reseq")
+                    "Condition", "Experiment", "ProtocolVersion")
 for(n in names(healthy_srat)){
   dat = merge(healthy_srat[[n]]@meta.data, dat_matches, by = 1)[,col_dat_matches]
   rownames(dat) = rownames(healthy_srat[[n]]@meta.data)
@@ -253,70 +253,33 @@ for(n in names(frozen_srat)){
 }
 ```
 
-Compare technical replicates
+Simplify sample names
 
-```{r, fig.height=5, fig.width=6}
-pdf("results/initial_stats/tech_replicates_comparison.pdf",
-    useDingbats = F, width = 6, height = 7)
-# global correlation
-cor_E = cor(as.matrix(cond_srat$Hep2N.data@assays$RNA@counts),
-            as.matrix(cond_srat$data.Reg1.NHep@assays$RNA@counts))
-common_cells = intersect(rownames(cor_E), colnames(cor_E))
-plot_df = data.frame("cor" = diag(cor_E[common_cells, common_cells]))
-plt1 = ggplot(plot_df, aes(y = cor, x = "cells"))+
-  ggbeeswarm::geom_quasirandom()+
-  labs(y = "Pearson correlation", title = "Embolised")+
-  theme_bw()
-
-cor_R = cor(as.matrix(cond_srat$Hep2R.data@assays$RNA@counts),
-            as.matrix(cond_srat$data.Reg1.RHep@assays$RNA@counts))
-common_cells = intersect(rownames(cor_R), colnames(cor_R))
-plot_df = data.frame("cor" = diag(cor_R[common_cells, common_cells]))
-plt2 = ggplot(plot_df, aes(y = cor, x = "cells"))+
-  ggbeeswarm::geom_quasirandom()+
-  labs(y = "Pearson correlation", title = "Regenerating")+
-  theme_bw()
-
-cowplot::plot_grid(plt1, plt2, ncol = 2)
-
-# compare number of genes
-par(mfrow = c(2,1))
-common_cells = intersect(rownames(cor_E), colnames(cor_E))
-plot(cond_srat$Hep2N.data@meta.data[common_cells,"nFeature_RNA"],
-     cond_srat$data.Reg1.NHep@meta.data[common_cells,"nFeature_RNA"],
-     xlab = "# genes (rep1)", ylab = "# genes (rep2)",
-     main = "# genes = Regenerating")
-common_cells = intersect(rownames(cor_R), colnames(cor_R))
-plot(cond_srat$Hep2R.data@meta.data[common_cells,"nFeature_RNA"],
-     cond_srat$data.Reg1.RHep@meta.data[common_cells,"nFeature_RNA"],
-     xlab = "# genes (rep1)", ylab = "# genes (rep2)", 
-     main = "# genes = Regenerating")
-
-# compare shared expressed genes
-par(mfrow = c(2,1))
-common_cells = intersect(rownames(cor_E), colnames(cor_E))
-giE_l = list()
-for(cc in common_cells){
-  g1 = rownames(cond_srat$Hep2N.data@assays$RNA@counts)[cond_srat$Hep2N.data@assays$RNA@counts[,cc]>0]
-  g2 = rownames(cond_srat$data.Reg1.NHep@assays$RNA@counts)[cond_srat$data.Reg1.NHep@assays$RNA@counts[,cc]>0]
-  
-  giE_l[[cc]] = length(intersect(g1, g2))/length(union(g1,g2))*100
+```{r}
+for(n in names(healthy_srat)){
+  newname=paste(healthy_srat[[n]]@meta.data$Name[1],healthy_srat[[n]]@meta.data$Fraction[1], 
+                  healthy_srat[[n]]@meta.data$Experiment[1], sep = ".")
+  names(healthy_srat)[names(healthy_srat)==n] = newname
+  n_df = data.frame(row.names = colnames(healthy_srat[[n]]),
+                    "unique_name" = rep(newname, ncol(healthy_srat[[n]])))
+  healthy_srat[[n]] = AddMetaData(healthy_srat[[n]], n_df)
 }
-plot(unlist(giE_l)[order(unlist(giE_l))], ylab = "% shared genes", xlab = "cells",
-     main = "Replicate shared genes - Embolised")
-
-common_cells = intersect(rownames(cor_R), colnames(cor_R))
-giR_l = list()
-for(cc in common_cells){
-  g1 = rownames(cond_srat$Hep2R.data@assays$RNA@counts)[cond_srat$Hep2R.data@assays$RNA@counts[,cc]>0]
-  g2 = rownames(cond_srat$data.Reg1.RHep@assays$RNA@counts)[cond_srat$data.Reg1.RHep@assays$RNA@counts[,cc]>0]
-  
-  giR_l[[cc]] = length(intersect(g1, g2))/length(union(g1,g2))*100
+for(n in names(cond_srat)){
+  newname = paste(cond_srat[[n]]@meta.data$Name[1], cond_srat[[n]]@meta.data$Fraction[1], 
+                  cond_srat[[n]]@meta.data$Experiment[1], sep = ".")
+  names(cond_srat)[names(cond_srat)==n] = newname
+  n_df = data.frame(row.names = colnames(cond_srat[[n]]),
+                    "unique_name" = rep(newname, ncol(cond_srat[[n]])))
+  cond_srat[[n]] = AddMetaData(cond_srat[[n]], n_df)
 }
-plot(unlist(giR_l)[order(unlist(giR_l))], ylab = "% shared genes", xlab = "cells",
-     main = "Replicate shared genes - Regenerating")
-
-dev.off()
+for(n in names(frozen_srat)){
+  newname = paste(frozen_srat[[n]]@meta.data$Name[1],frozen_srat[[n]]@meta.data$Fraction[1], 
+                  frozen_srat[[n]]@meta.data$Experiment[1], sep = ".")
+  names(frozen_srat)[names(frozen_srat)==n] = newname
+  n_df = data.frame(row.names = colnames(frozen_srat[[n]]),
+                    "unique_name" = rep(newname, ncol(frozen_srat[[n]])))
+  frozen_srat[[n]] = AddMetaData(frozen_srat[[n]], n_df)
+}
 ```
 
 Plot doublet score distributions
@@ -326,22 +289,22 @@ plotDoubScore = function(l){
   plot_df = data.frame()
   thr = c()
   for(n in names(l)){
-    plot_df = rbind(plot_df, l[[n]]@meta.data[,c("scrublet_score","orig.ident",
+    plot_df = rbind(plot_df, l[[n]]@meta.data[,c("scrublet_score","unique_name",
                                                  "Fraction","Name")])
     thr = c(thr, tapply(l[[n]]@meta.data$scrublet_score,
                         l[[n]]@meta.data$scrublet_isDoublet,
                         min)["TRUE"])
     
   }
-  line_df = data.frame("orig.ident" = names(l),
+  line_df = data.frame("unique_name" = names(l),
                        "threshold" = thr)
-  plt = ggplot(plot_df, aes(x = scrublet_score, y = orig.ident, 
-                            group = orig.ident))+
+  plt = ggplot(plot_df, aes(x = scrublet_score, y = unique_name, 
+                            group = unique_name))+
     ggridges::geom_density_ridges(size = 0.25, mapping = aes(fill = Fraction))+
     #geom_vline(data = line_df, mapping = aes(xintercept = threshold, y = orig.ident))+
     geom_segment(data = line_df, aes(x = threshold, xend = threshold, 
-                                     y = as.numeric(orig.ident),
-                                     yend = as.numeric(orig.ident) + 1))+
+                                     y = as.numeric(unique_name),
+                                     yend = as.numeric(unique_name) + 1))+
     scale_x_continuous(expand = c(0,0), limits = c(-.01,1.01))+
     theme_bw()
 
@@ -403,12 +366,11 @@ The scrublet score threshold is based on the assumption that there is a bimodal 
 plotDoubletGMM = function(l){
   plot_df = data.frame()
   for(n in names(l)){
-    plot_df = rbind(plot_df, l[[n]]@meta.data[,c("scrublet_score","orig.ident",
+    plot_df = rbind(plot_df, l[[n]]@meta.data[,c("scrublet_score","unique_name",
                                                  "Fraction","Name")])
   }
   
-  cond_scores = getDoubletScores(l)
-  gmm_cond = tapply(cond_scores$scrublet_score, cond_scores$orig.ident, 
+  gmm_cond = tapply(plot_df$scrublet_score, plot_df$unique_name, 
                     normalmixEM, k = 2)
   
   plot_mix_comps <- function(x, mu, sigma, lam) {
@@ -665,12 +627,11 @@ cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2)
 dev.off()
 ```
 
-Plot number of read distribution
+Plot number of read distribution in the condition donors
 
 ```{r}
 all_meta = Reduce(rbind, lapply(cond_srat, function(x) x@meta.data))
-all_meta$frac_exp_tec = paste(all_meta$Fraction, all_meta$Experiment, 
-                              all_meta$Reseq, sep = "_")
+all_meta$frac_exp_tec = paste(all_meta$Fraction, all_meta$Experiment, sep = "_")
 
 pdf("results/initial_stats/violin_number_reads.pdf", 
     width = 7, height = 6, useDingbats = F)
@@ -696,14 +657,13 @@ getClusters = function(obj){
 healthy_srat = lapply(healthy_srat, getClusters)
 cond_srat = lapply(cond_srat, getClusters)
 frozen_srat = lapply(frozen_srat, getClusters)
-#DimPlot(xxx, reduction = "umap", group.by = "SCT_snn_res.10")
 ```
 
 Compare some samples to understand the low count cells
 
 ```{r}
-sub_cond = cond_srat[c("data.Reg1.NHep","Data.Reg6_HepE","Hep2N.data", 
-                       "Data.Reg5_HepE","Data.Reg7_HepR","Data.Reg6_npcR")]
+sub_cond = cond_srat[c("sc_E1.HEP.Exp1","sc_E6.HEP.Exp1","sc_E1.HEP.Exp2", 
+                       "sc_E5.HEP.Exp1","sc_R7.HEP.Exp1","sc_E6.NPC.Exp1")]
 
 markers_sub = list()
 for(n in names(sub_cond)){
@@ -712,8 +672,8 @@ for(n in names(sub_cond)){
                                   sub_cond[[n]]@meta.data$SCT_snn_res.0.6, 
                                   N = 20, FDR = 0.05)
 }
-DimPlot(sub_cond$Data.Reg6_npcR, reduction = "umap", group.by = "SCT_snn_res.0.6")
-FeaturePlot(sub_cond$Data.Reg6_HepE, features = c("FGA", "FGB"))
+DimPlot(sub_cond$sc_E6.NPC.Exp1, reduction = "umap", group.by = "SCT_snn_res.0.6")
+FeaturePlot(sub_cond$sc_E6.NPC.Exp1, features = c("FGA", "FGB"))
 ```
 
 Now we calculate those mean stats per cluster and define the thresholds
@@ -776,46 +736,44 @@ Since  different samples can have very different qualities, we have chosen to de
 filt_names = c("scrublet_score_all", "scrublet_score_clusters", 
                "mt_percentage", "min_nUMI", "min_nGenes", "max_nUMI", "max_nGenes")
 
-dat_filt = list("EKS.data" = c(0.25, 0.3, 15, 1000, 800, 40000, 6000),
-             "NPC.data" = c(0.25, 0.3, 15, 1000, 800, 40000, 6000),
-             "HEP.data" = c(0.3, 0.3, 40, 1000, 800, 40000, 6000),
-             "Hep.2d.data" = c(0.3, 0.3, 40, 1000, 800, 40000, 6000),
-             "NPC.2d.data" = c(0.25, 0.3, 15, 1000, 800, 40000, 6000),
-             "Hep.3d.data" = c(0.3, 0.3, 40, 1000, 800, 40000, 6000),
-             "NPC.3d.data" = c(0.25, 0.3, 15, 1000, 800, 40000, 6000),
+dat_filt = list("sc_H1.EKS.Exp1" = c(0.25, 0.3, 15, 1000, 800, 40000, 6000),
+                "sc_H1.NPC.Exp1" = c(0.25, 0.3, 15, 1000, 800, 40000, 6000),
+                "sc_H1.HEP.Exp1" = c(0.3, 0.3, 40, 1000, 800, 40000, 6000),
+                "sc_H2.HEP.Exp1" = c(0.3, 0.3, 40, 1000, 800, 40000, 6000),
+                "sc_H2.NPC.Exp1" = c(0.25, 0.3, 15, 1000, 800, 40000, 6000),
+                "sc_H3.HEP.Exp1" = c(0.3, 0.3, 40, 1000, 800, 40000, 6000),
+                "sc_H3.NPC.Exp1" = c(0.25, 0.3, 15, 1000, 800, 40000, 6000),
                 
-             "data.Reg1.NHep" = c(0.4, 0.35, 20, 1000, 800, 40000,6000),
-             "data.Reg1.RHep" = c(0.4, 0.35, 20, 1000, 800, 40000,6000),
-             "Hep1N.data" = c(0.3, 0.35, 25, 1000, 800, 40000,6000),
-             "Hep1R.data" = c(0.4, 0.35, 25, 1000, 800, 40000,6000),
-             "Hep2N.data" = c(0.4, 0.35, 20, 1000, 800, 40000,6000),
-             "Hep2R.data" = c(0.4, 0.35, 20, 1000, 800, 40000,6000),
-             "HepRn.2d.data" = c(0.3, 0.35, 20, 1000, 800, 40000,6000),
-             "HepRr.2d.data" = c(0.5, 0.35, 20, 1000, 800, 40000,6000),
-             "NPC.Rn.2d.data" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
-             "NPC.Rr.2d.data" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
-             "NPCn.data" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
-             "NPCr.data" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
-             "HepRe.3d.data" = c(0.3, 0.35, 30, 1000, 800, 40000,6000),
-             "HepRr.3d.data" = c(0.3, 0.35, 30, 1000, 800, 40000,6000),
-             "NPC.Re.3d.data" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
-             "NPC.Rr.3d.data" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
-             "Data.Reg5_HepE" = c(0.4, 0.35, 40, 1000, 450, 40000,6000),
-             "Data.Reg5_HepR" = c(0.4, 0.35, 40, 1000, 750, 40000,6000),
-             "Data.Reg5_npcE" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
-             "Data.Reg5_npcR" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
-             "Data.Reg6_HepE" = c(0.4, 0.35, 25, 1000, 750, 40000,6000),
-             "Data.Reg6_HepR" = c(0.4, 0.35, 25, 1000, 750, 40000,6000),
-             "Data.Reg6_npcE" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
-             "Data.Reg6_npcR" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
-             "Data.Reg7_HepE" = c(0.4, 0.35, 25, 1000, 750, 40000,6000),
-             "Data.Reg7_HepR" = c(0.4, 0.35, 25, 1000, 700, 40000,6000),
-             "Data.Reg7_npcE" = c(0.25, 0.35, 25,1000,800,40000,6000),
-             "Data.Reg7_npcR" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
-                
-             "H1" = c(0.3, 0.3, 5, 400, 300, 40000, 6000),
-             "H3" = c(0.3, 0.3, 5, 400, 300, 40000, 6000),
-             "H4" = c(0.3, 0.3, 5, 400, 300, 40000, 6000))
+               "sc_E1.HEP.Exp2" = c(0.35, 0.35, 25, 1000, 800, 40000,6000),
+               "sc_R1.HEP.Exp2" = c(0.35, 0.35, 25, 1000, 800, 50000,8000),
+               "sc_E1.HEP.Exp1" = c(0.3, 0.35, 25, 1000, 800, 40000,6000),
+               "sc_R1.HEP.Exp1" = c(0.4, 0.35, 25, 1000, 800, 40000,6000),
+               "sc_E2.HEP.Exp1" = c(0.3, 0.35, 20, 1000, 800, 40000,6000),
+               "sc_R2.HEP.Exp1" = c(0.5, 0.35, 20, 1000, 800, 40000,6000),
+               "sc_E2.NPC.Exp1" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
+               "sc_R2.NPC.Exp1" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
+               "sc_E1.NPC.Exp1" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
+               "sc_R1.NPC.Exp1" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
+               "sc_E3.HEP.Exp1" = c(0.3, 0.35, 30, 1000, 800, 40000,6000),
+               "sc_R3.HEP.Exp1" = c(0.3, 0.35, 30, 1000, 800, 40000,6000),
+               "sc_E3.NPC.Exp1" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
+               "sc_R3.NPC.Exp1" = c(0.25, 0.35, 20, 1000, 800, 40000,6000),
+               "sc_E5.HEP.Exp1" = c(0.4, 0.35, 40, 1000, 450, 40000,6000),
+               "sc_R5.HEP.Exp1" = c(0.4, 0.35, 40, 1000, 750, 40000,6000),
+               "sc_E5.NPC.Exp1" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
+               "sc_R5.NPC.Exp1" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
+               "sc_E6.HEP.Exp1" = c(0.4, 0.35, 25, 1000, 750, 40000,6000),
+               "sc_R6.HEP.Exp1" = c(0.4, 0.35, 25, 1000, 750, 40000,6000),
+               "sc_E6.NPC.Exp1" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
+               "sc_R6.NPC.Exp1" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
+               "sc_E7.HEP.Exp1" = c(0.4, 0.35, 25, 1000, 750, 40000,6000),
+               "sc_R7.HEP.Exp1" = c(0.4, 0.35, 25, 1000, 700, 40000,6000),
+               "sc_E7.NPC.Exp1" = c(0.25, 0.35, 25,1000,800,40000,6000),
+               "sc_R7.NPC.Exp1" = c(0.25, 0.35, 25, 1000, 800, 40000,6000),
+                  
+               "sn_H1.all.Exp1" = c(0.3, 0.3, 5, 400, 300, 40000, 6000),
+               "sn_H3.all.Exp1" = c(0.3, 0.3, 5, 400, 300, 40000, 6000),
+               "sn_H4.all.Exp1" = c(0.3, 0.3, 5, 400, 300, 40000, 6000))
 
 dat_filt = t(data.frame(dat_filt, stringsAsFactors = F))
 colnames(dat_filt) = filt_names
@@ -932,10 +890,9 @@ Plot number of cells (removed or not)
 ```{r}
 plotFilteredCells = function(l){
   all_meta = Reduce(rbind, lapply(l, function(x) x@meta.data))
-  all_meta$frac_exp_tec = paste(all_meta$Fraction, all_meta$Experiment, 
-                                all_meta$Reseq, sep = "_")
+  all_meta$frac_exp = paste(all_meta$Fraction, all_meta$Experiment, sep = "_")
   
-  plt = ggplot(all_meta, aes(x = frac_exp_tec,fill = keep_allfilt))+
+  plt = ggplot(all_meta, aes(x = frac_exp, fill = keep_allfilt))+
     geom_bar(position = "dodge")+
     facet_wrap(~Name, scales = "free_y")+
     theme_bw()+
@@ -990,3 +947,71 @@ save(cond_srat, file = "data/processed/cond_srat.RData")
 save(frozen_srat, file = "data/processed/frozen_srat.RData")
 ```
 
+
+
+# Retired code
+Compare technical replicates
+
+```{r, fig.height=5, fig.width=6}
+pdf("results/initial_stats/tech_replicates_comparison.pdf",
+    useDingbats = F, width = 6, height = 7)
+# global correlation
+cor_E = cor(as.matrix(cond_srat$Hep2N.data@assays$RNA@counts),
+            as.matrix(cond_srat$data.Reg1.NHep@assays$RNA@counts))
+common_cells = intersect(rownames(cor_E), colnames(cor_E))
+plot_df = data.frame("cor" = diag(cor_E[common_cells, common_cells]))
+plt1 = ggplot(plot_df, aes(y = cor, x = "cells"))+
+  ggbeeswarm::geom_quasirandom()+
+  labs(y = "Pearson correlation", title = "Embolised")+
+  theme_bw()
+
+cor_R = cor(as.matrix(cond_srat$Hep2R.data@assays$RNA@counts),
+            as.matrix(cond_srat$data.Reg1.RHep@assays$RNA@counts))
+common_cells = intersect(rownames(cor_R), colnames(cor_R))
+plot_df = data.frame("cor" = diag(cor_R[common_cells, common_cells]))
+plt2 = ggplot(plot_df, aes(y = cor, x = "cells"))+
+  ggbeeswarm::geom_quasirandom()+
+  labs(y = "Pearson correlation", title = "Regenerating")+
+  theme_bw()
+
+cowplot::plot_grid(plt1, plt2, ncol = 2)
+
+# compare number of genes
+par(mfrow = c(2,1))
+common_cells = intersect(rownames(cor_E), colnames(cor_E))
+plot(cond_srat$Hep2N.data@meta.data[common_cells,"nFeature_RNA"],
+     cond_srat$data.Reg1.NHep@meta.data[common_cells,"nFeature_RNA"],
+     xlab = "# genes (rep1)", ylab = "# genes (rep2)",
+     main = "# genes = Regenerating")
+common_cells = intersect(rownames(cor_R), colnames(cor_R))
+plot(cond_srat$Hep2R.data@meta.data[common_cells,"nFeature_RNA"],
+     cond_srat$data.Reg1.RHep@meta.data[common_cells,"nFeature_RNA"],
+     xlab = "# genes (rep1)", ylab = "# genes (rep2)", 
+     main = "# genes = Regenerating")
+
+# compare shared expressed genes
+par(mfrow = c(2,1))
+common_cells = intersect(rownames(cor_E), colnames(cor_E))
+giE_l = list()
+for(cc in common_cells){
+  g1 = rownames(cond_srat$Hep2N.data@assays$RNA@counts)[cond_srat$Hep2N.data@assays$RNA@counts[,cc]>0]
+  g2 = rownames(cond_srat$data.Reg1.NHep@assays$RNA@counts)[cond_srat$data.Reg1.NHep@assays$RNA@counts[,cc]>0]
+  
+  giE_l[[cc]] = length(intersect(g1, g2))/length(union(g1,g2))*100
+}
+plot(unlist(giE_l)[order(unlist(giE_l))], ylab = "% shared genes", xlab = "cells",
+     main = "Replicate shared genes - Embolised")
+
+common_cells = intersect(rownames(cor_R), colnames(cor_R))
+giR_l = list()
+for(cc in common_cells){
+  g1 = rownames(cond_srat$Hep2R.data@assays$RNA@counts)[cond_srat$Hep2R.data@assays$RNA@counts[,cc]>0]
+  g2 = rownames(cond_srat$data.Reg1.RHep@assays$RNA@counts)[cond_srat$data.Reg1.RHep@assays$RNA@counts[,cc]>0]
+  
+  giR_l[[cc]] = length(intersect(g1, g2))/length(union(g1,g2))*100
+}
+plot(unlist(giR_l)[order(unlist(giR_l))], ylab = "% shared genes", xlab = "cells",
+     main = "Replicate shared genes - Regenerating")
+
+dev.off()
+```
