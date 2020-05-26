@@ -16,7 +16,7 @@ load(file = "data/processed/cond_srat_indivclust.RData")
 
 # Merge datasets (here by actually creating a single Seurat object)
 all_cell_l = c(healthy_srat, cond_srat)
-all_cell_srat = merge(all_cell_l[[1]], all_cell_srat[[2]])
+all_cell_srat = merge(all_cell_l[[1]], all_cell_l[[2]])
 for(n in names(all_cell_l)){
   all_cell_srat = merge(all_cell_srat, all_cell_l[[n]])
 }
