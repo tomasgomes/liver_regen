@@ -290,29 +290,69 @@ save(frozen_srat, file = "data/processed/frozen_srat_indivclust.RData")
 
 
 # Integrate datasets
+Integration of large sets of data will be done in batch jobs given the time it takes to run.  
+
 ## Integrate all datasets
-Using Seurat for integration
+Integrate all cell datasets using different methods, using batch scripts  
+
+Seurat Anchors CCA
+  - Script: `run_SeuratIntegration_allcells.R`
+  - Output: `data/processed/scripts_out/SeuratIntegr_allcells.RDS`
+  
+Seurat Anchors rPCA
+  - Script: `run_SeuratIntegrationRPCA_allcells.R`
+  - Output: `data/processed/scripts_out/SeuratIntegrRPCA_allcells.RDS`
+  
+Harmony
+  - Script: `run_HarmonyIntegration_allcells.R`
+  - Output: `data/processed/scripts_out/HarmIntegr_allcells.RDS`
+  
+
 
 ```{r}
-all_cell_srat = c(healthy_srat, cond_srat)
-# find features variable across all individual datasets
-integr_feat = SelectIntegrationFeatures(all_cell_srat, nfeatures = 5000)
-# calculate possible missing Pearson residuals for SCTransform
-all_cell_srat = PrepSCTIntegration(all_cell_srat, anchor.features = integr_feat, verbose = T)
-# finding the anchors for integration - in this case 30 dims should be a good default
-all_cell_anchors = FindIntegrationAnchors(all_cell_srat, normalization.method = "SCT", 
-                                          anchor.features = integr_feat, verbose = T)
-# actual data integration
-all_cell_integr = IntegrateData(all_cell_anchors, normalization.method = "SCT", verbose = F)
-# lets see how it looks
-all_cell_integr = RunPCA(all_cell_integr, verbose = F)
-all_cell_integr = RunUMAP(all_cell_integr, dims = 1:30)
+allcells_harm = readRDS("data/processed/scripts_out/HarmIntegr_allcells.RDS")
+```
+
+
+```{r}
+plt30 = DimPlot(allcells_harm, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:30")
+allcells_harm = RunUMAP(allcells_harm, reduction = "harmony", dims = 1:10)
+plt10 = DimPlot(allcells_harm, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:10")
+allcells_harm = RunUMAP(allcells_harm, reduction = "harmony", dims = 1:50)
+plt50 = DimPlot(allcells_harm, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:50")
 ```
 
 
 
+```{r}
+DimPlot(allcells_harm, reduction = "umap", pt.size = 0.2, 
+        split = "Fraction", group.by = "Name")
+```
+
+
 
 ```{r}
-library(harmony)
+FeaturePlot(allcells_harm, reduction = "umap", pt.size = 0.2,
+            features = c("FGA", "PTPRC", "ANXA4", "CD34", "EPCAM", "C1QB",
+                         "JCHAIN", "APOA1", "nFeature_RNA"))
 ```
+
+
+
+```{r}
+FeaturePlot(allcells_harm, reduction = "harmony", pt.size = 0.2,
+            features = c("FGA", "PTPRC", "ANXA4", "CD34", "EPCAM", "C1QB",
+                         "JCHAIN", "APOA1", "nFeature_RNA"))
+```
+
+
+
+```{r}
+FeaturePlot(allcells_harm, reduction = "harmony", pt.size = 0.15, dims = c(1,2),
+            features = c("FGA", "PTPRC", "ANXA4", "CD34"), split = "Fraction")
+```
+
 
