@@ -33,6 +33,7 @@ library(ggridges)
 library(mixtools)
 library(dplyr)
 library(SoupX)
+library(harmony)
 ```
 
 
@@ -290,7 +291,259 @@ save(frozen_srat, file = "data/processed/frozen_srat_indivclust.RData")
 
 
 # Integrate datasets
-Integration of large sets of data will be done in batch jobs given the time it takes to run.  
+Integration of large sets of data will be done in batch jobs given the time it takes to run. 
+
+## Integrate healthy datasets
+Integrate all cell datasets using different methods, using batch scripts 
+
+Seurat Anchors rPCA
+  - Script: `run_SeuratIntegrationRPCA_allhealthy.R`
+  - Output: `data/processed/scripts_out/SeuratIntegrRPCA_allhealthy.RDS`
+  
+Harmony
+  - Script: `run_HarmonyIntegration_allhealthy.R`
+  - Output: `data/processed/scripts_out/HarmIntegr_allhealthy.RDS`
+
+
+
+### Examine Harmony output
+Load data
+
+```{r}
+hcells_harm = readRDS("data/processed/scripts_out/HarmIntegr_allhealthy.RDS")
+```
+
+Checking how using different numbers of dimensions affects UMAP structure
+
+```{r}
+plt10 = DimPlot(hcells_harm, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:10")
+hcells_harm = RunUMAP(hcells_harm, reduction = "harmony", dims = 1:20, verbose = F)
+plt20 = DimPlot(hcells_harm, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:20")
+hcells_harm = RunUMAP(hcells_harm, reduction = "harmony", dims = 1:25, verbose = F)
+plt25 = DimPlot(hcells_harm, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:25")
+hcells_harm = RunUMAP(hcells_harm, reduction = "harmony", dims = 1:30, verbose = F)
+plt30 = DimPlot(hcells_harm, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:30")
+hcells_harm = RunUMAP(hcells_harm, reduction = "harmony", dims = 1:40, verbose = F)
+plt40 = DimPlot(hcells_harm, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:40")
+hcells_harm = RunUMAP(hcells_harm, reduction = "harmony", dims = 1:50, verbose = F)
+plt50 = DimPlot(hcells_harm, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:50")
+
+png("results/integr_healthy/harmony_umap_dims.png", width = 1200, height = 600)
+cowplot::plot_grid(plt10, plt20, plt25, plt30, plt40, plt50, ncol = 3, nrow = 2, align = "h")
+dev.off()
+```
+
+Run UMAP with chosen number of dimensions
+
+```{r}
+hcells_harm = RunUMAP(hcells_harm, reduction = "harmony", dims = 1:25, verbose = F)
+DimPlot(hcells_harm, reduction = "umap", pt.size = 0.2, 
+        split = "Fraction", group.by = "Name")
+```
+
+How do the different fractions and donors split in the UMAP (50 dims)
+
+```{r}
+png("results/integr_healthy/harmony_umap50_FracDonor.png", width = 900, height = 300)
+DimPlot(hcells_harm, reduction = "umap", pt.size = 0.2, 
+        split = "Fraction", group.by = "Name")
+dev.off()
+```
+
+Plotting general markers
+
+```{r}
+png("results/integr_healthy/harmony_umap50_genMarkers.png", width = 960, height = 900)
+FeaturePlot(hcells_harm, reduction = "umap", pt.size = 0.2,
+            features = c("FGA", "PTPRC", "ANXA4", "CD34", "EPCAM", "C1QB",
+                         "JCHAIN", "APOA1", "nFeature_RNA"))
+dev.off()
+```
+
+Cluster harmony results
+
+```{r}
+hcells_harm = FindNeighbors(hcells_harm, reduction = "harmony", dims = 1:25, force.recalc = T)
+hcells_harm = FindClusters(hcells_harm, algorithm = 2, verbose = F,
+                           resolution = seq(0.2, 1.1, 0.1))
+DimPlot(hcells_harm, reduction = "umap", pt.size = 0.2, label = T,
+        group.by = "SCT_snn_res.0.9")
+```
+
+Harmony seems to put a lot more cells from the HEP fractions together with the NPC fractions. To understand where these cells come from, and whether the same effect can be seen in the Seurat integration, we'll be checking the individual samples and take note which ones would be originally hepatocytes
+Load data (if necessary)
+
+```{r}
+load(file = "data/processed/healthy_srat_indivclust.RData")
+```
+
+For HEP samples, identify cells belonging to the hepatocyte cluster. This is important to understand the merging between fractions
+
+```{r}
+healthy_cl_use = c("sc_H1.EKS.Exp1" = 0.7, "sc_H2.HEP.Exp1" = 0.7, "sc_H3.HEP.Exp1" = 0.5,
+                   "sc_H1.HEP.Exp1" = 0.5,"sc_H2.NPC.Exp1" = 0.7, "sc_H3.NPC.Exp1" = 0.5,
+                   "sc_H1.NPC.Exp1" = 0.7)
+cl_hep = list(c(3), c(0:7), c(0:5), c(0:5, 8, 10), c(8), c(6), c(8))
+names(cl_hep) = names(healthy_cl_use)
+
+DimPlot(healthy_srat$sc_H2.HEP.Exp1, reduction = "umap", 
+        group.by = "SCT_snn_res.0.7", label = T)
+#FeaturePlot(healthy_srat$sc_H1.NPC.Exp1, reduction = "umap", features = "FGA")
+
+cells_nothep = list()
+for(n in names(cl_hep)){
+  cl = paste0("SCT_snn_res.", healthy_cl_use[n])
+  ishep = healthy_srat[[n]]@meta.data[,cl] %in% cl_hep[[n]]
+  cells_nothep[[n]] = paste0(n, "_", rownames(healthy_srat[[n]]@meta.data)[!ishep])
+}
+```
+
+Check where non-hepatocytes are
+
+```{r}
+df_nothep = data.frame(row.names = colnames(hcells_harm),
+                       "nothep" = colnames(hcells_harm) %in% unlist(cells_nothep))
+
+hcells_harm = AddMetaData(hcells_harm, df_nothep)
+
+DimPlot(hcells_harm, reduction = "umap", pt.size = 0.2, label = F,
+        group.by = "nothep", split = "Fraction")+geom_hline(yintercept = 3, linetype = "dashed")
+```
+
+Lets now examine the cells that are not grouped with the large hepatocyte cluster
+
+```{r}
+lower_cells = rownames(hcells_harm@reductions$umap@cell.embeddings)[hcells_harm@reductions$umap@cell.embeddings[,2]<3]
+
+df_lower = data.frame(row.names = colnames(hcells_harm),
+                      "lowercells" = colnames(hcells_harm) %in% lower_cells)
+df_lower$ds = unlist(lapply(strsplit(rownames(df_lower), "_", fixed = T), 
+                            function(x) paste0(x[1:2], collapse = "_")))
+n = "sc_H2.HEP.Exp1"
+df_lower = df_lower[df_lower$ds==n,]
+rownames(df_lower) = unlist(lapply(strsplit(rownames(df_lower), "_"), function(x) x[3]))
+test = AddMetaData(healthy_srat[[n]], df_lower)
+DimPlot(test, reduction = "umap", pt.size = 0.2, label = F,
+        group.by = "lowercells")
+```
+
+As can be seen, these cells still come from the hepatocyte cluster. A look at the markers from the corresponding clusters also revealed hepatocyte genes. In sum, this means that harmony is failing at least some of the integration  
+Lets see if the same effect can be seen with the Seurat integration. Load data
+
+```{r}
+hcells_rpca = readRDS("data/processed/scripts_out/SeuratIntegrRPCA_allhealthy.RDS")
+```
+
+Look at fraction distribution
+
+```{r}
+DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, 
+        split = "Fraction", group.by = "Name")
+```
+
+Look at how the hepatocytes are distributed
+
+```{r}
+cc = unlist(cells_nothep)
+for(x in 1:length(cc)){
+  nn = paste0(unlist(strsplit(cc[x], "_", fixed = T))[1:2], collapse = "_")
+  cell = unlist(strsplit(cc[x], "_", fixed = T))[3]
+  cc[x] = paste0(cell, "_", which(names(healthy_srat)==nn))
+}
+df_nothep = data.frame(row.names = colnames(hcells_rpca),
+                       "nothep" = colnames(hcells_rpca) %in% cc)
+
+hcells_rpca = AddMetaData(hcells_rpca, df_nothep)
+
+DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, label = F,
+        group.by = "nothep", split = "Fraction")
+```
+
+And the non-hepatocyte cells in the harmony integration
+
+```{r}
+cc = unlist(lower_cells)
+for(x in 1:length(cc)){
+  nn = paste0(unlist(strsplit(cc[x], "_", fixed = T))[1:2], collapse = "_")
+  cell = unlist(strsplit(cc[x], "_", fixed = T))[3]
+  cc[x] = paste0(cell, "_", which(names(healthy_srat)==nn))
+}
+df_nothep = data.frame(row.names = colnames(hcells_rpca),
+                       "lowercells" = colnames(hcells_rpca) %in% cc)
+
+hcells_rpca = AddMetaData(hcells_rpca, df_nothep)
+
+DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, label = F,
+        group.by = "lowercells", split = "Fraction")
+```
+
+So we can see that those cells are separate, but still close to the large hepatocyte cluster, which should make this a better integration.
+
+
+
+### Examine Seurat output
+Load data
+
+```{r}
+hcells_rpca = readRDS("data/processed/scripts_out/SeuratIntegrRPCA_allhealthy.RDS")
+```
+
+
+```{r}
+DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, 
+        split = "Fraction", group.by = "Name")
+```
+
+
+```{r}
+cc = unlist(cells_nothep)
+for(x in 1:length(cc)){
+  nn = paste0(unlist(strsplit(cc[x], "_", fixed = T))[1:2], collapse = "_")
+  cell = unlist(strsplit(cc[x], "_", fixed = T))[3]
+  cc[x] = paste0(cell, "_", which(names(healthy_srat)==nn))
+}
+df_nothep = data.frame(row.names = colnames(hcells_rpca),
+                       "nothep" = colnames(hcells_rpca) %in% cc)
+
+hcells_rpca = AddMetaData(hcells_rpca, df_nothep)
+
+DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, label = F,
+        group.by = "nothep", split = "Fraction")
+
+
+cc = unlist(lower_cells)
+for(x in 1:length(cc)){
+  nn = paste0(unlist(strsplit(cc[x], "_", fixed = T))[1:2], collapse = "_")
+  cell = unlist(strsplit(cc[x], "_", fixed = T))[3]
+  cc[x] = paste0(cell, "_", which(names(healthy_srat)==nn))
+}
+df_nothep = data.frame(row.names = colnames(hcells_rpca),
+                       "lowercells" = colnames(hcells_rpca) %in% cc)
+
+hcells_rpca = AddMetaData(hcells_rpca, df_nothep)
+
+DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, label = F,
+        group.by = "lowercells", split = "Fraction")
+```
+
+
+```{r}
+plot_df = t(table(hcells_harm@meta.data$unique_name,
+                hcells_harm@meta.data$SCT_snn_res.0.9))
+plot_df = plot_df/rowSums(plot_df)
+
+pheatmap::pheatmap(t(plot_df), clustering_method = "ward.D2")
+```
+
+
+
+
 
 ## Integrate all datasets
 Integrate all cell datasets using different methods, using batch scripts  
@@ -298,6 +551,7 @@ Integrate all cell datasets using different methods, using batch scripts
 Seurat Anchors CCA
   - Script: `run_SeuratIntegration_allcells.R`
   - Output: `data/processed/scripts_out/SeuratIntegr_allcells.RDS`
+  - Note: This did not work, likely because of too many cells
   
 Seurat Anchors rPCA
   - Script: `run_SeuratIntegrationRPCA_allcells.R`
@@ -306,33 +560,49 @@ Seurat Anchors rPCA
 Harmony
   - Script: `run_HarmonyIntegration_allcells.R`
   - Output: `data/processed/scripts_out/HarmIntegr_allcells.RDS`
-  
 
+
+### Examine Harmony output
+Load data
 
 ```{r}
 allcells_harm = readRDS("data/processed/scripts_out/HarmIntegr_allcells.RDS")
 ```
 
+Checking how using different numbers of dimensions affects UMAP structure
 
 ```{r}
-plt30 = DimPlot(allcells_harm, reduction = "umap", pt.size = 0.2, 
-                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:30")
-allcells_harm = RunUMAP(allcells_harm, reduction = "harmony", dims = 1:10)
 plt10 = DimPlot(allcells_harm, reduction = "umap", pt.size = 0.2, 
                 group.by = "Fraction")+labs(title = "UMAP with Harmony 1:10")
+allcells_harm = RunUMAP(allcells_harm, reduction = "harmony", dims = 1:20)
+plt20 = DimPlot(allcells_harm, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:20")
+allcells_harm = RunUMAP(allcells_harm, reduction = "harmony", dims = 1:25)
+plt25 = DimPlot(allcells_harm, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:25")
+allcells_harm = RunUMAP(allcells_harm, reduction = "harmony", dims = 1:30)
+plt30 = DimPlot(allcells_harm, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:30")
+allcells_harm = RunUMAP(allcells_harm, reduction = "harmony", dims = 1:40)
+plt40 = DimPlot(allcells_harm, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with Harmony 1:40")
 allcells_harm = RunUMAP(allcells_harm, reduction = "harmony", dims = 1:50)
 plt50 = DimPlot(allcells_harm, reduction = "umap", pt.size = 0.2, 
                 group.by = "Fraction")+labs(title = "UMAP with Harmony 1:50")
+
+png("results/integr_allcells/harmony_umap_dims.png", width = 1200, height = 600)
+cowplot::plot_grid(plt10, plt20, plt25, plt30, plt40, plt50, ncol = 3, nrow = 2, align = "h")
+dev.off()
 ```
 
-
+How do the different fractions and conditions split in the UMAP (50 dims)
 
 ```{r}
 DimPlot(allcells_harm, reduction = "umap", pt.size = 0.2, 
-        split = "Fraction", group.by = "Name")
+        split = "Fraction", group.by = "Condition")
 ```
 
-
+Plotting general markers
 
 ```{r}
 FeaturePlot(allcells_harm, reduction = "umap", pt.size = 0.2,
@@ -341,18 +611,22 @@ FeaturePlot(allcells_harm, reduction = "umap", pt.size = 0.2,
 ```
 
 
+### Examine Seurat output
+Load data
 
 ```{r}
-FeaturePlot(allcells_harm, reduction = "harmony", pt.size = 0.2,
-            features = c("FGA", "PTPRC", "ANXA4", "CD34", "EPCAM", "C1QB",
-                         "JCHAIN", "APOA1", "nFeature_RNA"))
+allcells_rpca = readRDS("data/processed/scripts_out/SeuratIntegrRPCA_allcells.RDS")
+```
+
+
+```{r}
+DimPlot(allcells_rpca, reduction = "umap", pt.size = 0.2, 
+        split = "Fraction", group.by = "Name")
 ```
 
 
 
 ```{r}
-FeaturePlot(allcells_harm, reduction = "harmony", pt.size = 0.15, dims = c(1,2),
-            features = c("FGA", "PTPRC", "ANXA4", "CD34"), split = "Fraction")
+FeaturePlot(allcells_rpca, features = c("APOA2", "FGA", "MKI67", "CD34", "ANXA2", "PTPRC"),
+            reduction = "umap")
 ```
-
-

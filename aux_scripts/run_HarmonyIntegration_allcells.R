@@ -20,10 +20,9 @@ if(!file.exists(merged_file)){
   # Merge datasets (here by actually creating a single Seurat object)
   ## this is a long step
   all_cell_l = c(healthy_srat, cond_srat)
-  all_cell_srat = merge(all_cell_l[[1]], all_cell_l[[2]])
-  for(n in names(all_cell_l)){
-    all_cell_srat = merge(all_cell_srat, all_cell_l[[n]])
-  }
+  
+  all_cell_srat = merge(all_cell_l[[1]], all_cell_l[2:length(all_cell_l)], 
+                        add.cell.ids = names(all_cell_l))
   
   saveRDS(all_cell_srat, file = merged_file)
 } else{
@@ -38,14 +37,15 @@ if(!file.exists(merged_file)){
 
 
 # Run PCA on merged object
-all_cell_srat = RunPCA(all_cell_srat, features = rownames(all_cell_srat@assays$SCT@scale.data), 
-                       verbose = FALSE, assay = "SCT")
+all_cell_srat = RunPCA(all_cell_srat, verbose = FALSE, assay = "SCT",
+                       features = rownames(all_cell_srat@assays$SCT@scale.data))
 
 # Run Harmony
-all_cell_srat = RunHarmony(all_cell_srat, "orig.ident", tau = 30, plot_convergence = F, assay.use = "SCT")
+all_cell_srat = RunHarmony(all_cell_srat, "orig.ident", tau = 30, 
+                           plot_convergence = F, assay.use = "SCT")
 
 # Run UMAP on Harmony dimentions
-all_cell_srat = RunUMAP(all_cell_srat, reduction = "harmony", dims = 1:30)
+all_cell_srat = RunUMAP(all_cell_srat, reduction = "harmony", dims = 1:10)
 
 # save output
 saveRDS(all_cell_srat, file = "data/processed/scripts_out/HarmIntegr_allcells.RDS")

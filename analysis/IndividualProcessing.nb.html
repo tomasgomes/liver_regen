@@ -1884,61 +1884,38 @@ runScrublet = function(mat, ncomp = 30L){
 <p>Conditions</p>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxubG9hZChcImRhdGEvSGVhbHRoeS8xZF9wcmVwYXJlZC5yZGF0YVwiKVxubG9hZChcImRhdGEvSGVhbHRoeS8yZF9wcmVwYXJlZC5yZGF0YVwiKVxubG9hZChcImRhdGEvSGVhbHRoeS8zZF9wcmVwYXJlZC5yZGF0YVwiKVxuaGVhbHRoeV9zcmF0ID0gbGlzdCgpXG5mb3Iob2JqIGluIGxzKClbZ3JlcGwoXCIuZGF0YVwiLCBscygpKV0pe1xuICBkb3ViX2RmID0gdHJ5Q2F0Y2goe3J1blNjcnVibGV0KGdldChvYmopKX0sIFxuICAgICAgICAgICAgICAgICAgICAgZXJyb3IgPSBmdW5jdGlvbihlKXtydW5TY3J1YmxldChnZXQob2JqKSwgbmNvbXAgPSAyMEwpfSwgXG4gICAgICAgICAgICAgICAgICAgIGZpbmFsbHkgPSB7cHJpbnQob2JqKX0pXG4gIGhlYWx0aHlfc3JhdFtbb2JqXV0gPSBDcmVhdGVTZXVyYXRPYmplY3QoZ2V0KG9iaiksIHByb2plY3QgPSBvYmosIG1ldGEuZGF0YSA9IGRvdWJfZGYpXG4gIHJtKGxpc3QgPSBvYmopXG59XG5gYGAifQ== -->
-<pre class="r"><code>load(&quot;data/Healthy/1d_prepared.rdata&quot;)
-load(&quot;data/Healthy/2d_prepared.rdata&quot;)
-load(&quot;data/Healthy/3d_prepared.rdata&quot;)
-healthy_srat = list()
-for(obj in ls()[grepl(&quot;.data&quot;, ls())]){
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxubG9hZChcImRhdGEvQ29uZGl0aW9ucy9Eb25vcl8xL3ByZXBhcmVkX2xpdl9yZWcxLnJkYXRhXCIpXG5ybShIZXAyTi5kYXRhLCBIZXAyUi5kYXRhKVxubG9hZChcImRhdGEvQ29uZGl0aW9ucy9Eb25vcl8xL3NjX0UxX21lcmdlZEhlcDIucmRhdGFcIilcbmxvYWQoXCJkYXRhL0NvbmRpdGlvbnMvRG9ub3JfMS9zY19SMV9tZXJnZWRIZXAyLnJkYXRhXCIpXG5sb2FkKFwiZGF0YS9Db25kaXRpb25zL0Rvbm9yXzIvcHJlcGFyZWRfbGl2X2hlcFJhbmROXzJkLnJkYXRhXCIpXG5sb2FkKFwiZGF0YS9Db25kaXRpb25zL0Rvbm9yXzIvcHJlcGFyZWRfbGl2X05QQ19SYW5kTl8yZC5yZGF0YVwiKVxubG9hZChcImRhdGEvQ29uZGl0aW9ucy9Eb25vcl8zL3ByZXBhcmVkX2xpdl9oZXBFXzNkLnJkYXRhXCIpXG5sb2FkKFwiZGF0YS9Db25kaXRpb25zL0Rvbm9yXzMvcHJlcGFyZWRfbGl2X2hlcFJfM2QucmRhdGFcIilcbmxvYWQoXCJkYXRhL0NvbmRpdGlvbnMvRG9ub3JfMy9wcmVwYXJlZF9saXZfTlBDX0VfM2QucmRhdGFcIilcbmxvYWQoXCJkYXRhL0NvbmRpdGlvbnMvRG9ub3JfMy9wcmVwYXJlZF9saXZfTlBDX3JfM2QucmRhdGFcIilcbmxvYWQoXCJkYXRhL0NvbmRpdGlvbnMvRG9ub3JfNS9EYXRhLlJlZzVfSGVwRS5yZGF0YVwiKVxubG9hZChcImRhdGEvQ29uZGl0aW9ucy9Eb25vcl81L0RhdGEuUmVnNV9IZXBSLnJkYXRhXCIpXG5sb2FkKFwiZGF0YS9Db25kaXRpb25zL0Rvbm9yXzUvRGF0YS5SZWc1X25wY0UucmRhdGFcIilcbmxvYWQoXCJkYXRhL0NvbmRpdGlvbnMvRG9ub3JfNS9EYXRhLlJlZzVfbnBjUi5yZGF0YVwiKVxubG9hZChcImRhdGEvQ29uZGl0aW9ucy9Eb25vcl82L0RhdGEuUmVnNl9IZXBFLnJkYXRhXCIpXG5sb2FkKFwiZGF0YS9Db25kaXRpb25zL0Rvbm9yXzYvRGF0YS5SZWc2X0hlcFIucmRhdGFcIilcbmxvYWQoXCJkYXRhL0NvbmRpdGlvbnMvRG9ub3JfNi9EYXRhLlJlZzZfbnBjRS5yZGF0YVwiKVxubG9hZChcImRhdGEvQ29uZGl0aW9ucy9Eb25vcl82L0RhdGEuUmVnNl9ucGNSLnJkYXRhXCIpXG5sb2FkKFwiZGF0YS9Db25kaXRpb25zL0Rvbm9yXzcvRGF0YS5SZWc3X0hlcEUucmRhdGFcIilcbmxvYWQoXCJkYXRhL0NvbmRpdGlvbnMvRG9ub3JfNy9EYXRhLlJlZzdfSGVwUi5yZGF0YVwiKVxubG9hZChcImRhdGEvQ29uZGl0aW9ucy9Eb25vcl83L0RhdGEuUmVnN19ucGNFLnJkYXRhXCIpXG5sb2FkKFwiZGF0YS9Db25kaXRpb25zL0Rvbm9yXzcvRGF0YS5SZWc3X25wY1IucmRhdGFcIilcbmNvbmRfc3JhdCA9IGxpc3QoKVxuZm9yKG9iaiBpbiBscygpW2dyZXBsKFwiYXRhXCIsIGxzKCkpXSl7XG4gIGRvdWJfZGYgPSB0cnlDYXRjaCh7cnVuU2NydWJsZXQoZ2V0KG9iaikpfSwgXG4gICAgICAgICAgICAgICAgICAgICBlcnJvciA9IGZ1bmN0aW9uKGUpe3J1blNjcnVibGV0KGdldChvYmopLCBuY29tcCA9IDIwTCl9LCBcbiAgICAgICAgICAgICAgICAgICAgZmluYWxseSA9IHtwcmludChvYmopfSlcbiAgY29uZF9zcmF0W1tvYmpdXSA9IENyZWF0ZVNldXJhdE9iamVjdChnZXQob2JqKSwgcHJvamVjdCA9IG9iaiwgbWV0YS5kYXRhID0gZG91Yl9kZilcbiAgcm0obGlzdCA9IG9iailcbn1cbmBgYCJ9 -->
+<pre class="r"><code>load(&quot;data/Conditions/Donor_1/prepared_liv_reg1.rdata&quot;)
+rm(Hep2N.data, Hep2R.data)
+load(&quot;data/Conditions/Donor_1/sc_E1_mergedHep2.rdata&quot;)
+load(&quot;data/Conditions/Donor_1/sc_R1_mergedHep2.rdata&quot;)
+load(&quot;data/Conditions/Donor_2/prepared_liv_hepRandN_2d.rdata&quot;)
+load(&quot;data/Conditions/Donor_2/prepared_liv_NPC_RandN_2d.rdata&quot;)
+load(&quot;data/Conditions/Donor_3/prepared_liv_hepE_3d.rdata&quot;)
+load(&quot;data/Conditions/Donor_3/prepared_liv_hepR_3d.rdata&quot;)
+load(&quot;data/Conditions/Donor_3/prepared_liv_NPC_E_3d.rdata&quot;)
+load(&quot;data/Conditions/Donor_3/prepared_liv_NPC_r_3d.rdata&quot;)
+load(&quot;data/Conditions/Donor_5/Data.Reg5_HepE.rdata&quot;)
+load(&quot;data/Conditions/Donor_5/Data.Reg5_HepR.rdata&quot;)
+load(&quot;data/Conditions/Donor_5/Data.Reg5_npcE.rdata&quot;)
+load(&quot;data/Conditions/Donor_5/Data.Reg5_npcR.rdata&quot;)
+load(&quot;data/Conditions/Donor_6/Data.Reg6_HepE.rdata&quot;)
+load(&quot;data/Conditions/Donor_6/Data.Reg6_HepR.rdata&quot;)
+load(&quot;data/Conditions/Donor_6/Data.Reg6_npcE.rdata&quot;)
+load(&quot;data/Conditions/Donor_6/Data.Reg6_npcR.rdata&quot;)
+load(&quot;data/Conditions/Donor_7/Data.Reg7_HepE.rdata&quot;)
+load(&quot;data/Conditions/Donor_7/Data.Reg7_HepR.rdata&quot;)
+load(&quot;data/Conditions/Donor_7/Data.Reg7_npcE.rdata&quot;)
+load(&quot;data/Conditions/Donor_7/Data.Reg7_npcR.rdata&quot;)
+cond_srat = list()
+for(obj in ls()[grepl(&quot;ata&quot;, ls())]){
   doub_df = tryCatch({runScrublet(get(obj))}, 
                      error = function(e){runScrublet(get(obj), ncomp = 20L)}, 
                     finally = {print(obj)})
-  healthy_srat[[obj]] = CreateSeuratObject(get(obj), project = obj, meta.data = doub_df)
+  cond_srat[[obj]] = CreateSeuratObject(get(obj), project = obj, meta.data = doub_df)
   rm(list = obj)
 }</code></pre>
 <!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiWzFdIFwiRUtTLmRhdGFcIlxuIn0= -->
-<pre><code>[1] &quot;EKS.data&quot;</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiRmVhdHVyZSBuYW1lcyBjYW5ub3QgaGF2ZSB1bmRlcnNjb3JlcyAoJ18nKSwgcmVwbGFjaW5nIHdpdGggZGFzaGVzICgnLScpXG4ifQ== -->
-<pre><code>Feature names cannot have underscores ('_'), replacing with dashes ('-')</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiWzFdIFwiSGVwLjJkLmRhdGFcIlxuIn0= -->
-<pre><code>[1] &quot;Hep.2d.data&quot;</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiRmVhdHVyZSBuYW1lcyBjYW5ub3QgaGF2ZSB1bmRlcnNjb3JlcyAoJ18nKSwgcmVwbGFjaW5nIHdpdGggZGFzaGVzICgnLScpXG4ifQ== -->
-<pre><code>Feature names cannot have underscores ('_'), replacing with dashes ('-')</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiWzFdIFwiSGVwLjNkLmRhdGFcIlxuIn0= -->
-<pre><code>[1] &quot;Hep.3d.data&quot;</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiRmVhdHVyZSBuYW1lcyBjYW5ub3QgaGF2ZSB1bmRlcnNjb3JlcyAoJ18nKSwgcmVwbGFjaW5nIHdpdGggZGFzaGVzICgnLScpXG4ifQ== -->
-<pre><code>Feature names cannot have underscores ('_'), replacing with dashes ('-')</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiWzFdIFwiSEVQLmRhdGFcIlxuIn0= -->
-<pre><code>[1] &quot;HEP.data&quot;</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiRmVhdHVyZSBuYW1lcyBjYW5ub3QgaGF2ZSB1bmRlcnNjb3JlcyAoJ18nKSwgcmVwbGFjaW5nIHdpdGggZGFzaGVzICgnLScpXG4ifQ== -->
-<pre><code>Feature names cannot have underscores ('_'), replacing with dashes ('-')</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiWzFdIFwiTlBDLjJkLmRhdGFcIlxuIn0= -->
-<pre><code>[1] &quot;NPC.2d.data&quot;</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiRmVhdHVyZSBuYW1lcyBjYW5ub3QgaGF2ZSB1bmRlcnNjb3JlcyAoJ18nKSwgcmVwbGFjaW5nIHdpdGggZGFzaGVzICgnLScpXG4ifQ== -->
-<pre><code>Feature names cannot have underscores ('_'), replacing with dashes ('-')</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiWzFdIFwiTlBDLjNkLmRhdGFcIlxuIn0= -->
-<pre><code>[1] &quot;NPC.3d.data&quot;</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiRmVhdHVyZSBuYW1lcyBjYW5ub3QgaGF2ZSB1bmRlcnNjb3JlcyAoJ18nKSwgcmVwbGFjaW5nIHdpdGggZGFzaGVzICgnLScpXG4ifQ== -->
-<pre><code>Feature names cannot have underscores ('_'), replacing with dashes ('-')</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiWzFdIFwiTlBDLmRhdGFcIlxuIn0= -->
-<pre><code>[1] &quot;NPC.data&quot;</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiRmVhdHVyZSBuYW1lcyBjYW5ub3QgaGF2ZSB1bmRlcnNjb3JlcyAoJ18nKSwgcmVwbGFjaW5nIHdpdGggZGFzaGVzICgnLScpXG4ifQ== -->
-<pre><code>Feature names cannot have underscores ('_'), replacing with dashes ('-')</code></pre>
-<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 <p>Frozen (nuclei)</p>

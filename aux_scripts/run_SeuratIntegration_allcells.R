@@ -1,5 +1,6 @@
 # RUN SEURAT INTEGRATION ON ALL DATASETS
-# RUNTIME: ~7h
+# RUNTIME: ???
+# This script did not work, likely because there are too many cells. Use rPCA instead.
 
 
 

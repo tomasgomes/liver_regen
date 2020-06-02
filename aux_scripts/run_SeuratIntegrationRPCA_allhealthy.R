@@ -1,5 +1,5 @@
 # RUN SEURAT INTEGRATION ON ALL DATASETS WITH rPCA
-# RUNTIME: ~4h
+# RUNTIME: ~45min
 
 
 
@@ -11,26 +11,23 @@ setwd("..") # project head directory
 
 # Load datasets
 load(file = "data/processed/healthy_srat_indivclust.RData")
-load(file = "data/processed/cond_srat_indivclust.RData")
-
-# Merge datasets
-all_cell_srat = c(healthy_srat, cond_srat)
 
 # find features variable across all individual datasets
-integr_feat = SelectIntegrationFeatures(all_cell_srat, nfeatures = 5000)
+integr_feat = SelectIntegrationFeatures(healthy_srat, nfeatures = 5000)
 
 # calculate possible missing Pearson residuals for SCTransform
-all_cell_srat = PrepSCTIntegration(all_cell_srat, anchor.features = integr_feat, verbose = T)
+healthy_srat = PrepSCTIntegration(healthy_srat, anchor.features = integr_feat, verbose = T)
 
-all_cell_srat <- lapply(X = all_cell_srat, FUN = function(x) {
+healthy_srat <- lapply(X = healthy_srat, FUN = function(x) {
   x <- ScaleData(x, features = integr_feat, verbose = FALSE)
   x <- RunPCA(x, features = integr_feat, verbose = FALSE)
 })
 
+
 # finding the anchors for integration
-all_cell_anchors = FindIntegrationAnchors(all_cell_srat, normalization.method = "SCT", 
+all_cell_anchors = FindIntegrationAnchors(healthy_srat, normalization.method = "SCT", 
                                           anchor.features = integr_feat, reduction = "rpca",
-                                          assay = rep("SCT", length(all_cell_srat)), 
+                                          assay = rep("SCT", length(healthy_srat)), 
                                           dims = 1:50, verbose = T)
 
 # actual data integration
@@ -43,5 +40,4 @@ all_cell_integr = RunPCA(all_cell_integr, verbose = F)
 all_cell_integr = RunUMAP(all_cell_integr, dims = 1:30)
 
 # save output
-saveRDS(all_cell_anchors, file = "data/processed/scripts_out/SeuratIntegrRPCA_allcells_anchors.RDS")
-saveRDS(all_cell_integr, file = "data/processed/scripts_out/SeuratIntegrRPCA_allcells.RDS")
+saveRDS(all_cell_integr, file = "data/processed/scripts_out/SeuratIntegrRPCA_allhealthy.RDS")
