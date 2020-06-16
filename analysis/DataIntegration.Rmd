@@ -58,7 +58,7 @@ basicSeurat2 = function(obj, npcs = 60){
   # normalise and PCA-UMAP
   obj = suppressWarnings(SCTransform(obj, do.correct.umi = T, verbose = F,
                                      vars.to.regress = "nCount_RNA",
-                                     variable.features.rv.th = 1,
+                                     variable.features.rv.th = 1, 
                                      return.only.var.genes = F,
                                      variable.features.n = NULL, seed.use = 1))
   obj = RunPCA(obj, npcs = npcs, verbose = F)
@@ -343,11 +343,10 @@ Run UMAP with chosen number of dimensions
 
 ```{r}
 hcells_harm = RunUMAP(hcells_harm, reduction = "harmony", dims = 1:25, verbose = F)
-DimPlot(hcells_harm, reduction = "umap", pt.size = 0.2, 
-        split = "Fraction", group.by = "Name")
+DimPlot(hcells_harm, reduction = "umap", pt.size = 0.2, group.by = "Fraction")
 ```
 
-How do the different fractions and donors split in the UMAP (50 dims)
+How do the different fractions and donors split in the UMAP
 
 ```{r}
 png("results/integr_healthy/harmony_umap50_FracDonor.png", width = 900, height = 300)
@@ -494,52 +493,407 @@ Load data
 hcells_rpca = readRDS("data/processed/scripts_out/SeuratIntegrRPCA_allhealthy.RDS")
 ```
 
+Checking how using different numbers of dimensions affects UMAP structure
 
 ```{r}
+hcells_rpca = RunUMAP(hcells_rpca, dims = 1:30, verbose = F)
+plt30 = DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:30")
+
+hcells_rpca = RunUMAP(hcells_rpca, dims = 1:20, verbose = F)
+plt20 = DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:20")
+
+hcells_rpca = RunUMAP(hcells_rpca, dims = 1:25, verbose = F)
+plt25 = DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:25")
+
+hcells_rpca = RunUMAP(hcells_rpca, dims = 1:10, verbose = F)
+plt10 = DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:10")
+
+hcells_rpca = RunUMAP(hcells_rpca, dims = 1:40, verbose = F)
+plt40 = DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:40")
+
+hcells_rpca = RunUMAP(hcells_rpca, dims = 1:50, verbose = F)
+plt50 = DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:50")
+
+png("results/integr_healthy/seurat_umap_dims.png", width = 1200, height = 600)
+cowplot::plot_grid(plt10, plt20, plt25, plt30, plt40, plt50, ncol = 3, nrow = 2, align = "h")
+dev.off()
+```
+
+Checking how using different numbers of dimensions affects t-SNE structure
+
+```{r}
+hcells_rpca = RunTSNE(hcells_rpca, dims = 1:30, verbose = F, perplexity = 25)
+plt30 = DimPlot(hcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:30")
+
+hcells_rpca = RunTSNE(hcells_rpca, dims = 1:20, verbose = F, perplexity = 25)
+plt20 = DimPlot(hcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:20")
+
+hcells_rpca = RunTSNE(hcells_rpca, dims = 1:25, verbose = F, perplexity = 25)
+plt25 = DimPlot(hcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:25")
+
+hcells_rpca = RunTSNE(hcells_rpca, dims = 1:10, verbose = F, perplexity = 25)
+plt10 = DimPlot(hcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:10")
+
+hcells_rpca = RunTSNE(hcells_rpca, dims = 1:40, verbose = F, perplexity = 25)
+plt40 = DimPlot(hcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:40")
+
+hcells_rpca = RunTSNE(hcells_rpca, dims = 1:50, verbose = F, perplexity = 25)
+plt50 = DimPlot(hcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:50")
+
+png("results/integr_healthy/seurat_tsne_dims.png", width = 1200, height = 600)
+cowplot::plot_grid(plt10, plt20, plt25, plt30, plt40, plt50, ncol = 3, nrow = 2, align = "h")
+dev.off()
+```
+
+Choose final dimensions
+
+```{r}
+hcells_rpca = RunUMAP(hcells_rpca, dims = 1:40, verbose = F)
+hcells_rpca = RunTSNE(hcells_rpca, dims = 1:40, verbose = F, perplexity = 25)
+```
+
+Plot fractions and donors
+
+```{r}
+png("results/integr_healthy/seurat_umap50_FracDonor.png", width = 900, height = 300)
 DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, 
         split = "Fraction", group.by = "Name")
+dev.off()
+```
+
+Cluster Seurat results
+
+```{r}
+hcells_rpca = FindNeighbors(hcells_rpca, reduction = "pca", dims = 1:40, 
+                            force.recalc = T, graph.name = "pc40")
+hcells_rpca = FindClusters(hcells_rpca, algorithm = 2, verbose = F, graph.name = "pc40",
+                           resolution = seq(0.1, 1.1, 0.1))
+
+hcells_rpca = FindNeighbors(hcells_rpca, reduction = "pca", dims = 1:25, 
+                            force.recalc = T, graph.name = "pc25")
+hcells_rpca = FindClusters(hcells_rpca, algorithm = 2, verbose = F, graph.name = "pc25",
+                           resolution = seq(0.1, 1.1, 0.1))
+
+umap_list = list()
+tsne_list = list()
+for(i in seq(0.3, 0.9, 0.1)){
+  n = paste0("res.",i)
+  umap_list[[n]] = DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, 
+                           label = T, group.by = paste0("pc40_", n)) + labs(title = n)
+  tsne_list[[n]] = DimPlot(hcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                           label = T, group.by = paste0("pc40_", n)) + labs(title = n)
+}
+umap_list[["phase"]] = DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, 
+                               label = T, group.by = "Phase") + labs(title = "CC phase")
+tsne_list[["phase"]] = DimPlot(hcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                               label = T, group.by = "Phase") + labs(title = "CC phase")
+
+
+png("results/integr_healthy/seurat_tsne_cluster.png", width = 1600, height = 700)
+cowplot::plot_grid(plotlist = tsne_list, ncol = 4, nrow = 2, align = "hv")
+dev.off()
+png("results/integr_healthy/seurat_umap_cluster.png", width = 1600, height = 700)
+cowplot::plot_grid(plotlist = umap_list, ncol = 4, nrow = 2, align = "hv")
+dev.off()
+```
+
+Get markers for some clusters. We'll be using SCT-normalised data rather than integrated, given that the latter does not include all genes.  
+THIS IS VERY SLOW (1 day)
+
+```{r}
+markers_sct_list = list()
+#markers_int_list = list()
+for(i in seq(0.3, 0.9, 0.1)){
+  n = paste0("res_", i)
+  print(n)
+  hcells_rpca = SetIdent(hcells_rpca, value = paste0("pc40_res.", i))
+  markers_sct_list[[n]] = FindAllMarkers(hcells_rpca, assay = "SCT", test.use = "wilcox",
+                                         pseudocount.use = 0.1, logfc.threshold = 0.2, 
+                                         verbose = F)
+  #markers_int_list[[n]] = FindAllMarkers(hcells_rpca, assay = "integrated", 
+  #                                       test.use = "wilcox", pseudocount.use = 0.1, 
+  #                                       logfc.threshold = 0.2, verbose = F)
+}
+saveRDS(markers_sct_list, file = "results/integr_healthy/mrk_sct_list.RDS")
+#saveRDS(markers_int_list, file = "results/integr_healthy/mrk_int_list.RDS")
+```
+
+Specific one on one comparisons
+
+```{r}
+hcells_rpca = SetIdent(hcells_rpca, value = "pc40_res.0.7")
+markers_1v1_list = list()
+
+cl_comb = combn(c("14", "20", "21"), 2)
+for(i in 1:ncol(cl_comb)){
+  n = paste0(cl_comb[1,i], "vs", cl_comb[2,i])
+  markers_1v1_list[[n]] = FindMarkers(hcells_rpca, assay = "SCT", test.use = "wilcox",
+                                      ident.1 = cl_comb[1,i], ident.2 = cl_comb[2,i], 
+                                      pseudocount.use = 0.1, logfc.threshold = 0.2, 
+                                      verbose = F)
+}
+
+cl_comb = combn(c("2", "12", "13", "16"), 2)
+for(i in 1:ncol(cl_comb)){
+  n = paste0(cl_comb[1,i], "vs", cl_comb[2,i])
+  markers_1v1_list[[n]] = FindMarkers(hcells_rpca, assay = "SCT", test.use = "wilcox",
+                                      ident.1 = cl_comb[1,i], ident.2 = cl_comb[2,i], 
+                                      pseudocount.use = 0.1, logfc.threshold = 0.2, 
+                                      verbose = F)
+}
+
+cl_comb = combn(c("16", "17", "19"), 2)
+for(i in 1:ncol(cl_comb)){
+  n = paste0(cl_comb[1,i], "vs", cl_comb[2,i])
+  markers_1v1_list[[n]] = FindMarkers(hcells_rpca, assay = "SCT", test.use = "wilcox",
+                                      ident.1 = cl_comb[1,i], ident.2 = cl_comb[2,i], 
+                                      pseudocount.use = 0.1, logfc.threshold = 0.2, 
+                                      verbose = F)
+}
+```
+
+Plotting hepatocyte zonation markers
+
+```{r}
+gfresh=c("CYP3A4", "CYP2E1", "GADD45G", "CYP1A2", "GLUL", "HAMP", "SAA2", "SAA1", "CRP", "NNMT", "IGFBP2", "KLF6")
+hep_cells = hcells_rpca[,hcells_rpca@meta.data$names_major=="Hepatocytes"]
+VlnPlot(hep_cells, features = gfresh, group.by = "names_clusters", 
+        pt.size = 0, sort = "increasing")
+hep_cells = FindVariableFeatures(hep_cells, verbose = F)
+hep_cells = RunPCA(hep_cells, verbose = F)
+hep_cells = RunUMAP(hep_cells, dims = 1:20)
+DimPlot(hep_cells, reduction = "umap", group.by = "names_clusters")
+FeaturePlot(hep_cells, features = gfresh, pt.size = 0.6)
+```
+
+We will also do some subclustering.  
+Cluster 13 can be split into two clusters - one of actual endothelial cells, and another of T cell-endothelial cell doublets. 
+
+```{r}
+# subcluster 13
+cl = "13"
+sub_srat = hcells_rpca[,hcells_rpca@meta.data$pc40_res.0.7==cl]
+sub_srat = RunPCA(sub_srat, verbose = F)
+sub_srat = RunUMAP(sub_srat, dims = 1:20, verbose = F)
+pltna = DimPlot(sub_srat, reduction = "umap", group.by = "Name")
+
+sub_srat = FindNeighbors(sub_srat, reduction = "pca", dims = 1:20, 
+                         force.recalc = T, graph.name = "c13pc10")
+sub_srat = FindClusters(sub_srat, algorithm = 2, verbose = F, graph.name = "c13pc10",
+                        resolution = seq(0.1, 0.5, 0.1))
+pltcl = DimPlot(sub_srat, reduction = "umap", group.by = "c13pc10_res.0.3")
+
+png("results/integr_healthy/seurat_umap_cluster13_sub.png", width = 800, height = 350)
+cowplot::plot_grid(pltna, pltcl, ncol = 2, nrow = 1, align = "hv")
+dev.off()
+
+sub_srat = SetIdent(sub_srat, value = "c13pc10_res.0.3")
+DefaultAssay(sub_srat) = "SCT"
+mk_sub13 = FindMarkers(sub_srat, assay = "SCT", test.use = "wilcox",
+                     ident.1 = "0", ident.2 = "1", 
+                     pseudocount.use = 0.1, logfc.threshold = 0.2, 
+                     verbose = T)
+mk_sub13 = mk_sub13[mk_sub13$p_val_adj<=0.05,]
+write.csv(x = cbind(rownames(mk_sub13), mk_sub13), col.names = T, row.names = T, quote = F,
+          file = "results/integr_healthy/cluster13_sub_markers.csv")
+
+# create new labels (required for next step)
+cl13_endo = rownames(sub_srat@meta.data)[sub_srat@meta.data$c13pc10_res.0.3=="0"]
+cl13_t = rownames(sub_srat@meta.data)[sub_srat@meta.data$c13pc10_res.0.3=="1"]
+healthy_cl = as.character(hcells_rpca@meta.data$pc40_res.0.7)
+healthy_cl[rownames(hcells_rpca@meta.data) %in% cl13_endo] = "13_endo"
+healthy_cl[rownames(hcells_rpca@meta.data) %in% cl13_t] = "13_t"
+```
+
+Cluster 14 can be subclustered into ab T cells and gd T cells.
+
+```{r}
+# subcluster 14
+cl = "14"
+sub_srat = hcells_rpca[,healthy_cl==cl]
+sub_srat = RunPCA(sub_srat, verbose = F)
+sub_srat = RunUMAP(sub_srat, dims = 1:20, verbose = F)
+pltna = DimPlot(sub_srat, reduction = "umap", group.by = "Name")
+
+sub_srat = FindNeighbors(sub_srat, reduction = "pca", dims = 1:20, 
+                         force.recalc = T, graph.name = "c14pc10")
+sub_srat = FindClusters(sub_srat, algorithm = 2, verbose = F, graph.name = "c14pc10",
+                        resolution = seq(0.1, 0.5, 0.1))
+pltcl = DimPlot(sub_srat, reduction = "umap", group.by = "c14pc10_res.0.3")
+png("results/integr_healthy/seurat_umap_cluster14_sub.png", width = 800, height = 350)
+cowplot::plot_grid(pltna, pltcl, ncol = 2, nrow = 1, align = "hv")
+dev.off()
+
+sub_srat = SetIdent(sub_srat, value = "c14pc10_res.0.3")
+DefaultAssay(sub_srat) = "SCT"
+mk_sub14 = FindAllMarkers(sub_srat, assay = "SCT", test.use = "wilcox",
+                          pseudocount.use = 0.1, logfc.threshold = 0.2, 
+                          verbose = T)
+mk_sub14 = mk_sub14[mk_sub14$p_val_adj<=0.05,]
+write.csv(x = mk_sub14, col.names = T, row.names = T, quote = F,
+          file = "results/integr_healthy/cluster14_sub_markers.csv")
+
+cl14_ab = rownames(sub_srat@meta.data)[sub_srat@meta.data$c14pc10_res.0.3=="0"]
+cl14_gd = rownames(sub_srat@meta.data)[sub_srat@meta.data$c14pc10_res.0.3=="1"]
+healthy_cl[rownames(hcells_rpca@meta.data) %in% cl14_ab] = "14_abTcell"
+healthy_cl[rownames(hcells_rpca@meta.data) %in% cl14_gd] = "14_gdTcell"
+```
+
+Cluster 20 - we can observe dividing monocytes and T cells
+
+```{r}
+# subcluster 20
+cl = "20"
+sub_srat = hcells_rpca[,healthy_cl==cl]
+sub_srat = RunPCA(sub_srat, verbose = F)
+sub_srat = RunUMAP(sub_srat, dims = 1:10, verbose = F)
+pltna = DimPlot(sub_srat, reduction = "umap", group.by = "Name")
+
+sub_srat = FindNeighbors(sub_srat, reduction = "pca", dims = 1:10, 
+                         force.recalc = T, graph.name = "c20pc10")
+sub_srat = FindClusters(sub_srat, algorithm = 2, verbose = F, graph.name = "c20pc10",
+                        resolution = seq(0.1, 0.5, 0.1))
+pltcl = DimPlot(sub_srat, reduction = "umap", group.by = "c20pc10_res.0.3")
+png("results/integr_healthy/seurat_umap_cluster20_sub.png", width = 800, height = 350)
+cowplot::plot_grid(pltna, pltcl, ncol = 2, nrow = 1, align = "hv")
+dev.off()
+
+sub_srat = SetIdent(sub_srat, value = "c20pc10_res.0.3")
+DefaultAssay(sub_srat) = "SCT"
+mk_sub20 = FindAllMarkers(sub_srat, assay = "SCT", test.use = "wilcox",
+                          pseudocount.use = 0.1, logfc.threshold = 0.2, 
+                          verbose = T)
+mk_sub20 = mk_sub20[mk_sub20$p_val_adj<=0.05,]
+write.csv(x = mk_sub20, col.names = T, row.names = T, quote = F,
+          file = "results/integr_healthy/cluster20_sub_markers.csv")
+
+cl20_t = rownames(sub_srat@meta.data)[sub_srat@meta.data$c20pc10_res.0.3=="0"]
+cl20_m = rownames(sub_srat@meta.data)[sub_srat@meta.data$c20pc10_res.0.3=="1"]
+healthy_cl[rownames(hcells_rpca@meta.data) %in% cl20_t] = "20_Tcell"
+healthy_cl[rownames(hcells_rpca@meta.data) %in% cl20_m] = "20_mono"
+```
+
+Add new clusters to metadata along with their names add names
+
+```{r}
+names_clusters = ifelse(healthy_cl=="0", "Cholangiocytes", 
+                        ifelse(healthy_cl=="1", "Hepatocytes_1", 
+                        ifelse(healthy_cl=="2", "LSEC central vein", 
+                        ifelse(healthy_cl=="3", "Hepatocytes_2", 
+                        ifelse(healthy_cl=="4", "cDCs", 
+                        ifelse(healthy_cl=="5", "Kupffer cells", 
+                        ifelse(healthy_cl=="6", "Hepatocytes_3", 
+                        ifelse(healthy_cl=="7", "Hepatocytes_4", 
+                        ifelse(healthy_cl=="8", "Hepatocytes_5", 
+                        ifelse(healthy_cl=="9", "Hepatocytes_6", 
+                        ifelse(healthy_cl=="10", "Hepatocytes_7", 
+                        ifelse(healthy_cl=="11", "Hepatocytes_8", 
+                        ifelse(healthy_cl=="12", "Periportal LSEC", 
+                        ifelse(healthy_cl=="13_endo", "Portal Endothelial cells", 
+                        ifelse(healthy_cl=="13_t", "T cell-Endothelial interaction", 
+                        ifelse(healthy_cl=="14_abTcell", "ab-T cells", 
+                        ifelse(healthy_cl=="14_gdTcell", "gd-T cells_1", 
+                        ifelse(healthy_cl=="15", "Hepatocytes_9", 
+                        ifelse(healthy_cl=="16", "Macrophage-Endothelial interaction", 
+                        ifelse(healthy_cl=="17", "Macrophages", 
+                        ifelse(healthy_cl=="18", "Plasmablasts", 
+                        ifelse(healthy_cl=="19", "pDCs", 
+                        ifelse(healthy_cl=="20_Tcell", "Dividing T cells",
+                        ifelse(healthy_cl=="20_mono", "Dividing monocytes",
+                        ifelse(healthy_cl=="21", "gd-T cells_2", 
+                        ifelse(healthy_cl=="22", "Stellate cells", "ERROR"
+                        ))))))))))))))))))))))))))
+
+names_major = ifelse(healthy_cl=="0", "Cholangiocytes", 
+                      ifelse(healthy_cl=="1", "Hepatocytes", 
+                      ifelse(healthy_cl=="2", "Endothelial cells", 
+                      ifelse(healthy_cl=="3", "Hepatocytes", 
+                      ifelse(healthy_cl=="4", "Dendritic cells", 
+                      ifelse(healthy_cl=="5", "Myeloid cells", 
+                      ifelse(healthy_cl=="6", "Hepatocytes", 
+                      ifelse(healthy_cl=="7", "Hepatocytes", 
+                      ifelse(healthy_cl=="8", "Hepatocytes", 
+                      ifelse(healthy_cl=="9", "Hepatocytes", 
+                      ifelse(healthy_cl=="10", "Hepatocytes", 
+                      ifelse(healthy_cl=="11", "Hepatocytes", 
+                      ifelse(healthy_cl=="12", "Endothelial cells", 
+                      ifelse(healthy_cl=="13_endo", "Endothelial cells", 
+                      ifelse(healthy_cl=="13_t", "Doublets", 
+                      ifelse(healthy_cl=="14_abTcell", "Lymphocytes", 
+                      ifelse(healthy_cl=="14_gdTcell", "Lymphocytes", 
+                      ifelse(healthy_cl=="15", "Hepatocytes", 
+                      ifelse(healthy_cl=="16", "Doublets", 
+                      ifelse(healthy_cl=="17", "Myeloid cells", 
+                      ifelse(healthy_cl=="18", "Lymphocytes", 
+                      ifelse(healthy_cl=="19", "Dendritic cells", 
+                      ifelse(healthy_cl=="20_Tcell", "Dividing cells",
+                      ifelse(healthy_cl=="20_mono", "Dividing cells",
+                      ifelse(healthy_cl=="21", "Lymphocytes", 
+                      ifelse(healthy_cl=="22", "Stellate cells", "ERROR"
+                      ))))))))))))))))))))))))))
+
+newmeta = data.frame(row.names = rownames(hcells_rpca@meta.data),
+                     "clusters" = healthy_cl,
+                     "names_clusters" = names_clusters,
+                     "names_major" = names_major)
+
+hcells_rpca = AddMetaData(hcells_rpca, metadata = newmeta)
+```
+
+Plot distribution of cell types by the different samples
+
+```{r}
+for(n in c("names_clusters", "names_major")){
+  pdf(paste0("results/integr_healthy/", n, "_distribution_samples.pdf"), useDingbats = F,
+      height = 6, width = 10)
+  
+  ct_dat = table(hcells_rpca@meta.data[,n])
+  ct_dat = data.frame(row.names = names(ct_dat),
+                      counts = as.numeric(ct_dat))
+  s_dat = unique(hcells_rpca@meta.data[,c("unique_name", "Fraction", "Name")])
+  rownames(s_dat) = s_dat[,1]
+  s_dat = s_dat[,-1]
+  
+  plot_df = t(table(hcells_rpca@meta.data$unique_name,
+                  hcells_rpca@meta.data[,n]))
+  plot_df = plot_df/rowSums(plot_df)
+  
+  pheatmap::pheatmap(t(plot_df), clustering_method = "ward.D2", 
+                     display_numbers = round(t(plot_df), 3), fontsize_number = 6.5,
+                     annotation_col = ct_dat, annotation_row = s_dat)
+  
+  plot_df = table(hcells_rpca@meta.data$unique_name,
+                  hcells_rpca@meta.data[,n])
+  plot_df = plot_df/rowSums(plot_df)
+  
+  pheatmap::pheatmap(t(plot_df), clustering_method = "ward.D2", 
+                     display_numbers = round(t(plot_df), 3), fontsize_number = 6.5,
+                     annotation_row = ct_dat, annotation_col = s_dat)
+  dev.off()
+}
 ```
 
 
 ```{r}
-cc = unlist(cells_nothep)
-for(x in 1:length(cc)){
-  nn = paste0(unlist(strsplit(cc[x], "_", fixed = T))[1:2], collapse = "_")
-  cell = unlist(strsplit(cc[x], "_", fixed = T))[3]
-  cc[x] = paste0(cell, "_", which(names(healthy_srat)==nn))
-}
-df_nothep = data.frame(row.names = colnames(hcells_rpca),
-                       "nothep" = colnames(hcells_rpca) %in% cc)
-
-hcells_rpca = AddMetaData(hcells_rpca, df_nothep)
-
-DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, label = F,
-        group.by = "nothep", split = "Fraction")
-
-
-cc = unlist(lower_cells)
-for(x in 1:length(cc)){
-  nn = paste0(unlist(strsplit(cc[x], "_", fixed = T))[1:2], collapse = "_")
-  cell = unlist(strsplit(cc[x], "_", fixed = T))[3]
-  cc[x] = paste0(cell, "_", which(names(healthy_srat)==nn))
-}
-df_nothep = data.frame(row.names = colnames(hcells_rpca),
-                       "lowercells" = colnames(hcells_rpca) %in% cc)
-
-hcells_rpca = AddMetaData(hcells_rpca, df_nothep)
-
-DimPlot(hcells_rpca, reduction = "umap", pt.size = 0.2, label = F,
-        group.by = "lowercells", split = "Fraction")
+plt1 = DimPlot(hcells_rpca, reduction = "tsne", group.by = "names_clusters", 
+               label = T)+theme(legend.position = "none")
+plt2 = DimPlot(hcells_rpca, reduction = "tsne", group.by = "names_major", 
+               label = T)+theme(legend.position = "none")
+cowplot::plot_grid(plt1, plt2, ncol = 2, align = "h")
 ```
 
-
-```{r}
-plot_df = t(table(hcells_harm@meta.data$unique_name,
-                hcells_harm@meta.data$SCT_snn_res.0.9))
-plot_df = plot_df/rowSums(plot_df)
-
-pheatmap::pheatmap(t(plot_df), clustering_method = "ward.D2")
-```
 
 
 

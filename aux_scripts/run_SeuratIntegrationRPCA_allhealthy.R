@@ -40,4 +40,5 @@ all_cell_integr = RunPCA(all_cell_integr, verbose = F)
 all_cell_integr = RunUMAP(all_cell_integr, dims = 1:30)
 
 # save output
+saveRDS(all_cell_anchors, file = "data/processed/scripts_out/SeuratIntegrRPCA_allhealthy_anchors.RDS")
 saveRDS(all_cell_integr, file = "data/processed/scripts_out/SeuratIntegrRPCA_allhealthy.RDS")
