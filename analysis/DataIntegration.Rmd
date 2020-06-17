@@ -664,20 +664,6 @@ for(i in 1:ncol(cl_comb)){
 }
 ```
 
-Plotting hepatocyte zonation markers
-
-```{r}
-gfresh=c("CYP3A4", "CYP2E1", "GADD45G", "CYP1A2", "GLUL", "HAMP", "SAA2", "SAA1", "CRP", "NNMT", "IGFBP2", "KLF6")
-hep_cells = hcells_rpca[,hcells_rpca@meta.data$names_major=="Hepatocytes"]
-VlnPlot(hep_cells, features = gfresh, group.by = "names_clusters", 
-        pt.size = 0, sort = "increasing")
-hep_cells = FindVariableFeatures(hep_cells, verbose = F)
-hep_cells = RunPCA(hep_cells, verbose = F)
-hep_cells = RunUMAP(hep_cells, dims = 1:20)
-DimPlot(hep_cells, reduction = "umap", group.by = "names_clusters")
-FeaturePlot(hep_cells, features = gfresh, pt.size = 0.6)
-```
-
 We will also do some subclustering.  
 Cluster 13 can be split into two clusters - one of actual endothelial cells, and another of T cell-endothelial cell doublets. 
 
@@ -852,6 +838,20 @@ newmeta = data.frame(row.names = rownames(hcells_rpca@meta.data),
 hcells_rpca = AddMetaData(hcells_rpca, metadata = newmeta)
 ```
 
+Plotting hepatocyte zonation markers
+
+```{r}
+gfresh=c("CYP3A4", "CYP2E1", "GADD45G", "CYP1A2", "GLUL", "HAMP", "SAA2", "SAA1", "CRP", "NNMT", "IGFBP2", "KLF6")
+hep_cells = hcells_rpca[,hcells_rpca@meta.data$names_major=="Hepatocytes"]
+VlnPlot(hep_cells, features = gfresh, group.by = "names_clusters", 
+        pt.size = 0, sort = "increasing")
+hep_cells = FindVariableFeatures(hep_cells, verbose = F)
+hep_cells = RunPCA(hep_cells, verbose = F)
+hep_cells = RunUMAP(hep_cells, dims = 1:20)
+DimPlot(hep_cells, reduction = "umap", group.by = "names_clusters")
+FeaturePlot(hep_cells, features = gfresh, pt.size = 0.6)
+```
+
 Plot distribution of cell types by the different samples
 
 ```{r}
@@ -885,17 +885,29 @@ for(n in c("names_clusters", "names_major")){
 }
 ```
 
+Check labels in UMAP
 
 ```{r}
-plt1 = DimPlot(hcells_rpca, reduction = "tsne", group.by = "names_clusters", 
+plt1 = DimPlot(hcells_rpca, reduction = "umap", group.by = "names_clusters", 
                label = T)+theme(legend.position = "none")
-plt2 = DimPlot(hcells_rpca, reduction = "tsne", group.by = "names_major", 
+plt2 = DimPlot(hcells_rpca, reduction = "umap", group.by = "names_major", 
                label = T)+theme(legend.position = "none")
 cowplot::plot_grid(plt1, plt2, ncol = 2, align = "h")
 ```
 
+Save markers
 
+```{r}
+write.csv(markers_sct_list$res_0.7, 
+          file = "results/integr_healthy/clusters_res0.7_markers.csv", 
+          col.names = T, row.names = T, quote = F)
+```
 
+Save seurat object with new labels
+
+```{r}
+saveRDS(hcells_rpca, file = "data/processed/hcells_rpca.RDS")
+```
 
 
 
