@@ -1,0 +1,144 @@
+---
+title: "Zonation analysis"
+output: html_notebook
+---
+
+
+
+# General Setup
+Setup chunk
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 8)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_knit$get("root.dir")
+```
+
+Setup reticulate
+
+```{r}
+library(reticulate)
+knitr::knit_engines$set(python = reticulate::eng_python)
+py_available(initialize = FALSE)
+use_python(Sys.which("python"))
+py_config()
+```
+
+Load libraries
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(ggridges)
+library(dplyr)
+library(destiny)
+```
+
+
+
+# Healthy
+Load data
+
+```{r}
+hcells_rpca = readRDS("data/processed/hcells_rpca.RDS")
+```
+
+
+## Hepatocyte zonation
+Subset hepatocytes
+```{r}
+hep_hcells = hcells_rpca[,hcells_rpca@meta.data$names_major=="Hepatocytes"]
+hep_hcells = suppressWarnings(SCTransform(hep_hcells, do.correct.umi = T, verbose = F, 
+                                          vars.to.regress = c("unique_name","nCount_RNA"),
+                                          variable.features.rv.th = 1, seed.use = 1,
+                                          return.only.var.genes = F, 
+                                          variable.features.n = NULL))
+#hep_hcells = FindVariableFeatures(hep_hcells, verbose = F)
+hep_hcells = RunPCA(hep_hcells, verbose = F)
+hep_hcells = RunUMAP(hep_hcells, dims = 1:20, verbose = F)
+DimPlot(hep_hcells, reduction = "umap", group.by = "unique_name")
+
+# the initial dimensionality reduction uncovers a few outlying cells, which will be removed from this zonation analysis
+outcells = (hep_hcells@reductions$umap@cell.embeddings[,1]>4 &
+              hep_hcells@reductions$umap@cell.embeddings[,2]>3.1)
+hep_hcells = hep_hcells[,!outcells]
+hep_hcells = suppressWarnings(SCTransform(hep_hcells, do.correct.umi = T, verbose = F, 
+                                          vars.to.regress = c("unique_name","nCount_RNA"),
+                                          variable.features.rv.th = 1, seed.use = 1,
+                                          return.only.var.genes = F, 
+                                          variable.features.n = NULL))
+#hep_hcells = FindVariableFeatures(hep_hcells, verbose = F)
+hep_hcells = RunPCA(hep_hcells, verbose = F)
+hep_hcells = RunUMAP(hep_hcells, dims = 1:15, verbose = F)
+DimPlot(hep_hcells, reduction = "umap", group.by = "unique_name")
+```
+
+Plotting hepatocyte zonation markers
+
+```{r}
+gfresh = c("CYP3A4", "CYP2E1", "CYP1A2", "GLUL", "HAMP", "SAA2", 
+           "SAA1", "CRP", "IGFBP2", "NNMT", "GADD45G", "KLF6")
+
+png("results/zonation_healthy/healthy_hepatocyte_zonation_markers_violin.png", 
+    height = 1000, width = 1000)
+VlnPlot(hep_hcells, features = gfresh, group.by = "names_clusters", 
+        pt.size = 0, sort = "increasing")
+dev.off()
+png("results/zonation_healthy/healthy_hepatocyte_zonation_markers_umap.png", 
+    height = 1000, width = 1500)
+FeaturePlot(hep_hcells, features = gfresh, pt.size = 0.6)
+dev.off()
+```
+
+Run destiny on hepatocytes
+
+```{r}
+dm = DiffusionMap(hep_hcells@reductions$pca@cell.embeddings[,1:15], rotate = T)
+dpt = DPT(dm)
+plot(dpt)
+```
+
+Plotting markers, clusters and sample names
+
+```{r}
+df_dc = cbind(hep_hcells@meta.data, data.frame(dpt@dm$DC1,dpt@dm$DC2))
+df_dc = cbind(df_dc, Matrix::t(hep_hcells@assays$SCT@data[gfresh,]))
+
+plt_list = list()
+for(n in c(gfresh[1:10], "names_clusters", "unique_name")){
+  plt_list[[n]] = ggplot(df_dc, aes_string(x = "dpt.dm.DC1", y = "dpt.dm.DC2", colour = n))+
+    geom_point()+
+    theme_classic()
+}
+
+png("results/zonation_healthy/healthy_hepatocyte_zonation_markers_dc.png", 
+    height = 1000, width = 1900)
+cowplot::plot_grid(plotlist = plt_list, nrow = 3, ncol = 4, align = "hv")
+dev.off()
+```
+
+
+
+## Endothelial zonation
+
+
+
+
+
+# Embolised/Regenerating
+## Hepatocyte zonation
+
+
+## Endothelial zonation
+
+
+
+
+
+# Dynamic time warping
+## Hepatocyte zonation
+
+
+## Endothelial zonation
+
+
