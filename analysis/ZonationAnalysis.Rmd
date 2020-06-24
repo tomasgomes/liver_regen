@@ -32,6 +32,8 @@ library(ggplot2)
 library(ggridges)
 library(dplyr)
 library(destiny)
+library(fdrtool)
+library(gam)
 ```
 
 
@@ -46,6 +48,7 @@ hcells_rpca = readRDS("data/processed/hcells_rpca.RDS")
 
 ## Hepatocyte zonation
 Subset hepatocytes
+
 ```{r}
 hep_hcells = hcells_rpca[,hcells_rpca@meta.data$names_major=="Hepatocytes"]
 hep_hcells = suppressWarnings(SCTransform(hep_hcells, do.correct.umi = T, verbose = F, 
@@ -117,11 +120,291 @@ cowplot::plot_grid(plotlist = plt_list, nrow = 3, ncol = 4, align = "hv")
 dev.off()
 ```
 
+We'll be using DC1 as the pseudotime. This was the best approximation possible to the zonation gradient based on diffusion maps
+
+```{r}
+pdf("results/zonation_healthy/hep_distributions_dc1.pdf", useDingbats = F, 
+    height = 4, width = 9)
+plt1 = ggplot(df_dc, aes(x = dpt.dm.DC1, y = names_clusters, 
+                  group = names_clusters, fill = names_clusters))+
+  geom_density_ridges2(alpha = 0.4)+
+  theme_bw()+
+  theme(legend.position = "none")
+
+plt2 = ggplot(df_dc, aes(x = dpt.dm.DC1, y = unique_name, 
+                  group = unique_name, fill = unique_name))+
+  geom_density_ridges2(alpha = 0.4)+
+  theme_bw()+
+  theme(legend.position = "none")
+
+cowplot::plot_grid(plt1, plt2, ncol = 2, align = "h")
+dev.off()
+```
+
+Add pseudotime and save the data
+
+```{r}
+ptdf = data.frame(row.names = rownames(df_dc), "healthy_hep_zon_dc1" = df_dc$dpt.dm.DC1)
+hep_hcells = AddMetaData(hep_hcells, ptdf)
+saveRDS(hep_hcells, file = "data/processed/hep_hcells_zon.RDS")
+```
+
+Which genes correlate with the defined pseudotime? (WARNING: very slow)
+
+```{r}
+dat = as.matrix(Matrix::t(hep_hcells@assays$SCT@data))
+cor_test_hep = suppressWarnings(suppressMessages(apply(dat, 
+                     2, function(x) cor.test(hep_hcells@meta.data$healthy_hep_zon_dc1, 
+                                             x, method = "sp"))))
+
+cor_test_hep = data.frame("gene" = names(cor_test_hep),
+                          "cor" = unlist(lapply(cor_test_hep, function(x) x$estimate)),
+                          "pval" = unlist(lapply(cor_test_hep, function(x) x$p.value)))
+
+cor_test_hep$cor_pval = fdrtool(cor_test_hep$pval, statistic = "pvalue", 
+                                plot = F, verbose = F)$qval
+rownames(cor_test_hep) = cor_test_hep$gene
+
+write.csv(cor_test_hep, file = "results/zonation_healthy/cor_test_hepatocytes_dc1_healthy.csv",
+          col.names = T, row.names = F, quote = F)
+```
+
+Because correlation might not be enough, we'll use a gam with a 4-degree spline to to model the genes
+
+```{r}
+# will only use variable genes
+hvg = hep_hcells@assays$SCT@var.features
+
+# Fit GAM for each gene using pseudotime as independent variable.
+t = hep_hcells@meta.data$healthy_hep_zon_dc1
+gene_fit_p = c()
+gene_fit_vals = data.frame(row.names = 1:100)
+for(i in 1:length(hvg)){
+  g = hvg[i]
+  z = hep_hcells@assays$SCT@data[g,]
+  
+  d = data.frame(z=z, t=t)
+  tmp = suppressMessages(gam(z ~ ns(t, df = 4), data=d))
+  
+  # bins for model fitting
+  bb = seq(min(t), max(t), length.out = 100)
+  gene_fit_vals[,g] = predict(tmp, 
+                              newdata = data.frame(t = bb))
+  p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+  gene_fit_p = c(gene_fit_p, p)
+  names(gene_fit_p)[length(gene_fit_p)] = g
+}
+```
+
+Get signifficant genes and cluster some/all
+
+```{r}
+gene_fit_vals_filt = t(gene_fit_vals[,names(gene_fit_p)[gene_fit_p<=0.05]])
+scale_fit = t(apply(gene_fit_vals_filt, 1, scale))
+
+# using the top 1000 genes because it gives the neatest plots
+topgenes = names(head(gene_fit_p[order(gene_fit_p, decreasing = F)], 1000))
+
+clust_genes = hclust(dist(scale_fit[topgenes,]), method = "ward.D2")
+
+cls = cutree(clust_genes, 4)
+plt_list = list()
+for(i in unique(cls)){
+  sub_df = scale_fit[names(cls)[cls==i],]
+  plot_df = reshape2::melt(sub_df)
+  plt_list[[paste0("gene_",i)]] = ggplot(plot_df, aes(x = Var2, y = value, group = Var1))+
+    geom_hline(yintercept = 0, linetype = "dashed")+
+    geom_line(alpha = 0.1, colour = "grey69")+
+    stat_summary(aes(y = value, group=1), fun.y=mean, colour="red", geom="line",group=1)+
+    labs(title = paste0("gene_",i))+
+    theme_bw()
+}
+
+pdf("results/zonation_healthy/hep_gene_expression_profile_clusters1000_dc1.pdf",
+    height = 4.5, width = 4.4)
+cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2, align = "hv")
+dev.off()
+
+df_pval_cl = merge(data.frame(gene_fit_p), data.frame(cls), by = 0, all = T)
+colnames(df_pval_cl) = c("gene", "pval", "cluster")
+
+write.csv(df_pval_cl, file = "results/zonation_healthy/hep_dc1_pval_clust_healthy.csv",
+          col.names = T, row.names = F, quote = F)
+```
+
 
 
 ## Endothelial zonation
+Subset endothelial cells
 
+```{r}
+end_hcells = hcells_rpca[,hcells_rpca@meta.data$names_major=="Endothelial cells"]
+end_hcells = suppressWarnings(SCTransform(end_hcells, do.correct.umi = T, verbose = F, 
+                                          vars.to.regress = c("unique_name","nCount_RNA"),
+                                          variable.features.rv.th = 1, seed.use = 1,
+                                          return.only.var.genes = F, 
+                                          variable.features.n = NULL))
+end_hcells = RunPCA(end_hcells, verbose = F)
+end_hcells = RunUMAP(end_hcells, dims = 1:15, verbose = F)
+DimPlot(end_hcells, reduction = "umap", group.by = "unique_name")
+DimPlot(end_hcells, reduction = "umap", group.by = "names_clusters")
 
+end_hcells = FindNeighbors(end_hcells, reduction = "pca", dims = 1:15, 
+                           force.recalc = T, graph.name = "endo")
+end_hcells = FindClusters(end_hcells, graph.name = "endo", algorithm = 2, 
+                          resolution = 0.3, verbose = F)
+DimPlot(end_hcells, reduction = "umap", group.by = "endo_res.0.3")
+
+end_hcells = SetIdent(end_hcells, value = "endo_res.0.3")
+mk_endo = FindAllMarkers(end_hcells, logfc.threshold = 0.2, min.pct = 0.05)
+# markers show some T cells, macrophages and hepatocytes. We remove these, as well as the portal endothelial cells, which should not be part of LSEC zonation
+
+keep_cells = colnames(end_hcells)[end_hcells@meta.data$endo_res.0.3 %in% c(0,1,3) &
+                                    end_hcells@meta.data$names_clusters!="Portal Endothelial cells"]
+end_hcells = end_hcells[,keep_cells]
+end_hcells = suppressWarnings(SCTransform(end_hcells, do.correct.umi = T, verbose = F, 
+                                          vars.to.regress = c("unique_name","nCount_RNA"),
+                                          variable.features.rv.th = 1, seed.use = 1,
+                                          return.only.var.genes = F, 
+                                          variable.features.n = NULL))
+end_hcells = RunPCA(end_hcells, verbose = F)
+end_hcells = RunUMAP(end_hcells, dims = 1:15, verbose = F)
+DimPlot(end_hcells, reduction = "umap", group.by = "unique_name")
+DimPlot(end_hcells, reduction = "umap", group.by = "names_clusters")
+```
+
+Will also first use diffusion maps to filter additional outliers
+
+```{r}
+dm = DiffusionMap(end_hcells@reductions$pca@cell.embeddings[,1:15], rotate = T)
+dpt = DPT(dm)
+plot(dpt, col_by = "DPT1")
+
+keep_cells = colnames(end_hcells)[dpt$DPT1<3]
+end_hcells = end_hcells[,keep_cells]
+end_hcells = suppressWarnings(SCTransform(end_hcells, do.correct.umi = T, verbose = F, 
+                                          vars.to.regress = c("unique_name","nCount_RNA"),
+                                          variable.features.rv.th = 1, seed.use = 1,
+                                          return.only.var.genes = F, 
+                                          variable.features.n = NULL))
+end_hcells = RunPCA(end_hcells, verbose = F)
+end_hcells = RunUMAP(end_hcells, dims = 1:15, verbose = F)
+DimPlot(end_hcells, reduction = "umap", group.by = "unique_name")
+DimPlot(end_hcells, reduction = "umap", group.by = "names_clusters")
+```
+
+Run destiny on endothelial cells - in this case, we use the calculated diffusion pseudo time by setting the roots as the tips of the curve
+
+```{r}
+dm = DiffusionMap(end_hcells@reductions$pca@cell.embeddings[,1:15], rotate = T)
+dpt = DPT(dm, tips = c(398, 334)) # tips are top DC2 for each LSEC cluster
+plot(dpt)
+```
+
+Extract the pseudotime
+
+```{r}
+branch_id = min(dpt@branch[,1], na.rm = TRUE)
+branch_idx = dpt@branch[, 1L] == 1
+tip_cells = which(branch_idx & dpt@tips[, 1L])
+dpt_use = dpt[tip_cells,]
+```
+
+Distribution of variables along the pseudotime
+
+```{r}
+df_dpt = cbind(end_hcells@meta.data, data.frame("dpt" = dpt_use))
+
+pdf("results/zonation_healthy/endo_distributions_dpt.pdf", useDingbats = F, 
+    height = 4, width = 9)
+plt1 = ggplot(df_dpt, aes(x = dpt, y = names_clusters, 
+                  group = names_clusters, fill = names_clusters))+
+  geom_density_ridges2(alpha = 0.4)+
+  theme_bw()+
+  theme(legend.position = "none")
+
+plt2 = ggplot(df_dpt, aes(x = dpt, y = unique_name, 
+                  group = unique_name, fill = unique_name))+
+  geom_density_ridges2(alpha = 0.4)+
+  theme_bw()+
+  theme(legend.position = "none")
+
+cowplot::plot_grid(plt1, plt2, ncol = 2, align = "h")
+dev.off()
+```
+
+Add pseudotime and save the data
+
+```{r}
+ptdf = data.frame(row.names = rownames(df_dpt), "healthy_end_zon_dpt" = df_dpt$dpt)
+end_hcells = AddMetaData(end_hcells, ptdf)
+saveRDS(end_hcells, file = "data/processed/end_hcells_zon.RDS")
+```
+
+We'll use a gam with a 4-degree spline to to model the genes
+
+```{r}
+# will only use variable genes
+hvg = end_hcells@assays$SCT@var.features
+
+# Fit GAM for each gene using pseudotime as independent variable.
+t = end_hcells@meta.data$healthy_end_zon_dpt
+gene_fit_p = c()
+gene_fit_vals = data.frame(row.names = 1:100)
+for(i in 1:length(hvg)){
+  g = hvg[i]
+  z = end_hcells@assays$SCT@data[g,]
+  
+  d = data.frame(z=z, t=t)
+  tmp = suppressMessages(gam(z ~ ns(t, df = 4), data=d))
+  
+  # bins for model fitting
+  bb = seq(min(t), max(t), length.out = 100)
+  gene_fit_vals[,g] = predict(tmp, 
+                              newdata = data.frame(t = bb))
+  p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+  gene_fit_p = c(gene_fit_p, p)
+  names(gene_fit_p)[length(gene_fit_p)] = g
+}
+```
+
+Get signifficant genes and cluster some/all
+
+```{r}
+gene_fit_vals_filt = t(gene_fit_vals[,names(gene_fit_p)[gene_fit_p<=0.05]])
+scale_fit = t(apply(gene_fit_vals_filt, 1, scale))
+
+# using the top 1000 genes because it gives the neatest plots
+topgenes = names(head(gene_fit_p[order(gene_fit_p, decreasing = F)], 1000))
+
+clust_genes = hclust(dist(scale_fit[topgenes,]), method = "ward.D2")
+
+cls = cutree(clust_genes, 4)
+plt_list = list()
+for(i in unique(cls)){
+  sub_df = scale_fit[names(cls)[cls==i],]
+  plot_df = reshape2::melt(sub_df)
+  plt_list[[paste0("gene_",i)]] = ggplot(plot_df, aes(x = Var2, y = value, group = Var1))+
+    geom_hline(yintercept = 0, linetype = "dashed")+
+    geom_line(alpha = 0.1, colour = "grey69")+
+    stat_summary(aes(y = value, group=1), fun.y=mean, colour="red", geom="line",group=1)+
+    labs(title = paste0("gene_",i))+
+    theme_bw()
+}
+
+pdf("results/zonation_healthy/end_gene_expression_profile_clusters1000_dpt.pdf",
+    height = 4.5, width = 4.4)
+cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2, align = "hv")
+dev.off()
+
+df_pval_cl = merge(data.frame(gene_fit_p), data.frame(cls), by = 0, all = T)
+colnames(df_pval_cl) = c("gene", "pval", "cluster")
+
+write.csv(df_pval_cl, file = "results/zonation_healthy/end_dc1_pval_clust_healthy.csv",
+          col.names = T, row.names = F, quote = F)
+```
+
+Might need to redo using ranks, which smooths cell orderings more (avoids dense clumps and sparse stretches)
 
 
 
