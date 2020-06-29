@@ -230,6 +230,9 @@ colnames(df_pval_cl) = c("gene", "pval", "cluster")
 
 write.csv(df_pval_cl, file = "results/zonation_healthy/hep_dc1_pval_clust_healthy.csv",
           col.names = T, row.names = F, quote = F)
+
+write.csv(gene_fit_vals, file = "results/zonation_healthy/hep_dc1_gene_fits_healthy.csv",
+          col.names = T, row.names = F, quote = F)
 ```
 
 
@@ -400,7 +403,10 @@ dev.off()
 df_pval_cl = merge(data.frame(gene_fit_p), data.frame(cls), by = 0, all = T)
 colnames(df_pval_cl) = c("gene", "pval", "cluster")
 
-write.csv(df_pval_cl, file = "results/zonation_healthy/end_dc1_pval_clust_healthy.csv",
+write.csv(df_pval_cl, file = "results/zonation_healthy/end_dpt_pval_clust_healthy.csv",
+          col.names = T, row.names = F, quote = F)
+
+write.csv(gene_fit_vals, file = "results/zonation_healthy/end_dpt_gene_fits_healthy.csv",
           col.names = T, row.names = F, quote = F)
 ```
 
