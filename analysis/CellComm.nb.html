@@ -2166,49 +2166,33 @@ cor_mat_both_simp = cor(mat_both_simp, use=&quot;pairwise.complete.obs&quot;, me
 <p>Score number of interactions by correlation - simplified</p>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxucGRmKFwicmVzdWx0cy9jZWxsX2NvbW1faGVhbHRoeS9pbnRlcmFjdGlvbnNfc2NvcmVfY2wucGRmXCIpXG5jb3JfbWF0X21vZCA9IGNvcl9tYXRfYm90aF9jbFxuaW50ZXJfY291bnRzX21vZCA9IGludGVyX2NvdW50c19jbFxuXG54eCA9IGludGVyX2NvdW50c19tb2QqY29yX21hdF9tb2Rbcm93bmFtZXMoaW50ZXJfY291bnRzX21vZCksY29sbmFtZXMoaW50ZXJfY291bnRzX21vZCldXG54eFt4eDwwXSA9IDBcbnBoZWF0bWFwOjpwaGVhdG1hcCh4eCwgY2x1c3RlcmluZ19tZXRob2QgPSBcIndhcmQuRDJcIiwgbWFpbiA9IFwiTGlnYW5kcyBhbmQgcmVjZXB0b3JzXCIpXG5cbnh4JGN0ID0gcm93bmFtZXMoeHgpXG5kZl9uZXQgPSByZXNoYXBlMjo6bWVsdCh4eClcbmBgYCJ9 -->
-<pre class="r"><code>pdf(&quot;results/cell_comm_healthy/interactions_score_cl.pdf&quot;)
-cor_mat_mod = cor_mat_both_cl
-inter_counts_mod = inter_counts_cl
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxucGRmKFwicmVzdWx0cy9jZWxsX2NvbW1faGVhbHRoeS9pbnRlcmFjdGlvbnNfc2NvcmVfc2ltcC5wZGZcIilcbmNvcl9tYXRfbW9kID0gY29yX21hdF9ib3RoX3NpbXBcbmludGVyX2NvdW50c19tb2QgPSBpbnRlcl9jb3VudHNfc2ltcFxuXG54eCA9IGludGVyX2NvdW50c19tb2QqY29yX21hdF9tb2Rbcm93bmFtZXMoaW50ZXJfY291bnRzX21vZCksY29sbmFtZXMoaW50ZXJfY291bnRzX21vZCldXG54eFt4eDwwXSA9IDBcbnBoZWF0bWFwOjpwaGVhdG1hcCh4eCwgY2x1c3RlcmluZ19tZXRob2QgPSBcIndhcmQuRDJcIiwgbWFpbiA9IFwiTGlnYW5kcyBhbmQgcmVjZXB0b3JzXCIpXG5cbnh4JGN0ID0gcm93bmFtZXMoeHgpXG5kZl9uZXQgPSByZXNoYXBlMjo6bWVsdCh4eClcbndyaXRlLnRhYmxlKGRmX25ldCwgZmlsZSA9IFwicmVzdWx0cy9jZWxsX2NvbW1faGVhbHRoeS9kZl9uZXRfY29yYm90aF9oZWFsdGh5X3NpbXAudHh0XCIsIFxuICAgICAgICAgICAgc2VwID0gXCJcXHRcIiwgY29sLm5hbWVzID0gVCwgcm93Lm5hbWVzID0gRiwgcXVvdGUgPSBGKVxuXG5jb3JfbWF0X21vZCA9IGNvcl9tYXRfZWFjaF9zaW1wXG5pbnRlcl9jb3VudHNfbW9kID0gaW50ZXJfY291bnRzX3NpbXBcblxueHggPSBpbnRlcl9jb3VudHNfbW9kKmNvcl9tYXRfbW9kW3Jvd25hbWVzKGludGVyX2NvdW50c19tb2QpLGNvbG5hbWVzKGludGVyX2NvdW50c19tb2QpXVxueHhbeHg8MF0gPSAwXG5waGVhdG1hcDo6cGhlYXRtYXAoeHgsIGNsdXN0ZXJpbmdfbWV0aG9kID0gXCJ3YXJkLkQyXCIsIG1haW4gPSBcIkxpZ2FuZHMgdnMgcmVjZXB0b3JzXCIpXG5cbnh4JGN0ID0gcm93bmFtZXMoeHgpXG5kZl9uZXQgPSByZXNoYXBlMjo6bWVsdCh4eClcbndyaXRlLnRhYmxlKGRmX25ldCwgZmlsZSA9IFwicmVzdWx0cy9jZWxsX2NvbW1faGVhbHRoeS9kZl9uZXRfY29yZWFjaF9oZWFsdGh5X3NpbXAudHh0XCIsIFxuICAgICAgICAgICAgc2VwID0gXCJcXHRcIiwgY29sLm5hbWVzID0gVCwgcm93Lm5hbWVzID0gRiwgcXVvdGUgPSBGKVxuZGV2Lm9mZigpXG5gYGAifQ== -->
+<pre class="r"><code>pdf(&quot;results/cell_comm_healthy/interactions_score_simp.pdf&quot;)
+cor_mat_mod = cor_mat_both_simp
+inter_counts_mod = inter_counts_simp
 
 xx = inter_counts_mod*cor_mat_mod[rownames(inter_counts_mod),colnames(inter_counts_mod)]
 xx[xx&lt;0] = 0
 pheatmap::pheatmap(xx, clustering_method = &quot;ward.D2&quot;, main = &quot;Ligands and receptors&quot;)
 
 xx$ct = rownames(xx)
-df_net = reshape2::melt(xx)</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiVXNpbmcgY3QgYXMgaWQgdmFyaWFibGVzXG4ifQ== -->
-<pre><code>Using ct as id variables</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxud3JpdGUudGFibGUoZGZfbmV0LCBmaWxlID0gXCJyZXN1bHRzL2NlbGxfY29tbV9oZWFsdGh5L2RmX25ldF9jb3Jib3RoX2hlYWx0aHlfY2wudHh0XCIsIFxuICAgICAgICAgICAgc2VwID0gXCJcXHRcIiwgY29sLm5hbWVzID0gVCwgcm93Lm5hbWVzID0gRiwgcXVvdGUgPSBGKVxuXG5jb3JfbWF0X21vZCA9IGNvcl9tYXRfZWFjaF9jbFxuaW50ZXJfY291bnRzX21vZCA9IGludGVyX2NvdW50c19jbFxuXG54eCA9IGludGVyX2NvdW50c19tb2QqY29yX21hdF9tb2Rbcm93bmFtZXMoaW50ZXJfY291bnRzX21vZCksY29sbmFtZXMoaW50ZXJfY291bnRzX21vZCldXG54eFt4eDwwXSA9IDBcbnBoZWF0bWFwOjpwaGVhdG1hcCh4eCwgY2x1c3RlcmluZ19tZXRob2QgPSBcIndhcmQuRDJcIiwgbWFpbiA9IFwiTGlnYW5kcyB2cyByZWNlcHRvcnNcIilcbmBgYCJ9 -->
-<pre class="r"><code>write.table(df_net, file = &quot;results/cell_comm_healthy/df_net_corboth_healthy_cl.txt&quot;, 
+df_net = reshape2::melt(xx)
+write.table(df_net, file = &quot;results/cell_comm_healthy/df_net_corboth_healthy_simp.txt&quot;, 
             sep = &quot;\t&quot;, col.names = T, row.names = F, quote = F)
 
-cor_mat_mod = cor_mat_each_cl
-inter_counts_mod = inter_counts_cl
+cor_mat_mod = cor_mat_each_simp
+inter_counts_mod = inter_counts_simp
 
 xx = inter_counts_mod*cor_mat_mod[rownames(inter_counts_mod),colnames(inter_counts_mod)]
 xx[xx&lt;0] = 0
-pheatmap::pheatmap(xx, clustering_method = &quot;ward.D2&quot;, main = &quot;Ligands vs receptors&quot;)</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuXG54eCRjdCA9IHJvd25hbWVzKHh4KVxuZGZfbmV0ID0gcmVzaGFwZTI6Om1lbHQoeHgpXG5gYGAifQ== -->
-<pre class="r"><code>
+pheatmap::pheatmap(xx, clustering_method = &quot;ward.D2&quot;, main = &quot;Ligands vs receptors&quot;)
+
 xx$ct = rownames(xx)
-df_net = reshape2::melt(xx)</code></pre>
-<!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoiVXNpbmcgY3QgYXMgaWQgdmFyaWFibGVzXG4ifQ== -->
-<pre><code>Using ct as id variables</code></pre>
-<!-- rnb-output-end -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxud3JpdGUudGFibGUoZGZfbmV0LCBmaWxlID0gXCJyZXN1bHRzL2NlbGxfY29tbV9oZWFsdGh5L2RmX25ldF9jb3JlYWNoX2hlYWx0aHlfY2wudHh0XCIsIFxuICAgICAgICAgICAgc2VwID0gXCJcXHRcIiwgY29sLm5hbWVzID0gVCwgcm93Lm5hbWVzID0gRiwgcXVvdGUgPSBGKVxuZGV2Lm9mZigpXG5gYGAifQ== -->
-<pre class="r"><code>write.table(df_net, file = &quot;results/cell_comm_healthy/df_net_coreach_healthy_cl.txt&quot;, 
+df_net = reshape2::melt(xx)
+write.table(df_net, file = &quot;results/cell_comm_healthy/df_net_coreach_healthy_simp.txt&quot;, 
             sep = &quot;\t&quot;, col.names = T, row.names = F, quote = F)
 dev.off()</code></pre>
 <!-- rnb-source-end -->
-<!-- rnb-output-begin eyJkYXRhIjoibnVsbCBkZXZpY2UgXG4gICAgICAgICAgMSBcbiJ9 -->
-<pre><code>null device 
-          1 </code></pre>
-<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 </div>

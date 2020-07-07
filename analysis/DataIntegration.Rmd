@@ -614,7 +614,6 @@ THIS IS VERY SLOW (1 day)
 
 ```{r}
 markers_sct_list = list()
-#markers_int_list = list()
 for(i in seq(0.3, 0.9, 0.1)){
   n = paste0("res_", i)
   print(n)
@@ -622,12 +621,8 @@ for(i in seq(0.3, 0.9, 0.1)){
   markers_sct_list[[n]] = FindAllMarkers(hcells_rpca, assay = "SCT", test.use = "wilcox",
                                          pseudocount.use = 0.1, logfc.threshold = 0.2, 
                                          verbose = F)
-  #markers_int_list[[n]] = FindAllMarkers(hcells_rpca, assay = "integrated", 
-  #                                       test.use = "wilcox", pseudocount.use = 0.1, 
-  #                                       logfc.threshold = 0.2, verbose = F)
 }
 saveRDS(markers_sct_list, file = "results/integr_healthy/mrk_sct_list.RDS")
-#saveRDS(markers_int_list, file = "results/integr_healthy/mrk_int_list.RDS")
 ```
 
 Specific one on one comparisons
@@ -962,23 +957,270 @@ FeaturePlot(allcells_harm, reduction = "umap", pt.size = 0.2,
                          "JCHAIN", "APOA1", "nFeature_RNA"))
 ```
 
+As explained in the healthy section, there are some issues with Harmony, so we will proceed with the Seurat integration
+
 
 ### Examine Seurat output
 Load data
 
 ```{r}
 allcells_rpca = readRDS("data/processed/scripts_out/SeuratIntegrRPCA_allcells.RDS")
+allcells_rpca = RunPCA(allcells_rpca, verbose = F, npcs = 80)
+# load healthy data, which now contains annotations and can help here
+hcells_rpca = readRDS("data/processed/hcells_rpca.RDS")
 ```
 
+Checking how using different numbers of dimensions affects UMAP structure
 
 ```{r}
+allcells_rpca = RunUMAP(allcells_rpca, dims = 1:30, verbose = F)
+plt30 = DimPlot(allcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:30")
+
+allcells_rpca = RunUMAP(allcells_rpca, dims = 1:20, verbose = F)
+plt20 = DimPlot(allcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:20")
+
+allcells_rpca = RunUMAP(allcells_rpca, dims = 1:25, verbose = F)
+plt25 = DimPlot(allcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:25")
+
+allcells_rpca = RunUMAP(allcells_rpca, dims = 1:10, verbose = F)
+plt10 = DimPlot(allcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:10")
+
+allcells_rpca = RunUMAP(allcells_rpca, dims = 1:40, verbose = F)
+plt40 = DimPlot(allcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:40")
+
+allcells_rpca = RunUMAP(allcells_rpca, dims = 1:50, verbose = F)
+plt50 = DimPlot(allcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:50")
+
+allcells_rpca = RunUMAP(allcells_rpca, dims = 1:60, verbose = F)
+plt60 = DimPlot(allcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:60")
+
+allcells_rpca = RunUMAP(allcells_rpca, dims = 1:70, verbose = F)
+plt70 = DimPlot(allcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:70")
+
+allcells_rpca = RunUMAP(allcells_rpca, dims = 1:80, verbose = F)
+plt80 = DimPlot(allcells_rpca, reduction = "umap", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "UMAP with 1:80")
+
+png("results/integr_allcells/seurat_umap_dims.png", width = 1400, height = 1200)
+cowplot::plot_grid(plt10, plt20, plt25, plt30, plt40, plt50, plt60, plt70, plt80, ncol = 3, nrow = 3, align = "h")
+dev.off()
+```
+
+Checking how using different numbers of dimensions affects t-SNE structure
+
+```{r}
+allcells_rpca = RunTSNE(allcells_rpca, dims = 1:30, verbose = F, perplexity = 25)
+plt30 = DimPlot(allcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:30")
+
+allcells_rpca = RunTSNE(allcells_rpca, dims = 1:20, verbose = F, perplexity = 25)
+plt20 = DimPlot(allcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:20")
+
+allcells_rpca = RunTSNE(allcells_rpca, dims = 1:25, verbose = F, perplexity = 25)
+plt25 = DimPlot(allcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:25")
+
+allcells_rpca = RunTSNE(allcells_rpca, dims = 1:10, verbose = F, perplexity = 25)
+plt10 = DimPlot(allcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:10")
+
+allcells_rpca = RunTSNE(allcells_rpca, dims = 1:40, verbose = F, perplexity = 25)
+plt40 = DimPlot(allcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:40")
+
+allcells_rpca = RunTSNE(allcells_rpca, dims = 1:50, verbose = F, perplexity = 25)
+plt50 = DimPlot(allcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:50")
+
+allcells_rpca = RunTSNE(allcells_rpca, dims = 1:60, verbose = F, perplexity = 25)
+plt60 = DimPlot(allcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:60")
+
+allcells_rpca = RunTSNE(allcells_rpca, dims = 1:70, verbose = F, perplexity = 25)
+plt70 = DimPlot(allcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:70")
+
+allcells_rpca = RunTSNE(allcells_rpca, dims = 1:80, verbose = F, perplexity = 25)
+plt80 = DimPlot(allcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                group.by = "Fraction")+labs(title = "t-SNE with 1:80")
+
+png("results/integr_allcells/seurat_tsne_dims.png", width = 1400, height = 1200)
+cowplot::plot_grid(plt10, plt20, plt25, plt30, plt40, plt50, plt60, plt70, plt80, ncol = 3, nrow = 3, align = "h")
+dev.off()
+```
+
+Choose final dimensions
+
+```{r}
+allcells_rpca = RunUMAP(allcells_rpca, dims = 1:60, verbose = F)
+allcells_rpca = RunTSNE(allcells_rpca, dims = 1:60, verbose = F, perplexity = 25)
+```
+
+Plot fractions and donors and condition
+
+```{r}
+png("results/integr_allcells/seurat_umap50_FracDonor.png", width = 900, height = 300)
 DimPlot(allcells_rpca, reduction = "umap", pt.size = 0.2, 
         split = "Fraction", group.by = "Name")
+dev.off()
+png("results/integr_allcells/seurat_umap50_CondDonor.png", width = 900, height = 300)
+DimPlot(allcells_rpca, reduction = "umap", pt.size = 0.2, 
+        split = "Condition", group.by = "Name")
+dev.off()
 ```
 
+Add existing labels from healthy
+
+```{r}
+merge_umap = merge(allcells_rpca@reductions$umap@cell.embeddings, 
+                   hcells_rpca@meta.data[,c("names_clusters", "names_major")], 
+                   by = 0, all = T)
+merge_umap$names_clusters = as.character(merge_umap$names_clusters)
+merge_umap$names_clusters[is.na(merge_umap$names_clusters)] = "No annot"
+merge_umap$names_clusters = factor(merge_umap$names_clusters, 
+                                   levels = c(levels(hcells_rpca@meta.data$names_clusters),
+                                              "No annot"))
+merge_umap = merge_umap[order(merge_umap$names_clusters, decreasing = T),]
+
+merge_umap$names_major = as.character(merge_umap$names_major)
+merge_umap$names_major[is.na(merge_umap$names_major)] = "No annot"
+merge_umap$names_major = factor(merge_umap$names_major, 
+                                   levels = c(levels(hcells_rpca@meta.data$names_major),
+                                              "No annot"))
+merge_umap = merge_umap[order(merge_umap$names_major, decreasing = T),]
+
+png("results/integr_allcells/umap_allcells_healthy_clusters.png", width = 650, height = 400)
+ggplot(merge_umap, aes(x = UMAP_1, y = UMAP_2, colour = names_clusters))+
+  geom_point(size = 0.25)+
+  guides(colour = guide_legend(override.aes = list(size = 4)))+
+  theme_classic()+
+  theme(legend.position = "right")
+dev.off()
+
+png("results/integr_allcells/umap_allcells_healthy_major.png", width = 510, height = 400)
+ggplot(merge_umap, aes(x = UMAP_1, y = UMAP_2, colour = names_major))+
+  geom_point(size = 0.25)+
+  guides(colour = guide_legend(override.aes = list(size = 4)))+
+  theme_classic()+
+  theme(legend.position = "right")
+dev.off()
+
+rownames(merge_umap) = merge_umap$Row.names
+allcells_rpca = AddMetaData(allcells_rpca, merge_umap[,c("names_clusters", "names_major")])
+```
+
+
+Cluster Seurat results - clustering here is veeeery slow (~6h)
+
+```{r}
+allcells_rpca = FindNeighbors(allcells_rpca, reduction = "pca", dims = 1:60, 
+                              force.recalc = T, graph.name = "pc60", prune.SNN = 1/10)
+allcells_rpca = FindClusters(allcells_rpca, algorithm = 2, verbose = F, graph.name = "pc60",
+                           resolution = seq(0.1, 1.1, 0.1))
+
+umap_list = list()
+tsne_list = list()
+for(i in seq(0.3, 1.0, 0.1)){
+  n = paste0("res.",i)
+  umap_list[[n]] = DimPlot(allcells_rpca, reduction = "umap", pt.size = 0.2, 
+                           label = T, group.by = paste0("pc60_", n)) + labs(title = n)
+  tsne_list[[n]] = DimPlot(allcells_rpca, reduction = "tsne", pt.size = 0.2, 
+                           label = T, group.by = paste0("pc60_", n)) + labs(title = n)
+}
+
+
+png("results/integr_allcells/seurat_tsne_cluster.png", width = 1600, height = 700)
+cowplot::plot_grid(plotlist = tsne_list, ncol = 4, nrow = 2, align = "hv")
+dev.off()
+png("results/integr_allcells/seurat_umap_cluster.png", width = 1600, height = 700)
+cowplot::plot_grid(plotlist = umap_list, ncol = 4, nrow = 2, align = "hv")
+dev.off()
+```
+
+This will be followed by: separating hepatocytes, reprocessing (correct for donor), clustering, add non-hepatocyte clusters to non-hepatocyte fraction, reprocessing (correct for donor), clustering, put everything together (UMAP with all those clusters), then do marker detection  
+
+We start by separating what appear to be hepatocytes and non-hepatocytes
+
+```{r}
+cls ="pc60_res.0.6"
+nonhep_cl = c(6,7,8,9,10,11,14,16,18,19,20,29)
+
+allcells_hep = allcells_rpca[,!(allcells_rpca@meta.data[,cls] %in% nonhep_cl)]
+cells_nhep = rownames(allcells_rpca@meta.data)[allcells_rpca@meta.data[,cls] %in% nonhep_cl]
+```
+
+We now reprocess both of these fractions for clustering
+
+```{r}
+allcells_hep = suppressWarnings(SCTransform(allcells_hep, do.correct.umi = T, verbose = F, 
+                                            vars.to.regress = c("unique_name","nCount_RNA"),
+                                            variable.features.rv.th = 1, seed.use = 1,
+                                            return.only.var.genes = F, 
+                                            variable.features.n = NULL))
+allcells_hep = RunPCA(allcells_hep, verbose = F)
+allcells_hep = RunUMAP(allcells_hep, dims = 1:25, verbose = F)
+DimPlot(allcells_hep, reduction = "umap", group.by = "Fraction", split.by = "Condition")
+
+allcells_hep = FindNeighbors(allcells_hep, reduction = "pca", dims = 1:25, 
+                             force.recalc = T, graph.name = "pc25", prune.SNN = 1/10)
+allcells_hep = FindClusters(allcells_hep, algorithm = 2, verbose = F, graph.name = "pc25",
+                            resolution = seq(0.3, 0.8, 0.1))
+
+allcells_hep = SetIdent(allcells_hep, value = "pc25_res.0.8")
+mk_hep = FindAllMarkers(allcells_hep, assay = "SCT", logfc.threshold = 0.2)
+
+plt = DimPlot(allcells_hep, reduction = "umap", group.by = "pc25_res.0.8", label = T)
+for(g in c("SAA1", "FGA", "CYP2E1", "NNMT", "IGFBP1", "FABP1", "HBB")){
+  vln = VlnPlot(allcells_hep, features = c(g), 
+                group.by = "pc25_res.0.8", sort = T)+theme(legend.position = "none")
+  png(paste0("results/integr_allcells/hep_group_cl_", g, ".png"), width = 1300, height = 600)
+  print(cowplot::plot_grid(plt, vln, ncol = 2))
+  dev.off()
+}
+
+nonhep_hepcl = c(17,8,15,24,20,30)
+#nonhep_hepcl = c(16, 12, 18, 22, 27, 26, 21, 28, 17, 23, 15, 30, 8, 24, 14, 25, 13, 22, 20)
+nonhep_hepcells = rownames(allcells_hep@meta.data)[allcells_hep@meta.data$pc25_res.0.8 %in% nonhep_hepcl]
+```
 
 
 ```{r}
-FeaturePlot(allcells_rpca, features = c("APOA2", "FGA", "MKI67", "CD34", "ANXA2", "PTPRC"),
-            reduction = "umap")
+nhep_cells = c(nonhep_hepcells, cells_nhep)
+allcells_nhep = allcells_rpca[,nhep_cells]
+allcells_nhep = suppressWarnings(SCTransform(allcells_nhep, do.correct.umi = T, verbose = F, 
+                                            vars.to.regress = c("unique_name","nCount_RNA"),
+                                            variable.features.rv.th = 1, seed.use = 1,
+                                            return.only.var.genes = F, 
+                                            variable.features.n = NULL))
+allcells_nhep = RunPCA(allcells_nhep, verbose = F)
+allcells_nhep = RunUMAP(allcells_nhep, dims = 1:25, verbose = F)
+DimPlot(allcells_nhep, reduction = "umap", group.by = "names_major")
+
+allcells_nhep = FindNeighbors(allcells_nhep, reduction = "pca", dims = 1:25, 
+                              force.recalc = T, graph.name = "pc25", prune.SNN = 1/10)
+allcells_nhep = FindClusters(allcells_nhep, algorithm = 2, verbose = F, graph.name = "pc25",
+                             resolution = seq(0.3, 0.8, 0.1))
+
+allcells_nhep = SetIdent(allcells_nhep, value = "pc25_res.0.5")
+mk_nhep = FindAllMarkers(allcells_nhep, assay = "SCT", logfc.threshold = 0.2)
 ```
+
+
+
+
+
+
+
+
+
+
+
