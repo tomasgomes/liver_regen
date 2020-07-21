@@ -165,7 +165,8 @@ cor_test_hep$cor_pval = fdrtool(cor_test_hep$pval, statistic = "pvalue",
                                 plot = F, verbose = F)$qval
 rownames(cor_test_hep) = cor_test_hep$gene
 
-write.csv(cor_test_hep, file = "results/zonation_healthy/cor_test_hepatocytes_dc1_healthy.csv",
+write.csv(cor_test_hep, 
+          file = "results/zonation_healthy/cor_test_hepatocytes_dc1_healthy.csv",
           col.names = T, row.names = F, quote = F)
 ```
 
@@ -230,10 +231,101 @@ colnames(df_pval_cl) = c("gene", "pval", "cluster")
 
 write.csv(df_pval_cl, file = "results/zonation_healthy/hep_dc1_pval_clust_healthy.csv",
           col.names = T, row.names = F, quote = F)
+saveRDS(gene_fit_p, file = "results/zonation_healthy/hep_dc1_pval_clust_healthy.RDS")
 
 write.csv(gene_fit_vals, file = "results/zonation_healthy/hep_dc1_gene_fits_healthy.csv",
           col.names = T, row.names = F, quote = F)
 ```
+
+We can also test zonation genes for pathway enrichment  
+Testing is only done on genes from clusters to avoid bloated non-specific results
+
+```{r}
+gprof_list = list()
+for(i in 1:4){ # this step does not work in RStudio-server
+  genes = df_pval_cl$gene[df_pval_cl$pval<=0.05 & df_pval_cl$cluster==i]
+  gprof_list[[i]] = gost(genes, organism = "hsapiens", significant = T, 
+                     correction_method = "fdr", sources = c("GO:BP", "GO:CC", "REAC"),
+                     custom_bg = hep_hcells@assays$SCT@var.features)
+  gprof_list[[i]]$result$f1 = 2*((gprof_list[[i]]$result$precision * gprof_list[[i]]$result$recall)/(gprof_list[[i]]$result$precision + gprof_list[[i]]$result$recall))
+  saveRDS(gprof_list[[i]], 
+          file = paste0("results/zonation_healthy/gprof_dehep_cl", i, ".RDS"))
+}
+genes = df_pval_cl$gene[df_pval_cl$pval<=0.05 & !is.na(df_pval_cl$cluster)]
+gprof_dehep = gost(genes, organism = "hsapiens", significant = T, 
+                   correction_method = "fdr", sources = c("GO:BP", "GO:CC", "REAC"),
+                   custom_bg = hep_hcells@assays$SCT@var.features)
+gprof_dehep$result$f1 = 2*((gprof_dehep$result$precision * gprof_dehep$result$recall)/(gprof_dehep$result$precision + gprof_dehep$result$recall))
+saveRDS(gprof_dehep, file = "results/zonation_healthy/gprof_dehep.RDS")
+
+# read in all results
+gprof_list = list()
+for(i in 1:4){
+  gprof_list[[i]] = readRDS(paste0("results/zonation_healthy/gprof_dehep_cl", i, ".RDS"))
+}
+gprof_dehep = readRDS("results/zonation_healthy/gprof_dehep.RDS")
+
+gprof_all = c(list("all" = gprof_dehep), gprof_list)
+names(gprof_all) = c("all", paste0("cl", 1:4))
+```
+
+Get term list to deconvolute the terms
+
+```{r}
+all_genes_conv = t(data.frame(gprof_dehep$meta$genes_metadata$query$query_1$mapping))
+
+# get file from here: https://biit.cs.ut.ee/gprofiler/gost
+inputFile <- "../../gene_refs/human/gprofiler_full_hsapiens.ENSG.gmt"
+con  <- file(inputFile, open = "r")
+
+term_list = list()
+term_names = list()
+while (length(oneLine <- readLines(con, n = 1, warn = FALSE)) > 0) {
+    myVector = (strsplit(oneLine, "\t"))[[1]]
+    term_names[[myVector[1]]] = myVector[2]
+    term_list[[myVector[1]]] = myVector[3:length(myVector)]
+    term_list[[myVector[1]]] = unique(rownames(all_genes_conv)[all_genes_conv[,1] %in% term_list[[myVector[1]]]])
+} 
+term_list = term_list[unlist(lapply(term_list, length))>0]
+
+close(con)
+```
+
+Plot genes from pathway
+
+```{r}
+g_sig = names(gene_fit_p)[gene_fit_p<=0.05]
+gene_fit_vals_filt = t(gene_fit_vals[,colnames(gene_fit_vals) %in% g_sig])
+scale_fit = t(apply(gene_fit_vals_filt, 1, scale))
+
+gprof_plt_list = list()
+for(n in names(gprof_all)){
+  gprof_df = gprof_all[[n]]$result
+  gprof_df = gprof_df[order(gprof_df$f1, decreasing = T),]
+  gprof_plt_list[[n]] = list()
+  
+  for(i in unique(gprof_df$term_id)){
+    genes_use = term_list[[i]]
+    if(n!="all"){
+      genes_use = genes_use[genes_use %in% df_pval_cl$gene[paste0("cl",df_pval_cl$cluster)==n]]
+    } else{
+      genes_use = genes_use[genes_use %in% rownames(scale_fit)]
+    }
+    if(length(genes_use>0)){
+      sub_df = scale_fit[genes_use,]
+      plot_df = reshape2::melt(sub_df)
+      gprof_plt_list[[n]][[i]] = ggplot(plot_df, aes(x = Var2, y = value, group = Var1))+
+        geom_hline(yintercept = 0, linetype = "dashed")+
+        geom_line(alpha = 0.1, colour = "grey69")+
+        stat_summary(aes(y = value, group=1), fun.y=mean, colour="red", geom="line",group=1)+
+        labs(subtitle = i, title = term_names[[i]])+
+        theme_bw()
+    }
+  }
+}
+```
+
+
 
 
 

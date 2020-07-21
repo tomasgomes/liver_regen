@@ -891,6 +891,353 @@ saveRDS(hcells_rpca, file = "data/processed/hcells_rpca.RDS")
 ```
 
 
+### Examine CSS output
+Load data
+
+```{r}
+hcells_css = readRDS("data/processed/scripts_out/CSSIntegr_allhealthy.RDS")
+```
+
+Cluster CSS results
+
+```{r}
+hcells_css = FindNeighbors(hcells_css, reduction = "css", 
+                           dims = 1:ncol(Embeddings(hcells_css,"css")), 
+                           force.recalc = T, graph.name = "cssAll")
+hcells_css = FindClusters(hcells_css, algorithm = 2, verbose = F, graph.name = "cssAll",
+                           resolution = seq(0.2, 1.5, 0.1))
+
+umap_list = list()
+for(i in seq(0.5, 1.5, 0.1)){
+  n = paste0("res.",i)
+  umap_list[[n]] = DimPlot(hcells_css, reduction = "umap_css", pt.size = 0.2, 
+                           label = T, group.by = paste0("cssAll_", n)) + labs(title = n)
+}
+umap_list[["phase"]] = DimPlot(hcells_css, reduction = "umap_css", pt.size = 0.2, 
+                               label = T, group.by = "Phase") + labs(title = "CC phase")
+
+png("results/integr_healthy/css_umap_cluster.png", width = 1600, height = 700)
+cowplot::plot_grid(plotlist = umap_list, ncol = 4, nrow = 3, align = "hv")
+dev.off()
+```
+
+Get markers for some clusters. We'll be using SCT-normalised data rather than integrated, given that the latter does not include all genes.  
+THIS IS VERY SLOW (1 day)
+
+```{r}
+css_markers_sct_list = list()
+for(i in c(0.5, 0.9, 1.5)){
+  n = paste0("res_", i)
+  print(n)
+  hcells_css = SetIdent(hcells_css, value = paste0("cssAll_res.", i))
+  css_markers_sct_list[[n]] = FindAllMarkers(hcells_css, assay = "SCT", test.use = "wilcox",
+                                             pseudocount.use = 0.1, logfc.threshold = 0.2, 
+                                             verbose = T)
+}
+saveRDS(css_markers_sct_list, file = "results/integr_healthy/css_mrk_sct_list.RDS")
+```
+
+Subclustering the endothelial cells
+
+```{r}
+cl = c(9)
+sub_srat = hcells_css[,hcells_css@meta.data$cssAll_res.0.9 %in% cl]
+sub_srat = ScaleData(sub_srat, use.umi = T, vars.to.regress = c("nCount_SCT", "Donor"),
+                     do.scale = F, verbose = FALSE)
+sub_srat = RunPCA(sub_srat, verbose = F)
+sub_srat = RunUMAP(sub_srat, reduction = "pca", dims = 1:10, verbose = F)
+pltna = DimPlot(sub_srat, reduction = "umap", group.by = "Name")
+
+sub_srat = FindNeighbors(sub_srat, reduction = "pca", dims = 1:10, prune.SNN = 1/5,
+                         force.recalc = T, graph.name = "endo_pc10")
+sub_srat = FindClusters(sub_srat, algorithm = 2, verbose = F, graph.name = "endo_pc10",
+                        resolution = seq(0.1, 1, 0.1))
+pltcl = DimPlot(sub_srat, reduction = "umap", group.by = "endo_pc10_res.0.1")
+
+png("results/integr_healthy/css_umap_cluster4_sub.png", width = 800, height = 350)
+cowplot::plot_grid(pltna, pltcl, ncol = 2, nrow = 1, align = "hv")
+dev.off()
+
+sub9 = data.frame(row.names = colnames(sub_srat),
+                  "sub9_cl" = ifelse(sub_srat@reductions$umap@cell.embeddings[,1]<(-5.2),
+                                     "sub9_stell",
+                                     ifelse(sub_srat@meta.data$endo_pc10_res.0.1==1,
+                                            "sub9_1", "sub9_0")))
+sub_srat = AddMetaData(sub_srat, metadata = sub9)
+
+sub_srat = SetIdent(sub_srat, value = "sub9_cl")
+DefaultAssay(sub_srat) = "SCT"
+mk_sub9 = FindAllMarkers(sub_srat, assay = "SCT", test.use = "wilcox",
+                     pseudocount.use = 0.1, logfc.threshold = 0.2, 
+                     verbose = T)
+mk_sub9 = mk_sub9[mk_sub9$p_val_adj<=0.05,]
+write.csv(x = mk_sub9, col.names = T, row.names = T, quote = F,
+          file = "results/integr_healthy/css_cluster4_sub_markers.csv")
+
+# create new labels (required for next step)
+cl9_stell = rownames(sub_srat@meta.data)[sub_srat@meta.data$sub9_cl=="sub9_stell"]
+cl9_0 = rownames(sub_srat@meta.data)[sub_srat@meta.data$sub9_cl=="sub9_0"]
+cl9_1 = rownames(sub_srat@meta.data)[sub_srat@meta.data$sub9_cl=="sub9_1"]
+healthy_cl = as.character(hcells_css@meta.data$cssAll_res.0.9)
+healthy_cl[rownames(hcells_css@meta.data) %in% cl9_stell] = "sub9_stell"
+healthy_cl[rownames(hcells_css@meta.data) %in% cl9_0] = "sub9_0"
+healthy_cl[rownames(hcells_css@meta.data) %in% cl9_1] = "sub9_1"
+
+# save data
+saveRDS(sub_srat, file = "data/processed/sub_healthy_css_endo_srat.RDS")
+```
+
+Subclustering the T cells
+
+```{r}
+cl = c(12)
+sub_srat = hcells_css[,hcells_css@meta.data$cssAll_res.0.9 %in% cl]
+sub_srat = ScaleData(sub_srat, use.umi = T, vars.to.regress = c("nCount_SCT", "Donor"),
+                     do.scale = F, verbose = FALSE)
+sub_srat = RunPCA(sub_srat, verbose = F)
+sub_srat = RunUMAP(sub_srat, reduction = "pca", dims = 1:10, verbose = F)
+pltna = DimPlot(sub_srat, reduction = "umap", group.by = "Name")
+
+sub_srat = FindNeighbors(sub_srat, reduction = "pca", dims = 1:10, prune.SNN = 1/5,
+                         force.recalc = T, graph.name = "t_pc10")
+sub_srat = FindClusters(sub_srat, algorithm = 2, verbose = F, graph.name = "t_pc10",
+                        resolution = seq(0.1, 1, 0.1))
+pltcl = DimPlot(sub_srat, reduction = "umap", group.by = "t_pc10_res.0.2")
+
+png("results/integr_healthy/css_umap_cluster12_sub.png", width = 800, height = 350)
+cowplot::plot_grid(pltna, pltcl, ncol = 2, nrow = 1, align = "hv")
+dev.off()
+
+sub_srat = SetIdent(sub_srat, value = "t_pc10_res.0.1")
+DefaultAssay(sub_srat) = "SCT"
+mk_sub12 = FindAllMarkers(sub_srat, assay = "SCT", test.use = "wilcox",
+                     pseudocount.use = 0.1, logfc.threshold = 0.2, 
+                     verbose = T)
+mk_sub12 = mk_sub12[mk_sub12$p_val_adj<=0.05,]
+write.csv(x = mk_sub12, col.names = T, row.names = T, quote = F,
+          file = "results/integr_healthy/css_cluster12_sub_markers.csv")
+
+# create new labels (required for next step)
+cl12_0 = rownames(sub_srat@meta.data)[sub_srat@meta.data$t_pc10_res.0.1==0]
+cl12_1 = rownames(sub_srat@meta.data)[sub_srat@meta.data$t_pc10_res.0.1==1]
+healthy_cl[rownames(hcells_css@meta.data) %in% cl12_0] = "sub12_0"
+healthy_cl[rownames(hcells_css@meta.data) %in% cl12_1] = "sub12_1"
+
+# save data
+saveRDS(sub_srat, file = "data/processed/sub_healthy_css_tcell_srat.RDS")
+```
+
+Subclustering the Kupffer-T cell interaction
+
+```{r}
+cl = c(16)
+sub_srat = hcells_css[,hcells_css@meta.data$cssAll_res.0.9 %in% cl]
+sub_srat = ScaleData(sub_srat, use.umi = T, vars.to.regress = c("nCount_SCT", "Donor"),
+                     do.scale = F, verbose = FALSE)
+sub_srat = RunPCA(sub_srat, verbose = F)
+sub_srat = RunUMAP(sub_srat, reduction = "pca", dims = 1:10, verbose = F)
+pltna = DimPlot(sub_srat, reduction = "umap", group.by = "Name")
+
+sub_srat = FindNeighbors(sub_srat, reduction = "pca", dims = 1:10, prune.SNN = 1/5,
+                         force.recalc = T, graph.name = "kt_pc10")
+sub_srat = FindClusters(sub_srat, algorithm = 2, verbose = F, graph.name = "kt_pc10",
+                        resolution = seq(0.1, 1, 0.1))
+pltcl = DimPlot(sub_srat, reduction = "umap", group.by = "kt_pc10_res.0.1")
+
+png("results/integr_healthy/css_umap_cluster16_sub.png", width = 800, height = 350)
+cowplot::plot_grid(pltna, pltcl, ncol = 2, nrow = 1, align = "hv")
+dev.off()
+
+sub_srat = SetIdent(sub_srat, value = "kt_pc10_res.0.1")
+DefaultAssay(sub_srat) = "SCT"
+mk_sub16 = FindAllMarkers(sub_srat, assay = "SCT", test.use = "wilcox",
+                     pseudocount.use = 0.1, logfc.threshold = 0.2, 
+                     verbose = T)
+mk_sub16 = mk_sub16[mk_sub16$p_val_adj<=0.05,]
+write.csv(x = mk_sub16, col.names = T, row.names = T, quote = F,
+          file = "results/integr_healthy/css_cluster16_sub_markers.csv")
+
+# this section just proves that these are not interacting cells, but rather a mix
+```
+
+Now we're organising the new labels. These will be as follows: hepatocytes and cholangiocytes using res 0.5, remaining using 0.9, also include subclusters from endothelial and T cells
+
+```{r}
+# replace labels for hepatocytes and cholangiocytes
+r5_cl3 = rownames(hcells_css@meta.data)[hcells_css@meta.data$cssAll_res.0.5==3]
+r5_cl0 = rownames(hcells_css@meta.data)[hcells_css@meta.data$cssAll_res.0.5==0]
+r5_cl12 = rownames(hcells_css@meta.data)[hcells_css@meta.data$cssAll_res.0.5==12]
+r5_cl1 = rownames(hcells_css@meta.data)[hcells_css@meta.data$cssAll_res.0.5==1]
+r5_cl6 = rownames(hcells_css@meta.data)[hcells_css@meta.data$cssAll_res.0.5==6]
+r5_cl4 = rownames(hcells_css@meta.data)[hcells_css@meta.data$cssAll_res.0.5==4]
+healthy_cl[rownames(hcells_css@meta.data) %in% r5_cl3] = "r5_cl3"
+healthy_cl[rownames(hcells_css@meta.data) %in% r5_cl0] = "r5_cl0"
+healthy_cl[rownames(hcells_css@meta.data) %in% r5_cl12] = "r5_cl12"
+healthy_cl[rownames(hcells_css@meta.data) %in% r5_cl1] = "r5_cl1"
+healthy_cl[rownames(hcells_css@meta.data) %in% r5_cl6] = "r5_cl6"
+healthy_cl[rownames(hcells_css@meta.data) %in% r5_cl4] = "r5_cl4"
+healthy_cl[healthy_cl==3] = "r5_cl1"
+
+# add metadata
+df_meta = data.frame(row.names = colnames(hcells_css),
+                     "healthy_cl" = healthy_cl)
+hcells_css = AddMetaData(hcells_css, df_meta)
+
+# get markers for these clusters
+hcells_css = SetIdent(hcells_css, value = "healthy_cl")
+mk_healthy_cl = FindAllMarkers(hcells_css, assay = "SCT", test.use = "wilcox",
+                               pseudocount.use = 0.1, logfc.threshold = 0.2, verbose = T)
+write.csv(x = mk_healthy_cl, col.names = T, row.names = T, quote = F,
+          file = "results/integr_healthy/css_allPops_markers.csv")
+```
+
+Now renaming
+
+```{r}
+names_clusters = ifelse(healthy_cl=="r5_cl3", "Cholangiocytes", 
+                        ifelse(healthy_cl=="r5_cl0", "Hepatocytes (central)", 
+                        ifelse(healthy_cl=="r5_cl12", "Hepatocytes (unknown 2)", 
+                        ifelse(healthy_cl=="r5_cl1", "Hepatocytes (midzone)", 
+                        ifelse(healthy_cl=="r5_cl6", "Hepatocytes (portal)", 
+                        ifelse(healthy_cl=="r5_cl4", "Hepatocytes (unknown 1)", 
+                        ifelse(healthy_cl=="sub12_0", "ab-T cells", 
+                        ifelse(healthy_cl=="sub12_1", "gd-T cells", 
+                        ifelse(healthy_cl=="sub9_stell", "Stellate cells", 
+                        ifelse(healthy_cl=="sub9_0", "LSEC portal vein", 
+                        ifelse(healthy_cl=="sub9_1", "Endothelial cells (non-LSEC)", 
+                        ifelse(healthy_cl=="10", "Hepatocytes (central-mid, low counts)", 
+                        ifelse(healthy_cl=="13", "Macrophage-Endothelial interaction", 
+                        ifelse(healthy_cl=="14", "T cell-Endothelial interaction", 
+                        ifelse(healthy_cl=="16", "Kupffer-T cell mix", 
+                        ifelse(healthy_cl=="17", "Plasmablasts", 
+                        ifelse(healthy_cl=="18", "Macrophages", 
+                        ifelse(healthy_cl=="19", "pDCs", 
+                        ifelse(healthy_cl=="4", "LSEC central vein", 
+                        ifelse(healthy_cl=="6", "cDCs", 
+                        ifelse(healthy_cl=="8", "Kupffer cells", "ERROR"
+                        )))))))))))))))))))))
+
+names_major = ifelse(healthy_cl=="r5_cl3", "Cholangiocytes", 
+                     ifelse(healthy_cl=="r5_cl0", "Hepatocytes", 
+                     ifelse(healthy_cl=="r5_cl12", "Hepatocytes", 
+                     ifelse(healthy_cl=="r5_cl1", "Hepatocytes", 
+                     ifelse(healthy_cl=="r5_cl6", "Hepatocytes", 
+                     ifelse(healthy_cl=="r5_cl4", "Hepatocytes", 
+                     ifelse(healthy_cl=="sub12_0", "T cells", 
+                     ifelse(healthy_cl=="sub12_1", "T cells", 
+                     ifelse(healthy_cl=="sub9_stell", "Stellate cells", 
+                     ifelse(healthy_cl=="sub9_0", "Endothelial cells", 
+                     ifelse(healthy_cl=="sub9_1", "Endothelial cells", 
+                     ifelse(healthy_cl=="10", "Hepatocytes", 
+                     ifelse(healthy_cl=="13", "Doublets", 
+                     ifelse(healthy_cl=="14", "Doublets", 
+                     ifelse(healthy_cl=="16", "Doublets", 
+                     ifelse(healthy_cl=="17", "Plasmablasts", 
+                     ifelse(healthy_cl=="18", "Macrophages", 
+                     ifelse(healthy_cl=="19", "DCs", 
+                     ifelse(healthy_cl=="4", "Endothelial cells", 
+                     ifelse(healthy_cl=="6", "DCs", 
+                     ifelse(healthy_cl=="8", "Macrophages", "ERROR"
+                     )))))))))))))))))))))
+
+newmeta = data.frame(row.names = rownames(hcells_css@meta.data),
+                     "clusters" = healthy_cl,
+                     "names_clusters" = names_clusters,
+                     "names_major" = names_major)
+
+hcells_css = AddMetaData(hcells_css, metadata = newmeta)
+```
+
+Plot markers for these populations
+
+```{r}
+mk_list = list("Cholangiocytes" = c("KRT7", "ANXA4", "EPCAM", "KRT19"), 
+               "Hepatocytes (central)" = c("CYP1A2", "CYP2E1", "APOH", "CYP3A4"), 
+               "Hepatocytes (unknown 2)" = c("CYP1A2", "DEPDC7", "PCOLCE2", "F13B"), 
+               "Hepatocytes (midzone)" = c("HAMP", "PLA2G2A", "NNMT", "HP"), 
+               "Hepatocytes (portal)" = c("C3", "SAA1", "CYP2A6", "C1R"), 
+               "Hepatocytes (unknown 1)" = c("HULC", "AR", "CYP4F3", "APOA2"), 
+               "ab-T cells" = c("CD8A", "CD3E", "TRAC", "TRBC1"), 
+               "gd-T cells" = c("TRDC", "GZMB", "CCL3", "MKI67"), 
+               "Stellate cells" = c("ACTA2", "DCN", "COLEC11", "SPARC"), 
+               "LSEC portal vein" = c("MGP", "CLEC14A", "PECAM1", "VWF"), 
+               "Endothelial cells (non-LSEC)" = c("INMT", "RAMP3", "ENG", "ICAM1"), 
+               "Hepatocytes (central-mid, low counts)" = c("GSTA2", "ANXA10", "FBP1", "SAA2"), 
+               "Macrophage-Endothelial interaction" = c("S100A8", "LYZ", "SPARC", "LYVE1"), 
+               "T cell-Endothelial interaction" = c("CD3D", "TRBC1", "CLEC4G", "LYVE1"), 
+               "Kupffer-T cell mix" = c("MARCO", "CD5L", "TRBC1", "NKG7"), 
+               "Plasmablasts" = c("IGLC3", "IGHA1", "CD79A", "CD27"), 
+               "Macrophages" = c("S100A8", "CD68", "LYZ", "IL1B"), 
+               "pDCs" = c("GZMB", "LILRA4", "IRF7", "TLR7"), 
+               "LSEC central vein" = c("CLEC4G", "CD68", "PECAM1", "F8"), 
+               "cDCs" = c("HLA-DQB1", "CD1C", "FCER1A", "CLEC10A"), 
+               "Kupffer cells" = c("CD5L", "MARCO", "C1QB", "IL10"))
+
+plt_list = list()
+plt_list[["all_clusters"]] = DimPlot(hcells_css, reduction = "umap_css", label = T,
+                                     group.by = "names_clusters")+
+  labs(title = "All clusters")+
+  theme(legend.position = "none")
+plt_list[["major_clusters"]] = DimPlot(hcells_css, reduction = "umap_css", label = T,
+                                       group.by = "names_major")+
+  labs(title = "Major clusters")+
+  theme(legend.position = "none")
+
+for(n in names(mk_list)){
+  plt_list[[n]] = FeaturePlot(hcells_css, reduction = "umap_css", features = mk_list[[n]])
+}
+
+for(n in names(plt_list)){
+  png(paste0("results/integr_healthy/css_markers_plots/", n, "_umap.png"), 
+      height = 1200, width = 1300)
+  print(plt_list[[n]])
+  dev.off()
+}
+
+# save markers in the same folder, renamed
+mk_healthy_filt = mk_healthy_cl[mk_healthy_cl$p_val_adj<=0.05,]
+meta_unique = unique(newmeta[,c(1,2)])
+rownames(meta_unique) = meta_unique$clusters
+mk_healthy_filt$cluster = meta_unique[mk_healthy_filt$cluster,"names_clusters"]
+write.csv(x = mk_healthy_filt, col.names = T, row.names = T, quote = F,
+          file = "results/integr_healthy/css_markers_plots/css_allPops_markers.csv")
+```
+
+And plot for the subclusters as well
+
+```{r}
+srat_tcell = readRDS("data/processed/sub_healthy_css_tcell_srat.RDS")
+plt_list = list()
+for(n in names(mk_list)[c(7,8)]){
+  plt_list[[n]] = FeaturePlot(srat_tcell, reduction = "umap", features = mk_list[[n]])
+}
+for(n in names(plt_list)){
+  png(paste0("results/integr_healthy/css_markers_plots/tcell_", n, "_umap.png"), 
+      height = 1200, width = 1300)
+  print(plt_list[[n]])
+  dev.off()
+}
+
+srat_endo = readRDS("data/processed/sub_healthy_css_endo_srat.RDS")
+plt_list = list()
+for(n in names(mk_list)[c(9,10,11)]){
+  plt_list[[n]] = FeaturePlot(srat_endo, reduction = "umap", features = mk_list[[n]])
+}
+for(n in names(plt_list)){
+  png(paste0("results/integr_healthy/css_markers_plots/endothelial_", n, "_umap.png"), 
+      height = 1200, width = 1300)
+  print(plt_list[[n]])
+  dev.off()
+}
+```
+
+Save Seurat object
+
+```{r}
+saveRDS(hcells_css, file = "data/processed/hcells_css.RDS")
+```
+
+
 
 ## Integrate all datasets
 Integrate all cell datasets using different methods, using batch scripts  
@@ -964,7 +1311,7 @@ As explained in the healthy section, there are some issues with Harmony, so we w
 Load data
 
 ```{r}
-allcells_rpca = readRDS("data/processed/scripts_out/SeuratIntegrRPCA_allcells.RDS")
+allcells_rpca = readRDS("data/processed/scripts_out/SeuratIntegrRPCA_allcells_v2.RDS")
 allcells_rpca = RunPCA(allcells_rpca, verbose = F, npcs = 80)
 # load healthy data, which now contains annotations and can help here
 hcells_rpca = readRDS("data/processed/hcells_rpca.RDS")
@@ -1118,7 +1465,6 @@ rownames(merge_umap) = merge_umap$Row.names
 allcells_rpca = AddMetaData(allcells_rpca, merge_umap[,c("names_clusters", "names_major")])
 ```
 
-
 Cluster Seurat results - clustering here is veeeery slow (~6h)
 
 ```{r}
@@ -1144,6 +1490,9 @@ dev.off()
 png("results/integr_allcells/seurat_umap_cluster.png", width = 1600, height = 700)
 cowplot::plot_grid(plotlist = umap_list, ncol = 4, nrow = 2, align = "hv")
 dev.off()
+
+# save data at this point 
+saveRDS(allcells_rpca, file = "data/processed/allcells_rpca_cl_mix.RDS")
 ```
 
 This will be followed by: separating hepatocytes, reprocessing (correct for donor), clustering, add non-hepatocyte clusters to non-hepatocyte fraction, reprocessing (correct for donor), clustering, put everything together (UMAP with all those clusters), then do marker detection  
@@ -1158,7 +1507,7 @@ allcells_hep = allcells_rpca[,!(allcells_rpca@meta.data[,cls] %in% nonhep_cl)]
 cells_nhep = rownames(allcells_rpca@meta.data)[allcells_rpca@meta.data[,cls] %in% nonhep_cl]
 ```
 
-We now reprocess both of these fractions for clustering
+We now reprocess both of these fractions for clustering. First, hep
 
 ```{r}
 allcells_hep = suppressWarnings(SCTransform(allcells_hep, do.correct.umi = T, verbose = F, 
@@ -1177,6 +1526,8 @@ allcells_hep = FindClusters(allcells_hep, algorithm = 2, verbose = F, graph.name
 
 allcells_hep = SetIdent(allcells_hep, value = "pc25_res.0.8")
 mk_hep = FindAllMarkers(allcells_hep, assay = "SCT", logfc.threshold = 0.2)
+write.csv(mk_hep, file = "results/integr_allcells/hep_markers_res.0.8.csv", 
+          col.names = T, row.names = T, quote = F)
 
 plt = DimPlot(allcells_hep, reduction = "umap", group.by = "pc25_res.0.8", label = T)
 for(g in c("SAA1", "FGA", "CYP2E1", "NNMT", "IGFBP1", "FABP1", "HBB")){
@@ -1190,15 +1541,25 @@ for(g in c("SAA1", "FGA", "CYP2E1", "NNMT", "IGFBP1", "FABP1", "HBB")){
 nonhep_hepcl = c(17,8,15,24,20,30)
 #nonhep_hepcl = c(16, 12, 18, 22, 27, 26, 21, 28, 17, 23, 15, 30, 8, 24, 14, 25, 13, 22, 20)
 nonhep_hepcells = rownames(allcells_hep@meta.data)[allcells_hep@meta.data$pc25_res.0.8 %in% nonhep_hepcl]
+
+# save data at this point 
+saveRDS(allcells_hep, file = "data/processed/allcells_hep.RDS")
 ```
 
+And now, non-hep
 
 ```{r}
 nhep_cells = c(nonhep_hepcells, cells_nhep)
 allcells_nhep = allcells_rpca[,nhep_cells]
-allcells_nhep = suppressWarnings(SCTransform(allcells_nhep, do.correct.umi = T, verbose = F, 
-                                            vars.to.regress = c("unique_name","nCount_RNA"),
-                                            variable.features.rv.th = 1, seed.use = 1,
+
+# we remove this object here to avoid making RStudio lag
+rm(allcells_rpca)
+
+allcells_nhep = suppressWarnings(SCTransform(allcells_nhep, do.correct.umi = T,
+                                             verbose = F, 
+                                             vars.to.regress = c("unique_name","nCount_RNA"),
+                                            variable.features.rv.th = 1, 
+                                            seed.use = 1,
                                             return.only.var.genes = F, 
                                             variable.features.n = NULL))
 allcells_nhep = RunPCA(allcells_nhep, verbose = F)
@@ -1206,21 +1567,182 @@ allcells_nhep = RunUMAP(allcells_nhep, dims = 1:25, verbose = F)
 DimPlot(allcells_nhep, reduction = "umap", group.by = "names_major")
 
 allcells_nhep = FindNeighbors(allcells_nhep, reduction = "pca", dims = 1:25, 
-                              force.recalc = T, graph.name = "pc25", prune.SNN = 1/10)
-allcells_nhep = FindClusters(allcells_nhep, algorithm = 2, verbose = F, graph.name = "pc25",
-                             resolution = seq(0.3, 0.8, 0.1))
+                              force.recalc = T, graph.name = "pc25", 
+                              prune.SNN = 1/10)
+allcells_nhep = FindClusters(allcells_nhep, algorithm = 2, verbose = F, 
+                             graph.name = "pc25", resolution = seq(0.3, 0.8, 0.1))
 
-allcells_nhep = SetIdent(allcells_nhep, value = "pc25_res.0.5")
+allcells_nhep = SetIdent(allcells_nhep, value = "pc25_res.0.6")
 mk_nhep = FindAllMarkers(allcells_nhep, assay = "SCT", logfc.threshold = 0.2)
+write.csv(mk_nhep, file = "results/integr_allcells/nhep_markers_res.0.6.csv", 
+          col.names = T, row.names = T, quote = F)
+
+plt = DimPlot(allcells_nhep, reduction = "umap", group.by = "pc25_res.0.6", label = T)
+for(g in c("SAA1", "FGA", "CYP2E1", "NNMT", "IGFBP1", "FABP1", "HBB")){
+  vln = VlnPlot(allcells_nhep, features = c(g), 
+                group.by = "pc25_res.0.6", sort = T)+theme(legend.position = "none")
+  png(paste0("results/integr_allcells/nhep_group_cl_", g, ".png"), width = 1300, height = 600)
+  print(cowplot::plot_grid(plt, vln, ncol = 2))
+  dev.off()
+}
+
+hep_nhepcl = c(13, 18, 20) # 20 is likely Kupffer-hep
+hep_nhepcells = rownames(allcells_nhep@meta.data)[allcells_nhep@meta.data$pc25_res.0.6 %in% hep_nhepcl]
+
+# save data at this point 
+saveRDS(allcells_nhep, file = "data/processed/allcells_nhep.RDS")
+```
+
+Having established hepatocyte and non-hepatocyte clusters, we will re-analyse the data
+
+```{r}
+hep_hepcells = rownames(allcells_hep@meta.data)[!(allcells_hep@meta.data$pc25_res.0.8 %in% nonhep_hepcl)]
+allcells_hep = merge(allcells_hep[,hep_hepcells], allcells_nhep[,hep_nhepcells])
+
+allcells_hep = suppressWarnings(SCTransform(allcells_hep, do.correct.umi = T, verbose = F, 
+                                            vars.to.regress = c("unique_name","nCount_RNA"),
+                                            variable.features.rv.th = 1, seed.use = 1,
+                                            return.only.var.genes = F, 
+                                            variable.features.n = NULL))
+allcells_hep = RunPCA(allcells_hep, verbose = F)
+allcells_hep = RunUMAP(allcells_hep, dims = 1:15, verbose = F)
+DimPlot(allcells_hep, reduction = "umap", group.by = "Condition", split.by = "Donor", ncol = 3)
+FeaturePlot(allcells_hep, features = c("FGA", "SAA1", "HAMP", "CYP2E1","LYVE1","HLA-DRA"))
+
+allcells_hep = FindNeighbors(allcells_hep, reduction = "pca", dims = 1:15, 
+                             force.recalc = T, graph.name = "pc15", prune.SNN = 1/10)
+allcells_hep = FindClusters(allcells_hep, algorithm = 2, verbose = F, graph.name = "pc15",
+                            resolution = seq(0.3, 0.8, 0.1))
+
+allcells_hep = SetIdent(allcells_hep, value = "pc15_res.0.5")
+mk_hep = FindAllMarkers(allcells_hep, assay = "SCT", logfc.threshold = 0.2)
+
+# remove "doublets"
+allcells_hep_filt = allcells_hep[,!(allcells_hep@meta.data$pc15_res.0.5 %in% c(12,13,16,11,14))]
+allcells_hep_filt = suppressWarnings(SCTransform(allcells_hep_filt, do.correct.umi = T, 
+                                                 verbose = F, seed.use = 1,
+                                                 vars.to.regress = c("unique_name","nCount_RNA"),
+                                                 variable.features.n = 1500, 
+                                                 return.only.var.genes = F))
+allcells_hep_filt = RunPCA(allcells_hep_filt, verbose = F)
+allcells_hep_filt = RunUMAP(allcells_hep_filt, dims = 1:10, verbose = F)
+
+DimPlot(allcells_hep_filt, reduction = "umap", group.by = "pc15_res.0.5", label = T)
+
+allcells_hep = FindNeighbors(allcells_hep, reduction = "pca", dims = 1:10, 
+                             force.recalc = T, graph.name = "pc15", prune.SNN = 1/10)
+allcells_hep = FindClusters(allcells_hep, algorithm = 2, verbose = F, graph.name = "pc10",
+                            resolution = seq(0.3, 0.8, 0.1))
+
+DimPlot(allcells_hep_filt, reduction = "umap", group.by = "pc15_res.0.5", label = T)
+
+
+
+
+tab_cl_hep = table(allcells_hep@meta.data$Condition, allcells_hep@meta.data$pc15_res.0.5)
+pheatmap::pheatmap(tab_cl_hep, scale = "column")
+
+hep_donor_list = lapply(unique(allcells_hep_filt@meta.data$unique_name), 
+                        function(x) allcells_hep_filt[,allcells_hep_filt@meta.data$unique_name==x])
+names(hep_donor_list) = unique(allcells_hep_filt@meta.data$unique_name)
+
+save(hep_donor_list, file = "data/processed/hep_donor_list.RData")
 ```
 
 
 
+### Examine CSS output
+Load data
 
+```{r}
+allcells_css = readRDS("data/processed/scripts_out/CSSIntegr_allcells.RDS")
+#allcells_rpca = RunPCA(allcells_rpca, verbose = F, npcs = 80)
+# load healthy data, which now contains annotations and can help here
+hcells_css = readRDS("data/processed/hcells_css.RDS")
+```
 
+Add existing labels from healthy
 
+```{r}
+hmeta = hcells_css@meta.data[,c("names_clusters", "names_major", "unique_name")]
+merge_umap = merge(allcells_css@reductions$umap_css@cell.embeddings, hmeta, 
+                   by = 0, all = T)
+print(dim(merge_umap))
+merge_umap$names_clusters = as.character(merge_umap$names_clusters)
+merge_umap$names_clusters[is.na(merge_umap$names_clusters)] = "No annot"
+merge_umap$names_clusters = factor(merge_umap$names_clusters, 
+                                   levels = c(levels(hcells_css@meta.data$names_clusters),
+                                              "No annot"))
+merge_umap = merge_umap[order(merge_umap$names_clusters, decreasing = T),]
 
+merge_umap$names_major = as.character(merge_umap$names_major)
+merge_umap$names_major[is.na(merge_umap$names_major)] = "No annot"
+merge_umap$names_major = factor(merge_umap$names_major, 
+                                   levels = c(levels(hcells_css@meta.data$names_major),
+                                              "No annot"))
+merge_umap = merge_umap[order(merge_umap$names_major, decreasing = T),]
 
+png("results/integr_allcells/umap_allcells_css_healthy_clusters.png", 
+    width = 650, height = 400)
+ggplot(merge_umap, aes(x = UMACSS_1, y = UMACSS_2, colour = names_clusters))+
+  geom_point(size = 0.25)+
+  guides(colour = guide_legend(override.aes = list(size = 4), ncol = 1))+
+  theme_classic()+
+  theme(legend.position = "right")
+dev.off()
 
+png("results/integr_allcells/umap_allcells_css_healthy_major.png", 
+    width = 510, height = 400)
+ggplot(merge_umap, aes(x = UMACSS_1, y = UMACSS_2, colour = names_major))+
+  geom_point(size = 0.25)+
+  guides(colour = guide_legend(override.aes = list(size = 4), ncol = 1))+
+  theme_classic()+
+  theme(legend.position = "right")
+dev.off()
+
+rownames(merge_umap) = merge_umap$Row.names
+allcells_css = AddMetaData(allcells_css, merge_umap[,c("names_clusters", "names_major")])
+rm(hcells_css)
+```
+
+Cluster CSS results
+
+```{r}
+allcells_css = FindNeighbors(allcells_css, reduction = "css", 
+                             dims = 1:ncol(Embeddings(allcells_css,"css")), 
+                             force.recalc = T, graph.name = "cssAll")
+allcells_css = FindClusters(allcells_css, algorithm = 2, verbose = F, graph.name = "cssAll",
+                            resolution = seq(0.2, 1.5, 0.1))
+
+umap_list = list()
+for(i in seq(0.5, 1.5, 0.1)){
+  n = paste0("res.",i)
+  umap_list[[n]] = DimPlot(allcells_css, reduction = "umap_css", pt.size = 0.2, 
+                           label = T, group.by = paste0("cssAll_", n)) + labs(title = n)
+}
+umap_list[["phase"]] = DimPlot(allcells_css, reduction = "umap_css", pt.size = 0.2, 
+                               label = T, group.by = "Phase") + labs(title = "CC phase")
+
+png("results/integr_allcells/css_umap_cluster.png", width = 1750, height = 850)
+cowplot::plot_grid(plotlist = umap_list, ncol = 4, nrow = 3, align = "hv")
+dev.off()
+```
+
+Get markers for some clusters. We'll be using SCT-normalised data rather than integrated, given that the latter does not include all genes.  
+THIS IS VERY SLOW (1 day)
+
+```{r}
+css_markers_sct_list = list()
+for(i in c(0.6, 1)){
+  n = paste0("res_", i)
+  print(n)
+  hcells_css = SetIdent(allcells_css, value = paste0("cssAll_res.", i))
+  css_markers_sct_list[[n]] = FindAllMarkers(allcells_css, assay = "SCT", 
+                                             test.use = "wilcox",
+                                             pseudocount.use = 0.1, logfc.threshold = 0.2, 
+                                             verbose = T)
+}
+saveRDS(css_markers_sct_list, file = "results/integr_allcells/css_mrk_sct_list.RDS")
+```
 
 

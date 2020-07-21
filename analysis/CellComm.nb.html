@@ -1808,14 +1808,27 @@ library(ggplot2)
 library(ggridges)
 library(dplyr)</code></pre>
 <!-- rnb-source-end -->
+<!-- rnb-output-begin eyJkYXRhIjoiXG5BdHRhY2hpbmcgcGFja2FnZTog4oCYZHBseXLigJlcblxuVGhlIGZvbGxvd2luZyBvYmplY3RzIGFyZSBtYXNrZWQgZnJvbSDigJhwYWNrYWdlOnN0YXRz4oCZOlxuXG4gICAgZmlsdGVyLCBsYWdcblxuVGhlIGZvbGxvd2luZyBvYmplY3RzIGFyZSBtYXNrZWQgZnJvbSDigJhwYWNrYWdlOmJhc2XigJk6XG5cbiAgICBpbnRlcnNlY3QsIHNldGRpZmYsIHNldGVxdWFsLCB1bmlvblxuIn0= -->
+<pre><code>
+Attaching package: ‘dplyr’
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union</code></pre>
+<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 <p>Save the data to run the analysis<br />
 “Doublet” clusters are removed, as well as some contaminaiting non-hepatocytes</p>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuaGNlbGxzX3JwY2EgPSByZWFkUkRTKFwiZGF0YS9wcm9jZXNzZWQvaGNlbGxzX3JwY2EuUkRTXCIpXG5gYGAifQ== -->
-<pre class="r"><code>hcells_rpca = readRDS(&quot;data/processed/hcells_rpca.RDS&quot;)</code></pre>
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuaGNlbGxzX3JwY2EgPSByZWFkUkRTKFwiZGF0YS9wcm9jZXNzZWQvaGNlbGxzX3JwY2EuUkRTXCIpXG5oZXBfaGNlbGxzID0gcmVhZFJEUyhcImRhdGEvcHJvY2Vzc2VkL2hlcF9oY2VsbHNfem9uLlJEU1wiKVxuYGBgIn0= -->
+<pre class="r"><code>hcells_rpca = readRDS(&quot;data/processed/hcells_rpca.RDS&quot;)
+hep_hcells = readRDS(&quot;data/processed/hep_hcells_zon.RDS&quot;)</code></pre>
 <!-- rnb-source-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
@@ -1834,7 +1847,7 @@ Run to get heatmaps and interaction counts: <code>cellphonedb plot heatmap_plot 
 <p>Load results</p>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuY3BkYl9wYXRoID0gXCJyZXN1bHRzL2NlbGxfY29tbV9oZWFsdGh5L0NlbGxQaG9uZURCX3J1bnNcIlxuXG4jIHJlbW92ZSBkb3VibGV0IGNlbGxzXG5oY2VsbHNfZmlsdCA9IGhjZWxsc19ycGNhWywhZ3JlcGwoXCJpbnRlcmFjdGlvblwiLCBoY2VsbHNfcnBjYUBtZXRhLmRhdGEkbmFtZXNfY2x1c3RlcnMpXVxuXG4jIHJlbW92ZSBjb250YW1pbmF0aW5nIGhlcGF0b2N5dGVzXG5oY2VsbHNfZmlsdCA9IGhjZWxsc19maWx0Wyxjb2xuYW1lcyhoY2VsbHNfZmlsdCkgJWluJSBjb2xuYW1lcyhoZXBfaGNlbGxzKSB8XG4gICAgICAgICAgICAgICAgICAgICAgICAgICAgIWdyZXBsKFwiSGVwYXRcIiwgaGNlbGxzX2ZpbHRAbWV0YS5kYXRhJG5hbWVzX2NsdXN0ZXJzKV1cblxuZGF0ID0gY2JpbmQocm93bmFtZXMoaGNlbGxzX2ZpbHRAYXNzYXlzJFNDVEBkYXRhKSxcbiAgICAgICAgICAgIE1hdHJpeDo6YXMubWF0cml4KGhjZWxsc19maWx0QGFzc2F5cyRTQ1RAZGF0YSkpXG5jb2xuYW1lcyhkYXQpWzFdID0gXCJHZW5lXCJcbndyaXRlLnRhYmxlKGRhdCwgZmlsZSA9IHBhc3RlMChjcGRiX3BhdGgsIFwiL2hjZWxsc19ycGNhX25vcm0udHh0XCIpLCBcbiAgICAgICAgICAgIHNlcCA9IFwiXFx0XCIsIGNvbC5uYW1lcyA9IFQsIHJvdy5uYW1lcyA9IEYsIHF1b3RlID0gRilcblxubWV0YSA9IGRhdGEuZnJhbWUoXCJDZWxsXCIgPSByb3duYW1lcyhoY2VsbHNfZmlsdEBtZXRhLmRhdGEpLCBcbiAgICAgICAgICAgICAgICAgIFwiY2VsbF90eXBlXCIgPSBhcy5jaGFyYWN0ZXIoaGNlbGxzX2ZpbHRAbWV0YS5kYXRhJG5hbWVzX2NsdXN0ZXJzKSxcbiAgICAgICAgICAgICAgICAgIHN0cmluZ3NBc0ZhY3RvcnMgPSBGKVxud3JpdGUudGFibGUobWV0YSwgZmlsZSA9IHBhc3RlMChjcGRiX3BhdGgsIFwiL2hjZWxsc19ycGNhX21ldGFfbmFtZXNfY2x1c3RlcnMudHh0XCIpLCBcbiAgICAgICAgICAgIHNlcCA9IFwiXFx0XCIsIGNvbC5uYW1lcyA9IFQsIHJvdy5uYW1lcyA9IEYsIHF1b3RlID0gRilcblxuIyBkZWZpbmUgMyB6b25lcyBmb3IgaGVwYXRvY3l0ZXNcbmhlcF96b25lcyA9IGN1dChoZXBfaGNlbGxzQG1ldGEuZGF0YSRoZWFsdGh5X2hlcF96b25fZGMxLCAzKVxubGV2ZWxzKGhlcF96b25lcykgPSBjKFwiKC0wLjA2LC0wLjAxNjVdXCIgPSBcIkhlcGF0b2N5dGVzX1oxXCIsXG4gICAgICAgICAgICAgICAgICAgICBcIigtMC4wMTY1LDAuMDI2OF1cIiA9IFwiSGVwYXRvY3l0ZXNfWjJcIixcbiAgICAgICAgICAgICAgICAgICAgIFwiKDAuMDI2OCwwLjA3MDJdXCIgPSBcIkhlcGF0b2N5dGVzX1ozXCIpXG5oZXBfem9uZXMgPSBhcy5jaGFyYWN0ZXIoaGVwX3pvbmVzKVxubmFtZXMoaGVwX3pvbmVzKSA9IHJvd25hbWVzKGhlcF9oY2VsbHNAbWV0YS5kYXRhKVxubWV0YSRjZWxsX3R5cGUgPSBpZmVsc2UobWV0YSRjZWxsX3R5cGUgJWluJSBjKFwiZ2QtVCBjZWxsc18xXCIsIFwiZ2QtVCBjZWxsc18yXCIpLCBcbiAgICAgICAgICAgICAgICAgICAgICAgIFwiZ2QtVCBjZWxsc1wiLCBtZXRhJGNlbGxfdHlwZSlcbm1ldGEkY2VsbF90eXBlID0gaWZlbHNlKG1ldGEkQ2VsbCAlaW4lIG5hbWVzKGhlcF96b25lcylbZ3JlcGwoXCJaMVwiLCBoZXBfem9uZXMpXSxcbiAgICAgICAgICAgICAgICAgICAgICAgIFwiSGVwYXRvY3l0ZXNfWjFcIiwgbWV0YSRjZWxsX3R5cGUpXG5tZXRhJGNlbGxfdHlwZSA9IGlmZWxzZShtZXRhJENlbGwgJWluJSBuYW1lcyhoZXBfem9uZXMpW2dyZXBsKFwiWjJcIiwgaGVwX3pvbmVzKV0sXG4gICAgICAgICAgICAgICAgICAgICAgICBcIkhlcGF0b2N5dGVzX1oyXCIsIG1ldGEkY2VsbF90eXBlKVxubWV0YSRjZWxsX3R5cGUgPSBpZmVsc2UobWV0YSRDZWxsICVpbiUgbmFtZXMoaGVwX3pvbmVzKVtncmVwbChcIlozXCIsIGhlcF96b25lcyldLFxuICAgICAgICAgICAgICAgICAgICAgICAgXCJIZXBhdG9jeXRlc19aM1wiLCBtZXRhJGNlbGxfdHlwZSlcbndyaXRlLnRhYmxlKG1ldGEsIGZpbGUgPSBwYXN0ZTAoY3BkYl9wYXRoLCBcIi9oY2VsbHNfcnBjYV9tZXRhX25hbWVzX3NpbXAudHh0XCIpLCBcbiAgICAgICAgICAgIHNlcCA9IFwiXFx0XCIsIGNvbC5uYW1lcyA9IFQsIHJvdy5uYW1lcyA9IEYsIHF1b3RlID0gRilcbmBgYCJ9 -->
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuY3BkYl9wYXRoID0gXCJyZXN1bHRzL2NlbGxfY29tbV9oZWFsdGh5L0NlbGxQaG9uZURCX3J1bnNcIlxuXG4jIHJlbW92ZSBkb3VibGV0IGNlbGxzXG5oY2VsbHNfZmlsdCA9IGhjZWxsc19ycGNhWywhZ3JlcGwoXCJpbnRlcmFjdGlvblwiLCBoY2VsbHNfcnBjYUBtZXRhLmRhdGEkbmFtZXNfY2x1c3RlcnMpXVxuXG4jIHJlbW92ZSBjb250YW1pbmF0aW5nIGhlcGF0b2N5dGVzXG5oY2VsbHNfZmlsdCA9IGhjZWxsc19maWx0Wyxjb2xuYW1lcyhoY2VsbHNfZmlsdCkgJWluJSBjb2xuYW1lcyhoZXBfaGNlbGxzKSB8XG4gICAgICAgICAgICAgICAgICAgICAgICAgICAgIWdyZXBsKFwiSGVwYXRcIiwgaGNlbGxzX2ZpbHRAbWV0YS5kYXRhJG5hbWVzX2NsdXN0ZXJzKV1cblxuZGF0ID0gY2JpbmQocm93bmFtZXMoaGNlbGxzX2ZpbHRAYXNzYXlzJFNDVEBkYXRhKSxcbiAgICAgICAgICAgIE1hdHJpeDo6YXMubWF0cml4KGhjZWxsc19maWx0QGFzc2F5cyRTQ1RAZGF0YSkpXG5gYGAifQ== -->
 <pre class="r"><code>cpdb_path = &quot;results/cell_comm_healthy/CellPhoneDB_runs&quot;
 
 # remove doublet cells
@@ -1845,35 +1858,12 @@ hcells_filt = hcells_filt[,colnames(hcells_filt) %in% colnames(hep_hcells) |
                             !grepl(&quot;Hepat&quot;, hcells_filt@meta.data$names_clusters)]
 
 dat = cbind(rownames(hcells_filt@assays$SCT@data),
-            Matrix::as.matrix(hcells_filt@assays$SCT@data))
-colnames(dat)[1] = &quot;Gene&quot;
-write.table(dat, file = paste0(cpdb_path, &quot;/hcells_rpca_norm.txt&quot;), 
-            sep = &quot;\t&quot;, col.names = T, row.names = F, quote = F)
-
-meta = data.frame(&quot;Cell&quot; = rownames(hcells_filt@meta.data), 
-                  &quot;cell_type&quot; = as.character(hcells_filt@meta.data$names_clusters),
-                  stringsAsFactors = F)
-write.table(meta, file = paste0(cpdb_path, &quot;/hcells_rpca_meta_names_clusters.txt&quot;), 
-            sep = &quot;\t&quot;, col.names = T, row.names = F, quote = F)
-
-# define 3 zones for hepatocytes
-hep_zones = cut(hep_hcells@meta.data$healthy_hep_zon_dc1, 3)
-levels(hep_zones) = c(&quot;(-0.06,-0.0165]&quot; = &quot;Hepatocytes_Z1&quot;,
-                     &quot;(-0.0165,0.0268]&quot; = &quot;Hepatocytes_Z2&quot;,
-                     &quot;(0.0268,0.0702]&quot; = &quot;Hepatocytes_Z3&quot;)
-hep_zones = as.character(hep_zones)
-names(hep_zones) = rownames(hep_hcells@meta.data)
-meta$cell_type = ifelse(meta$cell_type %in% c(&quot;gd-T cells_1&quot;, &quot;gd-T cells_2&quot;), 
-                        &quot;gd-T cells&quot;, meta$cell_type)
-meta$cell_type = ifelse(meta$Cell %in% names(hep_zones)[grepl(&quot;Z1&quot;, hep_zones)],
-                        &quot;Hepatocytes_Z1&quot;, meta$cell_type)
-meta$cell_type = ifelse(meta$Cell %in% names(hep_zones)[grepl(&quot;Z2&quot;, hep_zones)],
-                        &quot;Hepatocytes_Z2&quot;, meta$cell_type)
-meta$cell_type = ifelse(meta$Cell %in% names(hep_zones)[grepl(&quot;Z3&quot;, hep_zones)],
-                        &quot;Hepatocytes_Z3&quot;, meta$cell_type)
-write.table(meta, file = paste0(cpdb_path, &quot;/hcells_rpca_meta_names_simp.txt&quot;), 
-            sep = &quot;\t&quot;, col.names = T, row.names = F, quote = F)</code></pre>
+            Matrix::as.matrix(hcells_filt@assays$SCT@data))</code></pre>
 <!-- rnb-source-end -->
+<!-- rnb-output-begin eyJkYXRhIjoiRXJyb3IgaW4gcHlfbW9kdWxlX2ltcG9ydChtb2R1bGUsIGNvbnZlcnQgPSBjb252ZXJ0KSA6IFxuICBUeXBlRXJyb3I6ICdOb25lVHlwZScgb2JqZWN0IGlzIG5vdCBjYWxsYWJsZVxuIn0= -->
+<pre><code>Error in py_module_import(module, convert = convert) : 
+  TypeError: 'NoneType' object is not callable</code></pre>
+<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 <p>Reformat significant means matrix - clusters</p>
@@ -2062,14 +2052,25 @@ write.table(simp_reform, file = paste0(cpdb_path, &quot;/healthy_names_simp/simp
 <p>Making two cell type by interaction matrices: one has the ligand mean, another the receptor mean All clusters</p>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxucGRmKFwicmVzdWx0cy9jZWxsX2NvbW1faGVhbHRoeS9udW1iZXJfb2ZfaW50ZXJhY3Rpb25zLnBkZlwiLCB1c2VEaW5nYmF0cyA9IEYsIFxuICAgIGhlaWdodCA9IDYsIHdpZHRoID0gNylcbnBoZWF0bWFwOjpwaGVhdG1hcChpbnRlcl9jb3VudHNfY2wsIGNsdXN0ZXJpbmdfbWV0aG9kID0gXCJ3YXJkLkQyXCIsIG1haW4gPSBcIkFsbCBjbHVzdGVyc1wiKVxucGhlYXRtYXA6OnBoZWF0bWFwKGludGVyX2NvdW50c19zaW1wLCBjbHVzdGVyaW5nX21ldGhvZCA9IFwid2FyZC5EMlwiLCBcbiAgICAgICAgICAgICAgICAgICBtYWluID0gXCJTaW1wbGlmaWVkIGNsdXN0ZXJzXCIpXG5kZXYub2ZmKClcblxuYGBgIn0= -->
-<pre class="r"><code>pdf(&quot;results/cell_comm_healthy/number_of_interactions.pdf&quot;, useDingbats = F, 
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuaW50ZXJfY291bnRzX2NsID0gcmVzaGFwZTI6OmRjYXN0KGRhdGEgPSBuZXRfbmFtZXNfY2wsIGZvcm11bGEgPSBTT1VSQ0V+VEFSR0VULFxuICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgdmFsdWUudmFyID0gXCJjb3VudFwiKVxucm93bmFtZXMoaW50ZXJfY291bnRzX2NsKSA9IGludGVyX2NvdW50c19jbFssMV1cbmludGVyX2NvdW50c19jbCA9IGludGVyX2NvdW50c19jbFssLTFdXG5cbmludGVyX2NvdW50c19zaW1wID0gcmVzaGFwZTI6OmRjYXN0KGRhdGEgPSBuZXRfbmFtZXNfc2ltcCwgZm9ybXVsYSA9IFNPVVJDRX5UQVJHRVQsXG4gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICB2YWx1ZS52YXIgPSBcImNvdW50XCIpXG5yb3duYW1lcyhpbnRlcl9jb3VudHNfc2ltcCkgPSBpbnRlcl9jb3VudHNfc2ltcFssMV1cbmludGVyX2NvdW50c19zaW1wID0gaW50ZXJfY291bnRzX3NpbXBbLC0xXVxuXG5wZGYoXCJyZXN1bHRzL2NlbGxfY29tbV9oZWFsdGh5L251bWJlcl9vZl9pbnRlcmFjdGlvbnMucGRmXCIsIHVzZURpbmdiYXRzID0gRiwgXG4gICAgaGVpZ2h0ID0gNiwgd2lkdGggPSA3KVxucGhlYXRtYXA6OnBoZWF0bWFwKGludGVyX2NvdW50c19jbCwgY2x1c3RlcmluZ19tZXRob2QgPSBcIndhcmQuRDJcIiwgbWFpbiA9IFwiQWxsIGNsdXN0ZXJzXCIpXG5waGVhdG1hcDo6cGhlYXRtYXAoaW50ZXJfY291bnRzX3NpbXAsIGNsdXN0ZXJpbmdfbWV0aG9kID0gXCJ3YXJkLkQyXCIsIFxuICAgICAgICAgICAgICAgICAgIG1haW4gPSBcIlNpbXBsaWZpZWQgY2x1c3RlcnNcIilcbmBgYCJ9 -->
+<pre class="r"><code>inter_counts_cl = reshape2::dcast(data = net_names_cl, formula = SOURCE~TARGET,
+                                    value.var = &quot;count&quot;)
+rownames(inter_counts_cl) = inter_counts_cl[,1]
+inter_counts_cl = inter_counts_cl[,-1]
+
+inter_counts_simp = reshape2::dcast(data = net_names_simp, formula = SOURCE~TARGET,
+                                    value.var = &quot;count&quot;)
+rownames(inter_counts_simp) = inter_counts_simp[,1]
+inter_counts_simp = inter_counts_simp[,-1]
+
+pdf(&quot;results/cell_comm_healthy/number_of_interactions.pdf&quot;, useDingbats = F, 
     height = 6, width = 7)
 pheatmap::pheatmap(inter_counts_cl, clustering_method = &quot;ward.D2&quot;, main = &quot;All clusters&quot;)
 pheatmap::pheatmap(inter_counts_simp, clustering_method = &quot;ward.D2&quot;, 
-                   main = &quot;Simplified clusters&quot;)
-dev.off()
-</code></pre>
+                   main = &quot;Simplified clusters&quot;)</code></pre>
+<!-- rnb-source-end -->
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuZGV2Lm9mZigpXG5gYGAifQ== -->
+<pre class="r"><code>dev.off()</code></pre>
 <!-- rnb-source-end -->
 <!-- rnb-output-begin eyJkYXRhIjoibnVsbCBkZXZpY2UgXG4gICAgICAgICAgMSBcbiJ9 -->
 <pre><code>null device 
@@ -2166,33 +2167,49 @@ cor_mat_both_simp = cor(mat_both_simp, use=&quot;pairwise.complete.obs&quot;, me
 <p>Score number of interactions by correlation - simplified</p>
 <!-- rnb-text-end -->
 <!-- rnb-chunk-begin -->
-<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxucGRmKFwicmVzdWx0cy9jZWxsX2NvbW1faGVhbHRoeS9pbnRlcmFjdGlvbnNfc2NvcmVfc2ltcC5wZGZcIilcbmNvcl9tYXRfbW9kID0gY29yX21hdF9ib3RoX3NpbXBcbmludGVyX2NvdW50c19tb2QgPSBpbnRlcl9jb3VudHNfc2ltcFxuXG54eCA9IGludGVyX2NvdW50c19tb2QqY29yX21hdF9tb2Rbcm93bmFtZXMoaW50ZXJfY291bnRzX21vZCksY29sbmFtZXMoaW50ZXJfY291bnRzX21vZCldXG54eFt4eDwwXSA9IDBcbnBoZWF0bWFwOjpwaGVhdG1hcCh4eCwgY2x1c3RlcmluZ19tZXRob2QgPSBcIndhcmQuRDJcIiwgbWFpbiA9IFwiTGlnYW5kcyBhbmQgcmVjZXB0b3JzXCIpXG5cbnh4JGN0ID0gcm93bmFtZXMoeHgpXG5kZl9uZXQgPSByZXNoYXBlMjo6bWVsdCh4eClcbndyaXRlLnRhYmxlKGRmX25ldCwgZmlsZSA9IFwicmVzdWx0cy9jZWxsX2NvbW1faGVhbHRoeS9kZl9uZXRfY29yYm90aF9oZWFsdGh5X3NpbXAudHh0XCIsIFxuICAgICAgICAgICAgc2VwID0gXCJcXHRcIiwgY29sLm5hbWVzID0gVCwgcm93Lm5hbWVzID0gRiwgcXVvdGUgPSBGKVxuXG5jb3JfbWF0X21vZCA9IGNvcl9tYXRfZWFjaF9zaW1wXG5pbnRlcl9jb3VudHNfbW9kID0gaW50ZXJfY291bnRzX3NpbXBcblxueHggPSBpbnRlcl9jb3VudHNfbW9kKmNvcl9tYXRfbW9kW3Jvd25hbWVzKGludGVyX2NvdW50c19tb2QpLGNvbG5hbWVzKGludGVyX2NvdW50c19tb2QpXVxueHhbeHg8MF0gPSAwXG5waGVhdG1hcDo6cGhlYXRtYXAoeHgsIGNsdXN0ZXJpbmdfbWV0aG9kID0gXCJ3YXJkLkQyXCIsIG1haW4gPSBcIkxpZ2FuZHMgdnMgcmVjZXB0b3JzXCIpXG5cbnh4JGN0ID0gcm93bmFtZXMoeHgpXG5kZl9uZXQgPSByZXNoYXBlMjo6bWVsdCh4eClcbndyaXRlLnRhYmxlKGRmX25ldCwgZmlsZSA9IFwicmVzdWx0cy9jZWxsX2NvbW1faGVhbHRoeS9kZl9uZXRfY29yZWFjaF9oZWFsdGh5X3NpbXAudHh0XCIsIFxuICAgICAgICAgICAgc2VwID0gXCJcXHRcIiwgY29sLm5hbWVzID0gVCwgcm93Lm5hbWVzID0gRiwgcXVvdGUgPSBGKVxuZGV2Lm9mZigpXG5gYGAifQ== -->
-<pre class="r"><code>pdf(&quot;results/cell_comm_healthy/interactions_score_simp.pdf&quot;)
-cor_mat_mod = cor_mat_both_simp
-inter_counts_mod = inter_counts_simp
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxucGRmKFwicmVzdWx0cy9jZWxsX2NvbW1faGVhbHRoeS9pbnRlcmFjdGlvbnNfc2NvcmVfY2wucGRmXCIpXG5jb3JfbWF0X21vZCA9IGNvcl9tYXRfYm90aF9jbFxuaW50ZXJfY291bnRzX21vZCA9IGludGVyX2NvdW50c19jbFxuXG54eCA9IGludGVyX2NvdW50c19tb2QqY29yX21hdF9tb2Rbcm93bmFtZXMoaW50ZXJfY291bnRzX21vZCksY29sbmFtZXMoaW50ZXJfY291bnRzX21vZCldXG54eFt4eDwwXSA9IDBcbnBoZWF0bWFwOjpwaGVhdG1hcCh4eCwgY2x1c3RlcmluZ19tZXRob2QgPSBcIndhcmQuRDJcIiwgbWFpbiA9IFwiTGlnYW5kcyBhbmQgcmVjZXB0b3JzXCIpXG5cbnh4JGN0ID0gcm93bmFtZXMoeHgpXG5kZl9uZXQgPSByZXNoYXBlMjo6bWVsdCh4eClcbmBgYCJ9 -->
+<pre class="r"><code>pdf(&quot;results/cell_comm_healthy/interactions_score_cl.pdf&quot;)
+cor_mat_mod = cor_mat_both_cl
+inter_counts_mod = inter_counts_cl
 
 xx = inter_counts_mod*cor_mat_mod[rownames(inter_counts_mod),colnames(inter_counts_mod)]
 xx[xx&lt;0] = 0
 pheatmap::pheatmap(xx, clustering_method = &quot;ward.D2&quot;, main = &quot;Ligands and receptors&quot;)
 
 xx$ct = rownames(xx)
-df_net = reshape2::melt(xx)
-write.table(df_net, file = &quot;results/cell_comm_healthy/df_net_corboth_healthy_simp.txt&quot;, 
+df_net = reshape2::melt(xx)</code></pre>
+<!-- rnb-source-end -->
+<!-- rnb-output-begin eyJkYXRhIjoiVXNpbmcgY3QgYXMgaWQgdmFyaWFibGVzXG4ifQ== -->
+<pre><code>Using ct as id variables</code></pre>
+<!-- rnb-output-end -->
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxud3JpdGUudGFibGUoZGZfbmV0LCBmaWxlID0gXCJyZXN1bHRzL2NlbGxfY29tbV9oZWFsdGh5L2RmX25ldF9jb3Jib3RoX2hlYWx0aHlfY2wudHh0XCIsIFxuICAgICAgICAgICAgc2VwID0gXCJcXHRcIiwgY29sLm5hbWVzID0gVCwgcm93Lm5hbWVzID0gRiwgcXVvdGUgPSBGKVxuXG5jb3JfbWF0X21vZCA9IGNvcl9tYXRfZWFjaF9jbFxuaW50ZXJfY291bnRzX21vZCA9IGludGVyX2NvdW50c19jbFxuXG54eCA9IGludGVyX2NvdW50c19tb2QqY29yX21hdF9tb2Rbcm93bmFtZXMoaW50ZXJfY291bnRzX21vZCksY29sbmFtZXMoaW50ZXJfY291bnRzX21vZCldXG54eFt4eDwwXSA9IDBcbnBoZWF0bWFwOjpwaGVhdG1hcCh4eCwgY2x1c3RlcmluZ19tZXRob2QgPSBcIndhcmQuRDJcIiwgbWFpbiA9IFwiTGlnYW5kcyB2cyByZWNlcHRvcnNcIilcbmBgYCJ9 -->
+<pre class="r"><code>write.table(df_net, file = &quot;results/cell_comm_healthy/df_net_corboth_healthy_cl.txt&quot;, 
             sep = &quot;\t&quot;, col.names = T, row.names = F, quote = F)
 
-cor_mat_mod = cor_mat_each_simp
-inter_counts_mod = inter_counts_simp
+cor_mat_mod = cor_mat_each_cl
+inter_counts_mod = inter_counts_cl
 
 xx = inter_counts_mod*cor_mat_mod[rownames(inter_counts_mod),colnames(inter_counts_mod)]
 xx[xx&lt;0] = 0
-pheatmap::pheatmap(xx, clustering_method = &quot;ward.D2&quot;, main = &quot;Ligands vs receptors&quot;)
-
+pheatmap::pheatmap(xx, clustering_method = &quot;ward.D2&quot;, main = &quot;Ligands vs receptors&quot;)</code></pre>
+<!-- rnb-source-end -->
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxuXG54eCRjdCA9IHJvd25hbWVzKHh4KVxuZGZfbmV0ID0gcmVzaGFwZTI6Om1lbHQoeHgpXG5gYGAifQ== -->
+<pre class="r"><code>
 xx$ct = rownames(xx)
-df_net = reshape2::melt(xx)
-write.table(df_net, file = &quot;results/cell_comm_healthy/df_net_coreach_healthy_simp.txt&quot;, 
+df_net = reshape2::melt(xx)</code></pre>
+<!-- rnb-source-end -->
+<!-- rnb-output-begin eyJkYXRhIjoiVXNpbmcgY3QgYXMgaWQgdmFyaWFibGVzXG4ifQ== -->
+<pre><code>Using ct as id variables</code></pre>
+<!-- rnb-output-end -->
+<!-- rnb-source-begin eyJkYXRhIjoiYGBgclxud3JpdGUudGFibGUoZGZfbmV0LCBmaWxlID0gXCJyZXN1bHRzL2NlbGxfY29tbV9oZWFsdGh5L2RmX25ldF9jb3JlYWNoX2hlYWx0aHlfY2wudHh0XCIsIFxuICAgICAgICAgICAgc2VwID0gXCJcXHRcIiwgY29sLm5hbWVzID0gVCwgcm93Lm5hbWVzID0gRiwgcXVvdGUgPSBGKVxuZGV2Lm9mZigpXG5gYGAifQ== -->
+<pre class="r"><code>write.table(df_net, file = &quot;results/cell_comm_healthy/df_net_coreach_healthy_cl.txt&quot;, 
             sep = &quot;\t&quot;, col.names = T, row.names = F, quote = F)
 dev.off()</code></pre>
 <!-- rnb-source-end -->
+<!-- rnb-output-begin eyJkYXRhIjoibnVsbCBkZXZpY2UgXG4gICAgICAgICAgMSBcbiJ9 -->
+<pre><code>null device 
+          1 </code></pre>
+<!-- rnb-output-end -->
 <!-- rnb-chunk-end -->
 <!-- rnb-text-begin -->
 </div>
