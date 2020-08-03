@@ -34,8 +34,10 @@ if(!file.exists(merged_file)){
 int_healthy = SelectIntegrationFeatures(healthy_srat, nfeatures = 3000)
 int_cond = SelectIntegrationFeatures(cond_srat, nfeatures = 3000)
 ## include also top markers from identified healthy clusters
-mk_healthy = read.csv("results/integr_healthy/clusters_res0.7_markers.csv", 
-                      header = T, row.names = 1, stringsAsFactors = F)
+#mk_healthy = read.csv("results/integr_healthy/clusters_res0.7_markers.csv", 
+#                      header = T, row.names = 1, stringsAsFactors = F)
+mk_healthy = read.csv("results/integr_healthy/css_allPops_markers.csv", 
+                      header = T, stringsAsFactors = F)
 mk_healthy = mk_healthy[mk_healthy$p_val_adj<=0.05 & mk_healthy$avg_logFC>0.2,]
 mk_healthy = mk_healthy[order(mk_healthy$avg_logFC, decreasing = T),]
 topmk = tapply(mk_healthy$gene, mk_healthy$cluster, function(x) x[1:100])
@@ -61,11 +63,11 @@ all_cell_srat = cluster_sim_spectrum(all_cell_srat, label_tag="unique_name",
 
 # Run UMAP on CSS dimentions
 all_cell_srat = RunUMAP(all_cell_srat, reduction="css", dims = 1:ncol(Embeddings(all_cell_srat,"css")), 
-                        reduction.name="umap_css", reduction.key="UMACSS_")
+                        reduction.name="umap_css", reduction.key="UMAPCSS_")
 
 # save output
 #saveRDS(all_cell_srat, file = "data/processed/scripts_out/CSSIntegr_allcells_corrCount_pc50.RDS")
-saveRDS(all_cell_srat, file = "data/processed/scripts_out/CSSIntegr_allcells_pc50.RDS")
+saveRDS(all_cell_srat, file = "data/processed/scripts_out/CSSIntegr_allcells_pc50_cssmk.RDS")
 
 
 
