@@ -1,0 +1,545 @@
+---
+title: "Zonation analysis V2"
+output: html_notebook
+---
+
+This is the second version of the Zonation Analysis notebook. Decided to branch to start anew and have the notebook more organised.
+
+
+
+# General Setup
+Setup chunk
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 8)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_knit$get("root.dir")
+```
+
+Setup reticulate
+
+```{r}
+library(reticulate)
+knitr::knit_engines$set(python = reticulate::eng_python)
+py_available(initialize = FALSE)
+use_python(Sys.which("python"))
+py_config()
+```
+
+Load libraries
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(ggridges)
+library(dplyr)
+library(destiny)
+library(fdrtool)
+library(gam)
+library(dtw)
+```
+
+
+
+# Load data
+Load data (from all cells)
+
+```{r}
+allcells_css = readRDS(file = "data/processed/allcells_css.RDS")
+```
+
+
+
+# Hepatocytes
+Subset and process each condition
+
+```{r}
+hep_cells = list()
+for(cond in unique(allcells_css@meta.data$Condition)){
+  cat(cond)
+  hep_cells[[cond]] = allcells_css[,allcells_css@meta.data$allcells_major=="Hepatocytes" &
+                                     allcells_css@meta.data$Condition==cond]
+  print(dim(hep_cells[[cond]]))
+  hep_cells[[cond]] = suppressWarnings(SCTransform(hep_cells[[cond]], do.correct.umi = T, 
+                                                   verbose = F, 
+                                                   vars.to.regress=c("unique_name","nCount_RNA"),
+                                                   variable.features.rv.th = 1, seed.use = 1,
+                                                   return.only.var.genes = F, 
+                                                   variable.features.n = NULL))
+  hep_cells[[cond]] = RunPCA(hep_cells[[cond]], verbose = F)
+  hep_cells[[cond]] = RunUMAP(hep_cells[[cond]], dims = 1:20, verbose = F)
+}
+```
+
+
+## Healthy analysis
+For healthy cells (which will serve as reference), do additional filtering and reprocessing
+
+```{r}
+DimPlot(hep_cells$healthy, reduction = "umap", group.by = "unique_name")
+outcells = (hep_cells$healthy@reductions$umap@cell.embeddings[,1]>(1) &
+              hep_cells$healthy@reductions$umap@cell.embeddings[,2]>5)
+hep_cells$healthy = hep_cells$healthy[,!outcells]
+
+hep_cells$healthy = suppressWarnings(SCTransform(hep_cells$healthy, do.correct.umi = T, 
+                                                 verbose = F,
+                                                 vars.to.regress = c("unique_name","nCount_RNA"),
+                                                 variable.features.rv.th = 1, seed.use = 1,
+                                                 return.only.var.genes = F, 
+                                                 variable.features.n = NULL))
+hep_cells$healthy = RunPCA(hep_cells$healthy, verbose = F)
+hep_cells$healthy = RunUMAP(hep_cells$healthy, dims = 1:15, verbose = F)
+DimPlot(hep_cells$healthy, reduction = "umap", group.by = "unique_name")
+```
+
+Save hepatocytes
+
+```{r}
+saveRDS(hep_cells, file="results/zonation_cond/hep_cells.RDS")
+```
+
+Plot expression of zonation markers
+
+```{r}
+gfresh = c("CYP1A2", "CYP2E1", "GLUL", "CYP3A4", "G0S2", "APOC1", "UGT2B17", "BCHE", # central 
+           "SAA1", "HAMP", "SAA2", "CPS1", "C3", "C1R", "MT-ND4", "MT-CO2") # portal
+
+png("results/zonation_healthy/healthy_hepatocyte_zonation_markers_violin.png", 
+    height = 1400, width = 1400)
+VlnPlot(hep_cells$healthy, features = gfresh, group.by = "names_clusters", 
+        pt.size = 0, sort = "increasing")
+dev.off()
+png("results/zonation_healthy/healthy_hepatocyte_zonation_markers_umap.png", 
+    height = 1400, width = 1400)
+FeaturePlot(hep_cells$healthy, features = gfresh, pt.size = 0.6)
+dev.off()
+```
+
+Obtain Diffusion maps projection
+
+```{r}
+dm = DiffusionMap(hep_cells$healthy@reductions$pca@cell.embeddings[,1:15], 
+                  rotate = T, n_eigs = 5)
+dpt = DPT(dm)
+plot(dpt)
+```
+
+Check expression of some genes
+
+```{r}
+df_dc = cbind(hep_cells$healthy@meta.data, 
+              data.frame("DC1" = dpt@dm$DC1, "DC2" = dpt@dm$DC2),
+              Matrix::t(hep_cells$healthy@assays$SCT@data[gfresh,]))
+colnames(df_dc) = gsub("-", ".", colnames(df_dc), fixed = T)
+
+plt_list = list()
+for(n in c(gsub("-", ".", gfresh, fixed = T), "names_clusters", "unique_name")){
+  plt_list[[n]] = ggplot(df_dc, aes_string(x = "DC1", y = "DC2", colour = n))+
+    geom_point()+
+    theme_classic()
+}
+
+png("results/zonation_healthy/healthy_hepatocyte_zonation_markers_dc.png", 
+    height = 900, width = 2800)
+cowplot::plot_grid(plotlist = plt_list, nrow = 3, ncol = 6, align = "hv")
+dev.off()
+```
+
+We'll be using DC1 as the pseudotime. This was the best approximation possible to the zonation gradient based on diffusion maps
+
+```{r}
+pdf("results/zonation_healthy/hep_distributions_dc1.pdf", useDingbats = F, 
+    height = 4, width = 9)
+plt1 = ggplot(df_dc, aes(x = DC1, y = names_clusters, 
+                  group = names_clusters, fill = names_clusters))+
+  geom_density_ridges2(alpha = 0.4)+
+  theme_bw()+
+  theme(legend.position = "none")
+
+plt2 = ggplot(df_dc, aes(x = DC1, y = unique_name, 
+                  group = unique_name, fill = unique_name))+
+  geom_density_ridges2(alpha = 0.4)+
+  theme_bw()+
+  theme(legend.position = "none")
+
+cowplot::plot_grid(plt1, plt2, ncol = 2, align = "h")
+dev.off()
+```
+
+Find genes varying along the pseudotime
+
+```{r}
+# will only use variable genes
+hvg = hep_cells$healthy@assays$SCT@var.features
+
+# Fit GAM for each gene using pseudotime as independent variable.
+t = df_dc$DC1
+gene_fit_p = c()
+gene_fit_vals = data.frame(row.names = 1:100)
+for(i in 1:length(hvg)){
+  g = hvg[i]
+  z = hep_cells$healthy@assays$SCT@data[g,]
+  
+  d = data.frame(z=z, t=t)
+  tmp = suppressMessages(gam(z ~ ns(t, df = 4), data=d))
+  
+  # bins for model fitting
+  bb = seq(min(t), max(t), length.out = 100)
+  gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                               newdata = data.frame(t = bb)))
+  p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+  gene_fit_p = c(gene_fit_p, p)
+  names(gene_fit_p)[length(gene_fit_p)] = g
+}
+
+gene_fit_p = fdrtool::fdrtool(gene_fit_p, statistic="pvalue", plot=F, 
+                              verbose=F, cutoff.method="pct0", pct0=0.9)$qval
+```
+
+
+## Analysis of other conditions
+Now use the top 500 genes to learn the pseudozonation coordinates and project the embolised and regenerating data
+
+```{r}
+sig_genes = gene_fit_p[gene_fit_p<=0.05]
+top_sig_genes = names(sig_genes[order(sig_genes, decreasing = F)][1:500]) 
+# using all genes was identical
+
+data_gam_h = cbind(data.frame("DC1" = df_dc$DC1),
+                   Matrix::t(hep_cells$health@assays$SCT@data[top_sig_genes,]))
+
+gam_healthy = gam::gam(DC1 ~ ., data = data_gam_h)
+
+hea_pred = predict(gam_healthy,
+                   Matrix::t(hep_cells$health@assays$SCT@data[top_sig_genes,]))
+reg_pred = predict(gam_healthy,
+                   Matrix::t(hep_cells$regenerating@assays$SCT@data[top_sig_genes,]))
+emb_pred = predict(gam_healthy,
+                   Matrix::t(hep_cells$embolised@assays$SCT@data[top_sig_genes,]))
+
+plot(density(reg_pred), col = "blue")
+lines(density(emb_pred), col = "red")
+lines(density(data_gam_h$DC1), col = "green")
+lines(density(hea_pred), col = "grey50")
+legend(-0.073,32, legend = c("healthy (DC1)", "healthy (pred)", 
+                         "embolised (pred)", "regenerating (pred)"),
+       fill = c("green", "grey50", "red", "blue"))
+```
+
+Calculate correlations
+
+```{r}
+cor_h = t(cor(df_dc$DC1, as.matrix(Matrix::t(hep_cells$healthy@assays$SCT@data)),
+              method = "sp"))
+cor_emb = t(cor(emb_pred, as.matrix(Matrix::t(hep_cells$embolised@assays$SCT@data)),
+                method = "sp"))
+cor_reg = t(cor(reg_pred, as.matrix(Matrix::t(hep_cells$regenerating@assays$SCT@data)),
+                method = "sp"))
+```
+
+Find varying genes
+
+```{r}
+traj_list = list("healthy" = df_dc$DC1, "embolised" = emb_pred, "regenerating" = reg_pred)
+
+qvals_list = list()
+fits_list = list()
+for(cond in names(hep_cells)){
+  print(cond)
+  # will only use variable genes
+  hvg = hep_cells[[cond]]@assays$SCT@var.features
+  
+  # Fit GAM for each gene using pseudotime as independent variable.
+  t = traj_list[[cond]]
+  gene_fit_p = c()
+  gene_fit_vals = data.frame(row.names = 1:100)
+  for(i in 1:length(hvg)){
+    g = hvg[i]
+    z = hep_cells[[cond]]@assays$SCT@data[g,]
+    
+    d = data.frame(z=z, t=t)
+    tmp = suppressMessages(gam(z ~ ns(t, df = 4), data=d))
+    
+    # bins for model fitting
+    bb = seq(min(t), max(t), length.out = 100)
+    gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                                 newdata = data.frame(t = bb)))
+    p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+    gene_fit_p = c(gene_fit_p, p)
+    names(gene_fit_p)[length(gene_fit_p)] = g
+  }
+  
+  gene_fit_p = fdrtool::fdrtool(gene_fit_p, statistic="pvalue", plot=F, 
+                                verbose=F, cutoff.method="pct0", pct0=0.9)$qval
+  
+  qvals_list[[cond]] = gene_fit_p
+  fits_list[[cond]] = gene_fit_vals
+}
+```
+
+Sabe trajectories and genes
+
+```{r}
+save(fits_list, qvals_list, traj_list, file = "results/zonation_cond/traj_qval_fits.RData")
+```
+
+Calculate distances for all significant genes
+
+```{r}
+for(cond in names(qvals_list)){
+  gene_fit_p = qvals_list[[cond]]
+  gene_fit_vals = fits_list[[cond]]
+  gene_fit_vals_filt = t(gene_fit_vals[,names(gene_fit_p)[gene_fit_p<=0.05]])
+  scale_fit = t(apply(gene_fit_vals_filt, 1, scale))
+  
+  # dist
+  if(file.exists(paste0("results/zonation_cond/dtw_distance_", cond, "_sigGenes.RDS"))){
+    next
+  } else{
+    dd = dtw::dtwDist(scale_fit) # TAKES 4.5 HOURS
+    saveRDS(dd, paste0("results/zonation_cond/dtw_distance_", cond, "_sigGenes.RDS"))
+  }
+}
+```
+
+Cluster genes (per condition)
+
+```{r}
+top_n = 1000
+for(cond in names(qvals_list)){
+  print(cond)
+  gene_fit_p = qvals_list[[cond]]
+  gene_fit_vals = fits_list[[cond]]
+  
+  dd = readRDS(paste0("results/zonation_cond/dtw_distance_", cond, "_sigGenes.RDS"))
+  
+  gene_fit_vals_filt = t(gene_fit_vals[,names(gene_fit_p)[gene_fit_p<=0.05]])
+  scale_fit = t(apply(gene_fit_vals_filt, 1, scale))
+  
+  # select top genes (0 if using all)
+  topgenes = if(top_n==0) names(gene_fit_p) else names(head(gene_fit_p[order(gene_fit_p,
+                                                                             decreasing = F)],
+                                                            top_n))
+  
+  clust_genes = hclust(as.dist(dd[topgenes,topgenes]), method = "ward.D2")
+  
+  cls = cutree(clust_genes, 4)
+  #ape::plot.phylo(ape::as.phylo(clust_genes), tip.color = rainbow(10)[cls])
+  plt_list = list()
+  for(i in unique(cls)){
+    sub_df = scale_fit[names(cls)[cls==i],]
+    plot_df = reshape2::melt(sub_df)
+    plt_list[[paste0("gene_",i)]] = ggplot(plot_df, aes(x = Var2, y = value, group = Var1))+
+      geom_hline(yintercept = 0, linetype = "dashed")+
+      geom_line(alpha = 0.1, colour = "grey69")+
+      stat_summary(aes(y = value, group=1), fun=mean, colour="red", geom="line",group=1)+
+      labs(title = paste0("gene_",i))+
+      theme_bw()
+  }
+  
+  pdf(paste0("results/zonation_cond/hep_gene_expression_profile_", cond, ".pdf"),
+      height = 4.5, width = 4.4)
+  cowplot::plot_grid(plotlist = plt_list, nrow = 2, ncol = 2, align = "hv")
+  dev.off()
+  
+  df_pval_cl = merge(data.frame(gene_fit_p), data.frame(cls), by = 0, all = T)
+  colnames(df_pval_cl) = c("gene", "pval", "cluster")
+  
+  write.csv(df_pval_cl, file = paste0("results/zonation_cond/hep_pval_clust_", cond, ".csv"),
+            col.names = T, row.names = F, quote = F)
+
+  write.csv(gene_fit_vals, file = paste0("results/zonation_cond/hep_gene_fits_", cond, ".csv"),
+            col.names = T, row.names = F, quote = F)
+}
+```
+
+Plot cell distributions in pseudotime
+
+```{r}
+plot_df = data.frame("pseudotime" = c(traj_list$healthy, traj_list$embolised,
+                                      traj_list$regenerating),
+           "donor" = c(hep_cells$healthy@meta.data[,"Donor"],
+                       hep_cells$embolised@meta.data[names(traj_list$embolised),"Donor"],
+                       hep_cells$regenerating@meta.data[names(traj_list$regenerating),"Donor"]),
+           "cond" = c(rep("healthy", length(traj_list$healthy)), 
+                      rep("embolised", length(traj_list$embolised)),
+                      rep("regenerating", length(traj_list$regenerating))))
+
+pdf("results/zonation_cond/hep_cell_distributions_zonation.pdf", useDingbats = F, 
+    width = 6, height = 5)
+ggplot(plot_df, aes(x = donor, y = pseudotime, fill = cond))+
+  geom_boxplot(notch = T)+
+  theme_bw()
+
+ggplot(plot_df, aes(x = pseudotime, group = donor, colour = donor))+
+  facet_wrap(~cond)+
+  geom_density()+
+  theme_bw()
+
+ggplot(plot_df, aes(x = pseudotime, colour = cond))+
+  geom_density()+
+  theme_bw()
+dev.off()
+```
+
+Do cross validation on the healthy trajectory
+
+```{r}
+sig_genes = qvals_list$healthy[qvals_list$healthy<=0.05]
+top_sig_genes = names(sig_genes[order(sig_genes, decreasing = F)][1:500]) 
+
+data_gam_h = cbind(data.frame("DC1" = traj_list$healthy),
+                   Matrix::t(hep_cells$health@assays$SCT@data[top_sig_genes,]))
+colnames(data_gam_h) = gsub("-", "_", colnames(data_gam_h), fixed = T)
+colnames(data_gam_h) = gsub(".", "_", colnames(data_gam_h), fixed = T)
+
+CVgam = function (formula, data, nfold = 10, debug.level = 0, method = "glm.fit", 
+    printit = TRUE, cvparts = NULL, gamma = 1, seed = 29){
+  # modified from the `gamclass` package to use gam::gam
+    if (is.null(cvparts)) {
+        set.seed(seed)
+        cvparts <- sample(1:nfold, nrow(data), replace = TRUE)
+    }
+    folds <- unique(cvparts)
+    khat <- hat <- numeric(nrow(data))
+    scale.gam <- summary(gam::gam(formula, data = data, method = method))$scale
+    for (i in folds) {
+        trainrows <- cvparts != i
+        testrows <- cvparts == i
+        elev.gam <- gam::gam(formula, data = data[trainrows, ], method = method, 
+            gamma = gamma)
+        hat[testrows] <- predict(elev.gam, newdata = data[testrows, 
+            ], select = TRUE)
+        res <- residuals(elev.gam)
+    }
+    y <- eval(formula[[2]], envir = as.data.frame(data))
+    res <- y - hat
+    cvscale <- sum(res^2)/length(res)
+    prntvec <- c(GAMscale = scale.gam, `CV-mse-GAM ` = cvscale)
+    if (printit) 
+        print(round(prntvec, 4))
+    invisible(list(fitted = hat, resid = res, cvscale = cvscale, 
+        scale.gam = scale.gam))
+}
+
+cv_gam = CVgam(formula = DC1 ~ ., data = data_gam_h, nfold = 10, seed = 1, method = "glm.fit")
+
+pdf("results/zonation_healthy/hep_original_fitted_pseudotime.pdf", useDingbats = F, 
+    width = 6, height = 5)
+plot(data_gam_h$DC1, cv_gam$fitted, xlab = "Healthy pseudotime (DC1)",ylab = "Predicted Healthy",
+     main = paste0("Healthy original vs fitted pseudotime\nMSE: ", round(cv_gam$cvscale, 6)),
+     pch = 19, cex = 0.5)
+abline(0,1, col = "blue", lwd = 3)
+dev.off()
+```
+
+
+
+# Endothelial cells
+Subset and process each condition
+
+```{r}
+end_cells = list()
+for(cond in unique(allcells_css@meta.data$Condition)){
+  cat(cond)
+  end_cells[[cond]] = allcells_css[,grepl("LSEC ", allcells_css@meta.data$allcells_clusters) &
+                                     allcells_css@meta.data$Condition==cond]
+  print(dim(end_cells[[cond]]))
+  end_cells[[cond]] = suppressWarnings(SCTransform(end_cells[[cond]], do.correct.umi = T, 
+                                                   verbose = F, 
+                                                   vars.to.regress=c("unique_name","nCount_RNA"),
+                                                   variable.features.rv.th = 1, seed.use = 1,
+                                                   return.only.var.genes = F, 
+                                                   variable.features.n = NULL))
+  end_cells[[cond]] = RunPCA(end_cells[[cond]], verbose = F)
+  end_cells[[cond]] = RunUMAP(end_cells[[cond]], dims = 1:20, verbose = F)
+}
+```
+
+
+
+
+
+
+# LEGACY CODE
+Find genes with differencial variation - not very interesting since most genes seem to be showing a variation
+
+```{r}
+cells = unlist(lapply(hep_cells, colnames))
+genes = unique(unlist(lapply(hep_cells, VariableFeatures)))
+exp_hep = allcells_css[genes,cells]@assays$SCT@data
+genes = rownames(exp_hep)
+
+df_meta = data.frame("pt" = c(df_dc$DC1, emb_pred, reg_pred),
+                     "cond" = allcells_css[genes,cells]@meta.data$Condition)
+
+# Fit GAM for each gene using pseudotime as independent variable.
+t = df_meta$pt
+cond = df_meta$cond
+gene_fit_int_p = matrix(nrow = 0, ncol = 3)
+colnames(gene_fit_int_p) = c("spline", "condition", "interaction")
+gene_fit_int_vals = data.frame(row.names = 1:300)
+predgrid = data.frame("t" = rep(seq(min(t), max(t), length.out = 100), 3),
+                      "cond" = rep(names(hep_cells), each = 100))
+for(i in genes){
+  z = exp_hep[i,]
+  
+  d = data.frame(z=z, t=t, cond=cond)
+  tmp = suppressMessages(gam(z ~ ns(t, df = 4)*cond, data=d))
+  
+  # bins for model fitting
+  gene_fit_int_vals[,g] = suppressMessages(predict(tmp, newdata = predgrid))
+  p = summary(tmp)$parametric.anova$`Pr(>F)`[1:3]
+  gene_fit_int_p = rbind(gene_fit_int_p, p)
+  rownames(gene_fit_int_p)[nrow(gene_fit_int_p)] = i
+}
+```
+
+DTW condition vs condition
+
+```{r}
+cond_comb = combn(names(qvals_list), 2)
+for(i in 1:ncol(cond_comb)){
+  genes = intersect(names(qvals_list[[cond_comb[1,i]]])[qvals_list[[cond_comb[1,i]]]<=0.05],
+                    names(qvals_list[[cond_comb[2,i]]])[qvals_list[[cond_comb[2,i]]]<=0.05])
+  
+  sc_list = list()
+  for(cond in cond_comb[,i]){
+    gene_fit_vals = fits_list[[cond]]
+    gene_fit_vals_filt = t(gene_fit_vals[,genes])
+    sc_list[[cond]] = t(apply(gene_fit_vals_filt, 1, scale))
+  }
+  
+  xxx = dtw(sc_list[[1]], sc_list[[2]], window.type = "itakura", dist.method = "DTW")
+  yyy = dtw(dist(t(sc_list[[1]]), t(sc_list[[2]]), method = "DTW"), window.type = "itakura")
+}
+```
+
+
+
+```{r}
+source("aux_scripts/primate_cerebral_organoids_pt_alignment.r")
+
+xcv = align_pt_traj(expr_ref = hep_cells$healthy@assays$SCT@data[genes,], 
+                    pt_ref = traj_list$healthy,
+                    expr_query = hep_cells$embolised@assays$SCT@data[genes,], 
+                    pt_query = traj_list$embolised, num_breaks_ref = 100, 
+                    ref_name = "healthy", query_name = "embolised")
+
+plot(traj_list$embolised, xcv$pt_query_aligned)
+abline(0,1)
+
+xcb = align_pt_traj(expr_ref = hep_cells$healthy@assays$SCT@data[genes,], 
+                    pt_ref = traj_list$healthy,
+                    expr_query = hep_cells$regenerating@assays$SCT@data[genes,], 
+                    pt_query = traj_list$regenerating, num_breaks_ref = 100, 
+                    ref_name = "healthy", query_name = "regenerating")
+
+plot(traj_list$regenerating, xcb$pt_query_aligned)
+abline(0,1)
+```
+
+
+
+
+
