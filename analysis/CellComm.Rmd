@@ -35,400 +35,509 @@ library(dplyr)
 
 
 
-# Healthy
-Load data
+# Load and preprocess data
+Load data (from all cells)
 
 ```{r}
-hcells_rpca = readRDS("data/processed/hcells_rpca.RDS")
-hep_hcells = readRDS("data/processed/hep_hcells_zon.RDS")
+allcells_css = readRDS(file = "data/processed/allcells_css.RDS")
+end_cells = readRDS(file = "results/zonation_cond/end_cells_zonation.RDS")
+hep_cells = readRDS(file = "results/zonation_cond/hep_cells_zonation.RDS")
 ```
 
-Save the data to run the analysis  
-"Doublet" clusters are removed, as well as some contaminaiting non-hepatocytes
+Subset and process each condition
 
 ```{r}
-cpdb_path = "results/cell_comm_healthy/CellPhoneDB_runs"
+cpdb_path = "results/cell_comm/CellPhoneDB_runs"
 
-# remove doublet cells
-hcells_filt = hcells_rpca[,!grepl("interaction", hcells_rpca@meta.data$names_clusters)]
-
-# remove contaminating hepatocytes
-hcells_filt = hcells_filt[,colnames(hcells_filt) %in% colnames(hep_hcells) |
-                            !grepl("Hepat", hcells_filt@meta.data$names_clusters)]
-
-dat = cbind(rownames(hcells_filt@assays$SCT@data),
-            Matrix::as.matrix(hcells_filt@assays$SCT@data))
-colnames(dat)[1] = "Gene"
-write.table(dat, file = paste0(cpdb_path, "/hcells_rpca_norm.txt"), 
+cond_cells = list()
+for(cond in unique(allcells_css@meta.data$Condition)){
+  print(cond)
+  cond_cells[[cond]] = allcells_css[,allcells_css@meta.data$Condition==cond]
+  
+  # remove doublet cells
+  cond_cells[[cond]] = cond_cells[[cond]][,cond_cells[[cond]]@meta.data$allcells_major!="Doublets"]
+  
+  # remove contaminating hepatocytes
+  cond_cells[[cond]] = cond_cells[[cond]][,colnames(cond_cells[[cond]]) %in% colnames(hep_cells[[cond]]) | cond_cells[[cond]]@meta.data$allcells_major!="Hepatocytes"]
+  
+  # remove contaminating endothelial cells
+  cond_cells[[cond]] = cond_cells[[cond]][,colnames(cond_cells[[cond]]) %in% colnames(end_cells[[cond]]) | !startsWith(cond_cells[[cond]]@meta.data$allcells_simp,"LSEC")]
+  
+  # add zonation labels
+  meta = data.frame(row.names = rownames(cond_cells[[cond]]@meta.data),
+                    "Cell" = rownames(cond_cells[[cond]]@meta.data), 
+                    "cell_type" = as.character(cond_cells[[cond]]@meta.data$allcells_simp),
+                    stringsAsFactors = F)
+  
+  hep_zones = hep_cells[[cond]]@meta.data$zonation_int
+  levels(hep_zones) = c("(-0.0688,-0.0253]" = "Hepatocytes_Z1",
+                        "(-0.0253,0.018]" = "Hepatocytes_Z2",
+                        "(0.018,0.0615]" = "Hepatocytes_Z3")
+  hep_zones = as.character(hep_zones)
+  names(hep_zones) = colnames(hep_cells[[cond]])
+  meta[names(hep_zones),"cell_type"] = hep_zones
+  
+  end_zones = end_cells[[cond]]@meta.data$zonation_int
+  levels(end_zones) = c("(-0.0194,6.47]" = "LSEC_Z1",
+                        "(6.47,12.9]" = "LSEC_Z2",
+                        "(12.9,19.4]" = "LSEC_Z3")
+  end_zones = as.character(end_zones)
+  names(end_zones) = colnames(end_cells[[cond]])
+  meta[names(end_zones),"cell_type"] = end_zones
+  
+  write.table(meta, file = paste0(cpdb_path, "/", cond, "_meta_names_simp.txt"), 
             sep = "\t", col.names = T, row.names = F, quote = F)
-
-meta = data.frame("Cell" = rownames(hcells_filt@meta.data), 
-                  "cell_type" = as.character(hcells_filt@meta.data$names_clusters),
-                  stringsAsFactors = F)
-write.table(meta, file = paste0(cpdb_path, "/hcells_rpca_meta_names_clusters.txt"), 
-            sep = "\t", col.names = T, row.names = F, quote = F)
-
-# define 3 zones for hepatocytes
-hep_zones = cut(hep_hcells@meta.data$healthy_hep_zon_dc1, 3)
-levels(hep_zones) = c("(-0.06,-0.0165]" = "Hepatocytes_Z1",
-                     "(-0.0165,0.0268]" = "Hepatocytes_Z2",
-                     "(0.0268,0.0702]" = "Hepatocytes_Z3")
-hep_zones = as.character(hep_zones)
-names(hep_zones) = rownames(hep_hcells@meta.data)
-meta$cell_type = ifelse(meta$cell_type %in% c("gd-T cells_1", "gd-T cells_2"), 
-                        "gd-T cells", meta$cell_type)
-meta$cell_type = ifelse(meta$Cell %in% names(hep_zones)[grepl("Z1", hep_zones)],
-                        "Hepatocytes_Z1", meta$cell_type)
-meta$cell_type = ifelse(meta$Cell %in% names(hep_zones)[grepl("Z2", hep_zones)],
-                        "Hepatocytes_Z2", meta$cell_type)
-meta$cell_type = ifelse(meta$Cell %in% names(hep_zones)[grepl("Z3", hep_zones)],
-                        "Hepatocytes_Z3", meta$cell_type)
-write.table(meta, file = paste0(cpdb_path, "/hcells_rpca_meta_names_simp.txt"), 
-            sep = "\t", col.names = T, row.names = F, quote = F)
+  
+  # normalise and save
+  cond_cells[[cond]] = suppressWarnings(SCTransform(cond_cells[[cond]], do.correct.umi = T, 
+                                                   verbose = F, 
+                                                   vars.to.regress=c("unique_name",
+                                                                     "nCount_RNA"),
+                                                   variable.features.rv.th = 1, seed.use = 1,
+                                                   return.only.var.genes = F, 
+                                                   variable.features.n = NULL))
+  
+  dat = cbind(rownames(cond_cells[[cond]]@assays$SCT@data),
+              Matrix::as.matrix(cond_cells[[cond]]@assays$SCT@data))
+  colnames(dat)[1] = "Gene"
+  write.table(dat, file = paste0(cpdb_path, "/", cond, "_exp_norm.txt"), 
+              sep = "\t", col.names = T, row.names = F, quote = F)
+}
 ```
-
 
 ## Running CellPhoneDB
 Commands for runnin CellPhoneDB will be written here. Results are output to the `local1` disk to avoid I/O issues, but the output folders should then be copied to: `results/cell_comm_healthy/CellPhoneDB_runs`.  
-  
-Running for the defined cluster names: `cellphonedb method statistical_analysis results/cell_comm_healthy/CellPhoneDB_runs/hcells_rpca_meta_names_clusters.txt results/cell_comm_healthy/CellPhoneDB_runs/hcells_rpca_norm.txt --threads=6 --output-path=/local1/USERS/tomasgomes/liver/CellPhoneDB_res --project-name healthy_names_clusters --counts-data gene_name`  
-Copy files: `cp -r /local1/USERS/tomasgomes/liver/CellPhoneDB_res/healthy_names_clusters results/cell_comm_healthy/CellPhoneDB_runs/`  
-Run to get heatmaps and interaction counts: `cellphonedb plot heatmap_plot --pvalues-path ./results/cell_comm_healthy/CellPhoneDB_runs/healthy_names_clusters/pvalues.txt --output-path ./results/cell_comm_healthy/CellPhoneDB_runs/healthy_names_clusters/ --count-name counts_heat.pdf --count-network-name count_net.txt --interaction-count-name count_inter.txt ./results/cell_comm_healthy/CellPhoneDB_runs/hcells_rpca_meta_names_clusters.txt`  
+NOTE: for some reason I'm getting a SegFault when trying to run the heatmap_plot command. This was run on the Euler server instead.
 
-Running for simplified cluster names: `cellphonedb method statistical_analysis results/cell_comm_healthy/CellPhoneDB_runs/hcells_rpca_meta_names_simp.txt results/cell_comm_healthy/CellPhoneDB_runs/hcells_rpca_norm.txt --threads=6 --output-path=/local1/USERS/tomasgomes/liver/CellPhoneDB_res --project-name healthy_names_simp --counts-data gene_name`  
-Copy files: `cp -r /local1/USERS/tomasgomes/liver/CellPhoneDB_res/healthy_names_simp results/cell_comm_healthy/CellPhoneDB_runs/`  
-Run to get heatmaps and interaction counts: `cellphonedb plot heatmap_plot --pvalues-path ./results/cell_comm_healthy/CellPhoneDB_runs/healthy_names_simp/pvalues.txt --output-path ./results/cell_comm_healthy/CellPhoneDB_runs/healthy_names_simp/ --count-name counts_heat.pdf --count-network-name count_net.txt --interaction-count-name count_inter.txt ./results/cell_comm_healthy/CellPhoneDB_runs/hcells_rpca_meta_names_simp.txt`  
+```{r}
+for(n in names(cond_cells)){
+comm1 = paste0("cellphonedb method statistical_analysis results/cell_comm/CellPhoneDB_runs/", n, "_meta_names_simp.txt results/cell_comm/CellPhoneDB_runs/", n, "_exp_norm.txt --threads=8 --output-path=/local1/USERS/tomasgomes/liver/CellPhoneDB_res --project-name ", n, " --counts-data gene_name")
+comm2 = paste0("cp -r /local1/USERS/tomasgomes/liver/CellPhoneDB_res/", n, " results/cell_comm/CellPhoneDB_runs/")
+comm3 = paste0("cellphonedb plot heatmap_plot --pvalues-path ./results/cell_comm/CellPhoneDB_runs/", n, "/pvalues.txt --output-path ./results/cell_comm/CellPhoneDB_runs/", n, "/ --count-name counts_heat.pdf --count-network-name count_net.txt --interaction-count-name count_inter.txt ./results/cell_comm/CellPhoneDB_runs/", n, "_meta_names_simp.txt")
+
+print(n)
+print(comm1)
+print(comm2)
+print(comm3)
+print(".")
+}
+```
 
 
 ## Examine results
 Load results
 
 ```{r}
-cpdb_path = "results/cell_comm_healthy/CellPhoneDB_runs"
+cpdb_path = "results/cell_comm/CellPhoneDB_runs"
 
-# all clusters
-sig_means_names_clusters = read.table(paste0(cpdb_path,
-                                             "/healthy_names_clusters/significant_means.txt"),
+sig_means_names_l = list()
+dec_l = list()
+net_names_l = list()
+meta_l = list()
+for(n in unique(allcells_css@meta.data$Condition)){
+  sig_means_names_l[[n]] = read.table(paste0(cpdb_path, "/", n, "/significant_means.txt"),
                                       header = T, sep = "\t", stringsAsFactors = F)
-
-dec_cl = read.table(paste0(cpdb_path, "/healthy_names_clusters/deconvoluted.txt"),
-                    header = T, sep = "\t")
-colnames(dec_cl) = gsub(".", " ", colnames(dec_cl), fixed = T)
-colnames(dec_cl)[colnames(dec_cl)=="gd T cells_1"] = "gd-T cells_1"
-colnames(dec_cl)[colnames(dec_cl)=="gd T cells_2"] = "gd-T cells_2"
-colnames(dec_cl)[colnames(dec_cl)=="ab T cells"] = "ab-T cells"
-
-net_names_cl = read.table(paste0(cpdb_path, "/healthy_names_clusters/count_net.txt"),
-                            header = T, sep = "\t", stringsAsFactors = F)
-
-meta_cl = read.table(paste0(cpdb_path, "/hcells_rpca_meta_names_clusters.txt"),
-                     header = T, sep = "\t")
-
-
-# simplified clusters
-sig_means_names_simp = read.table(paste0(cpdb_path,
-                                         "/healthy_names_simp/significant_means.txt"),
-                                  header = T, sep = "\t", stringsAsFactors = F)
-
-dec_simp = read.table(paste0(cpdb_path, "/healthy_names_simp/deconvoluted.txt"),
-                      header = T, sep = "\t")
-colnames(dec_simp) = gsub(".", " ", colnames(dec_simp), fixed = T)
-colnames(dec_simp)[colnames(dec_simp)=="gd T cells"] = "gd-T cells"
-colnames(dec_simp)[colnames(dec_simp)=="ab T cells"] = "ab-T cells"
-
-net_names_simp = read.table(paste0(cpdb_path, "/healthy_names_simp/count_net.txt"),
-                            header = T, sep = "\t", stringsAsFactors = F)
-
-meta_simp = read.table(paste0(cpdb_path, "/hcells_rpca_meta_names_simp.txt"),
-                     header = T, sep = "\t")
+  dec_l[[n]] = read.table(paste0(cpdb_path, "/", n, "/deconvoluted.txt"),
+                          header = T, sep = "\t")
+  colnames(dec_l[[n]]) = gsub(".", " ", colnames(dec_l[[n]]), fixed = T)
+  colnames(dec_l[[n]])[colnames(dec_l[[n]])=="gd T cells"] = "gd-T cells"
+  colnames(dec_l[[n]])[colnames(dec_l[[n]])=="ab T cells"] = "ab-T cells"
+  colnames(dec_l[[n]])[colnames(dec_l[[n]])=="Endothelial cells  non LSEC "] = "Endothelial cells (non-LSEC)"
+  net_names_l[[n]] = read.table(paste0(cpdb_path, "/", n, "/count_net.txt"),
+                                header = T, sep = "\t", stringsAsFactors = F)
+  meta_l[[n]] = read.table(paste0(cpdb_path, "/", n, "_meta_names_simp.txt"),
+                           header = T, sep = "\t")
+}
 ```
 
-Reformat significant means matrix - clusters
+Reformat significant means matrix
 
 ```{r}
-cl_reform = reshape2::melt(sig_means_names_clusters[,c(1:4, 7:9,
-                                                         13:ncol(sig_means_names_clusters))])
-cl_reform = cl_reform[complete.cases(cl_reform),]
-
-lr1 = c()
-lr2 = c()
-for(i in 1:nrow(cl_reform)){
-  if(grepl("complex", cl_reform$partner_a[i])){
-    lr1 = c(lr1, substr(cl_reform$partner_a[i], 9,100))
-  } else{
-    lr1 = c(lr1, strsplit(cl_reform$interacting_pair[i], "_")[[1]][1])
+reform_list = list()
+for(n in names(meta_l)){
+  simp_reform = reshape2::melt(sig_means_names_l[[n]][,c(1:4, 7:9,
+                                                         13:ncol(sig_means_names_l[[n]]))])
+  simp_reform = simp_reform[complete.cases(simp_reform),]
+  
+  lr1 = c()
+  lr2 = c()
+  for(i in 1:nrow(simp_reform)){
+    if(grepl("complex", simp_reform$partner_a[i])){
+      lr1 = c(lr1, substr(simp_reform$partner_a[i], 9,100))
+    } else{
+      lr1 = c(lr1, strsplit(simp_reform$interacting_pair[i], "_")[[1]][1])
+    }
+    if(grepl("complex", simp_reform$partner_b[i])){
+      lr2 = c(lr2, substr(simp_reform$partner_b[i], 9,100))
+    } else{
+      spltlen = length(strsplit(simp_reform$interacting_pair[i], "_")[[1]])
+      lr2 = c(lr2, strsplit(simp_reform$interacting_pair[i], "_")[[1]][spltlen])
+    }
   }
-  if(grepl("complex", cl_reform$partner_b[i])){
-    lr2 = c(lr2, substr(cl_reform$partner_b[i], 9,100))
-  } else{
-    spltlen = length(strsplit(cl_reform$interacting_pair[i], "_")[[1]])
-    lr2 = c(lr2, strsplit(cl_reform$interacting_pair[i], "_")[[1]][spltlen])
+  simp_reform$lr1 = lr1
+  simp_reform$lr2 = lr2
+  
+  simp_reform$ct1 = NA
+  simp_reform$ct2 = NA
+  for(ct in unique(meta_l[[n]]$cell_type)){
+    ct_mod = gsub("-", " ", ct, fixed = T)
+    ct_mod = gsub("(", " ", ct_mod, fixed = T)
+    ct_mod = gsub(")", " ", ct_mod, fixed = T)
+    st = grepl(paste0("^",ct_mod), gsub(".", " ", simp_reform$variable, fixed = T), fixed = F)
+    en = grepl(paste0(ct_mod,"$"), gsub(".", " ", simp_reform$variable, fixed = T), fixed = F)
+    simp_reform$ct1[st] = ct
+    simp_reform$ct2[en] = ct
   }
-}
-cl_reform$lr1 = lr1
-cl_reform$lr2 = lr2
-
-cl_reform$ct1 = NA
-cl_reform$ct2 = NA
-for(ct in unique(meta_cl$cell_type)){
-  ct_mod = gsub("-", " ", ct, fixed = T)
-  st = grepl(paste0("^",ct_mod), gsub(".", " ", cl_reform$variable, fixed = T), fixed = F)
-  en = grepl(paste0(ct_mod,"$"), gsub(".", " ", cl_reform$variable, fixed = T), fixed = F)
-  cl_reform$ct1[st] = ct
-  cl_reform$ct2[en] = ct
-}
-
-# direction: receptors activate internal signal - that is the direction of the signalling
-## if both are true, the "net signal" is 0
-cl_reform$dir = ifelse(cl_reform$receptor_a==cl_reform$receptor_b, 0, 
-                         ifelse(cl_reform$receptor_a=="True" & 
-                                  cl_reform$receptor_b=="False", -1,
-                                ifelse(cl_reform$receptor_a=="False" &
-                                         cl_reform$receptor_b=="True", 1, NA)))
-
-cl_reform = cl_reform[,c("id_cp_interaction", "ct1", "ct2", "lr1", "lr2", "value", "dir")]
-
-for(i in 1:nrow(cl_reform)){
-  if(cl_reform[i,"dir"]==-1){
-    tmp = cl_reform[i,"ct2"]
-    cl_reform[i,"ct2"] = cl_reform[i,"ct1"]
-    cl_reform[i,"ct1"] = tmp
-    
-    tmp = cl_reform[i,"lr2"]
-    cl_reform[i,"lr2"] = cl_reform[i,"lr1"]
-    cl_reform[i,"lr1"] = tmp
-    
-    cl_reform[i,"dir"]=1
+  
+  # direction: receptors activate internal signal - that is the direction of the signalling
+  ## if both are true, the "net signal" is 0
+  simp_reform$dir = ifelse(simp_reform$receptor_a==simp_reform$receptor_b, 0, 
+                           ifelse(simp_reform$receptor_a=="True" & 
+                                    simp_reform$receptor_b=="False", -1,
+                                  ifelse(simp_reform$receptor_a=="False" &
+                                           simp_reform$receptor_b=="True", 1, NA)))
+  
+  simp_reform = simp_reform[,c("id_cp_interaction", "ct1", "ct2", "lr1", "lr2", 
+                               "value", "dir")]
+  
+  for(i in 1:nrow(simp_reform)){
+    if(simp_reform[i,"dir"]==-1){
+      tmp = simp_reform[i,"ct2"]
+      simp_reform[i,"ct2"] = simp_reform[i,"ct1"]
+      simp_reform[i,"ct1"] = tmp
+      
+      tmp = simp_reform[i,"lr2"]
+      simp_reform[i,"lr2"] = simp_reform[i,"lr1"]
+      simp_reform[i,"lr1"] = tmp
+      
+      simp_reform[i,"dir"]=1
+    }
   }
+  
+ reform_list[[n]] = simp_reform
 }
-
-write.table(cl_reform, file = paste0(cpdb_path, "/healthy_names_simp/cl_reform_tab.txt"),
-            sep = "\t", col.names = T, row.names = T, quote = F)
-```
-
-Reformat significant means matrix - simplified clusters
-
-```{r}
-simp_reform = reshape2::melt(sig_means_names_simp[,c(1:4, 7:9, 13:ncol(sig_means_names_simp))])
-simp_reform = simp_reform[complete.cases(simp_reform),]
-
-lr1 = c()
-lr2 = c()
-for(i in 1:nrow(simp_reform)){
-  if(grepl("complex", simp_reform$partner_a[i])){
-    lr1 = c(lr1, substr(simp_reform$partner_a[i], 9,100))
-  } else{
-    lr1 = c(lr1, strsplit(simp_reform$interacting_pair[i], "_")[[1]][1])
-  }
-  if(grepl("complex", simp_reform$partner_b[i])){
-    lr2 = c(lr2, substr(simp_reform$partner_b[i], 9,100))
-  } else{
-    spltlen = length(strsplit(simp_reform$interacting_pair[i], "_")[[1]])
-    lr2 = c(lr2, strsplit(simp_reform$interacting_pair[i], "_")[[1]][spltlen])
-  }
-}
-simp_reform$lr1 = lr1
-simp_reform$lr2 = lr2
-
-simp_reform$ct1 = NA
-simp_reform$ct2 = NA
-for(ct in unique(meta_simp$cell_type)){
-  ct_mod = gsub("-", " ", ct, fixed = T)
-  st = grepl(paste0("^",ct_mod), gsub(".", " ", simp_reform$variable, fixed = T), fixed = F)
-  en = grepl(paste0(ct_mod,"$"), gsub(".", " ", simp_reform$variable, fixed = T), fixed = F)
-  simp_reform$ct1[st] = ct
-  simp_reform$ct2[en] = ct
-}
-
-# direction: receptors activate internal signal - that is the direction of the signalling
-## if both are true, the "net signal" is 0
-simp_reform$dir = ifelse(simp_reform$receptor_a==simp_reform$receptor_b, 0, 
-                         ifelse(simp_reform$receptor_a=="True" & 
-                                  simp_reform$receptor_b=="False", -1,
-                                ifelse(simp_reform$receptor_a=="False" &
-                                         simp_reform$receptor_b=="True", 1, NA)))
-
-simp_reform = simp_reform[,c("id_cp_interaction", "ct1", "ct2", "lr1", "lr2", "value", "dir")]
-
-for(i in 1:nrow(simp_reform)){
-  if(simp_reform[i,"dir"]==-1){
-    tmp = simp_reform[i,"ct2"]
-    simp_reform[i,"ct2"] = simp_reform[i,"ct1"]
-    simp_reform[i,"ct1"] = tmp
-    
-    tmp = simp_reform[i,"lr2"]
-    simp_reform[i,"lr2"] = simp_reform[i,"lr1"]
-    simp_reform[i,"lr1"] = tmp
-    
-    simp_reform[i,"dir"]=1
-  }
-}
-
-write.table(simp_reform, file = paste0(cpdb_path, "/healthy_names_simp/simp_reform_tab.txt"),
-            sep = "\t", col.names = T, row.names = T, quote = F)
+saveRDS(reform_list, file = "results/cell_comm/reform_list.RDS")
 ```
 
 Plot interaction counts
 
 ```{r}
-inter_counts_cl = reshape2::dcast(data = net_names_cl, formula = SOURCE~TARGET,
-                                    value.var = "count")
-rownames(inter_counts_cl) = inter_counts_cl[,1]
-inter_counts_cl = inter_counts_cl[,-1]
-
-inter_counts_simp = reshape2::dcast(data = net_names_simp, formula = SOURCE~TARGET,
-                                    value.var = "count")
-rownames(inter_counts_simp) = inter_counts_simp[,1]
-inter_counts_simp = inter_counts_simp[,-1]
-
-pdf("results/cell_comm_healthy/number_of_interactions.pdf", useDingbats = F, 
-    height = 6, width = 7)
-pheatmap::pheatmap(inter_counts_cl, clustering_method = "ward.D2", main = "All clusters")
-pheatmap::pheatmap(inter_counts_simp, clustering_method = "ward.D2", 
-                   main = "Simplified clusters")
-dev.off()
+inter_counts_l = list()
+for(n in names(net_names_l)){
+  inter_counts = reshape2::dcast(data = net_names_l[[n]], 
+                                 formula = SOURCE~TARGET, value.var = "count")
+  rownames(inter_counts) = inter_counts[,1]
+  inter_counts = inter_counts[,-1]
+  
+  pdf(paste0("results/cell_comm/", n, "_number_of_interactions.pdf"), useDingbats = F, 
+      height = 6, width = 7)
+  pheatmap::pheatmap(inter_counts, clustering_method = "ward.D2", main = "All clusters")
+  dev.off()
+  inter_counts_l[[n]] = inter_counts
+}
 ```
 
 Making two cell type by interaction matrices: one has the ligand mean, another the receptor mean
-All clusters
 
 ```{r}
-mat_lig_cl = data.frame(matrix(NA, nrow = length(unique(cl_reform$id_cp_interaction)), 
-                 ncol = length(unique(cl_reform$ct1))))
-mat_rec_cl = data.frame(matrix(NA, nrow = length(unique(cl_reform$id_cp_interaction)), 
-                 ncol = length(unique(cl_reform$ct1))))
-colnames(mat_lig_cl) = colnames(mat_rec_cl) = unique(cl_reform$ct1)
-rownames(mat_lig_cl) = rownames(mat_rec_cl) = unique(cl_reform$id_cp_interaction)
-for(i in 1:nrow(cl_reform)){
-  g1 = cl_reform[i,"lr1"]
-  g2 = cl_reform[i,"lr2"]
+scoring_mats = list()
+for(n in names(reform_list)){
+  cl_reform = reform_list[[n]]
+  # add reversed non-directed interactions, to consider them in both directions
+  cl_reform0 = cl_reform[cl_reform$dir==0,]
+  cl_reform0 = cl_reform0[,c(1,3,2,5,4,6,7)]
+  colnames(cl_reform0) = colnames(cl_reform)
+  cl_reform = rbind(cl_reform, cl_reform0)
   
-  c1 = cl_reform[i,"ct1"]
-  c2 = cl_reform[i,"ct2"]
+  dec_cl = dec_l[[n]]
   
-  int = as.character(cl_reform[i,1])
+  mat_lig_cl = data.frame(matrix(NA, nrow = length(unique(cl_reform$id_cp_interaction)), 
+                   ncol = length(unique(cl_reform$ct1))))
+  mat_rec_cl = data.frame(matrix(NA, nrow = length(unique(cl_reform$id_cp_interaction)), 
+                   ncol = length(unique(cl_reform$ct1))))
+  colnames(mat_lig_cl) = colnames(mat_rec_cl) = unique(cl_reform$ct1)
+  rownames(mat_lig_cl) = rownames(mat_rec_cl) = unique(cl_reform$id_cp_interaction)
+  for(i in 1:nrow(cl_reform)){
+    g1 = cl_reform[i,"lr1"]
+    g2 = cl_reform[i,"lr2"]
+    
+    c1 = cl_reform[i,"ct1"]
+    c2 = cl_reform[i,"ct2"]
+    
+    int = as.character(cl_reform[i,1])
+    
+    m1 = mean(dec_cl[dec_cl$id_cp_interaction==int & dec_cl[,1]==g1,c1], na.rm = T)
+    if(is.na(m1)) m1 = mean(dec_cl[dec_cl$id_cp_interaction==int & dec_cl[,5]==g1,c1], 
+                            na.rm = T)
+    mat_lig_cl[int, c1] = m1
+    
+    m2 = mean(dec_cl[dec_cl$id_cp_interaction==int & dec_cl[,1]==g2,c2], na.rm = T)
+    if(is.na(m2)) m2 = mean(dec_cl[dec_cl$id_cp_interaction==int & dec_cl[,5]==g2,c2],
+                            na.rm = T)
+    if(is.na(m1) | is.na(m2)) print(int)
+    mat_rec_cl[int, c2] = m2
+  }
   
-  m1 = mean(dec_cl[dec_cl$id_cp_interaction==int & dec_cl[,1]==g1,c1], na.rm = T)
-  if(is.na(m1)) m1 = mean(dec_cl[dec_cl$id_cp_interaction==int & dec_cl[,5]==g1,c1], 
-                          na.rm = T)
-  mat_lig_cl[int, c1] = m1
+  # ligand vs receptor correlation
+  cor_mat_each_cl = cor(mat_lig_cl, mat_rec_cl, use="pairwise.complete.obs", method = "sp")
   
-  m2 = mean(dec_cl[dec_cl$id_cp_interaction==int & dec_cl[,1]==g2,c2], na.rm = T)
-  if(is.na(m2)) m2 = mean(dec_cl[dec_cl$id_cp_interaction==int & dec_cl[,5]==g2,c2],
-                          na.rm = T)
-  if(is.na(m1) | is.na(m2)) print(int)
-  mat_rec_cl[int, c2] = m2
+  scoring_mats[[n]] = list("mat_lig_ct" = mat_lig_cl, "mat_rec_ct" = mat_rec_cl,
+                           "cor_mat_each" = cor_mat_each_cl)
+  
+  # sum(lig, reg) correlation
+  mat_lig_cl[is.na(mat_lig_cl)] = 0
+  mat_rec_cl[is.na(mat_rec_cl)] = 0
+  mat_both_cl = mat_lig_cl+mat_rec_cl
+  mat_both_cl[mat_both_cl==0] = NA
+  cor_mat_both_cl = cor(mat_both_cl, use="pairwise.complete.obs", method = "sp")
+  
+  scoring_mats[[n]]$cor_mat_both = cor_mat_both_cl
 }
-
-# ligand vs receptor correlation
-cor_mat_each_cl = cor(mat_lig_cl, mat_rec_cl, use="pairwise.complete.obs", method = "sp")
-
-# sum(lig, reg) correlation
-mat_lig_cl[is.na(mat_lig_cl)] = 0
-mat_rec_cl[is.na(mat_rec_cl)] = 0
-mat_both_cl = mat_lig_cl+mat_rec_cl
-mat_both_cl[mat_both_cl==0] = NA
-cor_mat_both_cl = cor(mat_both_cl, use="pairwise.complete.obs", method = "sp")
+saveRDS(scoring_mats, file = "results/cell_comm/scoring_mats.RDS")
 ```
 
-Simplified clusters
+Making two cell type by interaction matrices: one has the ligand mean, another the receptor mean (here only directional)
 
 ```{r}
-mat_lig_simp = data.frame(matrix(NA, nrow = length(unique(simp_reform$id_cp_interaction)), 
-                 ncol = length(unique(simp_reform$ct1))))
-mat_rec_simp = data.frame(matrix(NA, nrow = length(unique(simp_reform$id_cp_interaction)), 
-                 ncol = length(unique(simp_reform$ct1))))
-colnames(mat_lig_simp) = colnames(mat_rec_simp) = unique(simp_reform$ct1)
-rownames(mat_lig_simp) = rownames(mat_rec_simp) = unique(simp_reform$id_cp_interaction)
-for(i in 1:nrow(simp_reform)){
-  g1 = simp_reform[i,"lr1"]
-  g2 = simp_reform[i,"lr2"]
+scoring_mats_dir = list()
+for(n in names(reform_list)){
+  cl_reform = reform_list[[n]]
+  # add reversed non-directed interactions, to consider them in both directions
+  cl_reform0 = cl_reform[cl_reform$dir==0,]
+  cl_reform0 = cl_reform0[,c(1,3,2,5,4,6,7)]
+  colnames(cl_reform0) = colnames(cl_reform)
+  cl_reform = rbind(cl_reform, cl_reform0)
   
-  c1 = simp_reform[i,"ct1"]
-  c2 = simp_reform[i,"ct2"]
+  cl_reform = cl_reform[cl_reform$dir==1,]
   
-  int = as.character(simp_reform[i,1])
+  dec_cl = dec_l[[n]]
   
-  m1 = mean(dec_simp[dec_simp$id_cp_interaction==int & dec_simp[,1]==g1,c1], na.rm = T)
-  if(is.na(m1)) m1 = mean(dec_simp[dec_simp$id_cp_interaction==int & dec_simp[,5]==g1,c1], 
-                          na.rm = T)
-  mat_lig_simp[int, c1] = m1
+  mat_lig_cl = data.frame(matrix(NA, nrow = length(unique(cl_reform$id_cp_interaction)), 
+                   ncol = length(unique(cl_reform$ct1))))
+  mat_rec_cl = data.frame(matrix(NA, nrow = length(unique(cl_reform$id_cp_interaction)), 
+                   ncol = length(unique(cl_reform$ct1))))
+  colnames(mat_lig_cl) = colnames(mat_rec_cl) = unique(cl_reform$ct1)
+  rownames(mat_lig_cl) = rownames(mat_rec_cl) = unique(cl_reform$id_cp_interaction)
+  for(i in 1:nrow(cl_reform)){
+    g1 = cl_reform[i,"lr1"]
+    g2 = cl_reform[i,"lr2"]
+    
+    c1 = cl_reform[i,"ct1"]
+    c2 = cl_reform[i,"ct2"]
+    
+    int = as.character(cl_reform[i,1])
+    
+    m1 = mean(dec_cl[dec_cl$id_cp_interaction==int & dec_cl[,1]==g1,c1], na.rm = T)
+    if(is.na(m1)) m1 = mean(dec_cl[dec_cl$id_cp_interaction==int & dec_cl[,5]==g1,c1], 
+                            na.rm = T)
+    mat_lig_cl[int, c1] = m1
+    
+    m2 = mean(dec_cl[dec_cl$id_cp_interaction==int & dec_cl[,1]==g2,c2], na.rm = T)
+    if(is.na(m2)) m2 = mean(dec_cl[dec_cl$id_cp_interaction==int & dec_cl[,5]==g2,c2],
+                            na.rm = T)
+    if(is.na(m1) | is.na(m2)) print(int)
+    mat_rec_cl[int, c2] = m2
+  }
   
-  m2 = mean(dec_simp[dec_simp$id_cp_interaction==int & dec_simp[,1]==g2,c2], na.rm = T)
-  if(is.na(m2)) m2 = mean(dec_simp[dec_simp$id_cp_interaction==int & dec_simp[,5]==g2,c2],
-                          na.rm = T)
-  if(is.na(m1) | is.na(m2)) print(int)
-  mat_rec_simp[int, c2] = m2
+  # ligand vs receptor correlation
+  cor_mat_each_cl = cor(mat_lig_cl, mat_rec_cl, use="pairwise.complete.obs", method = "sp")
+  
+  scoring_mats_dir[[n]] = list("mat_lig_ct" = mat_lig_cl, "mat_rec_ct" = mat_rec_cl,
+                               "cor_mat_each" = cor_mat_each_cl)
+  
+  # sum(lig, reg) correlation
+  mat_lig_cl[is.na(mat_lig_cl)] = 0
+  mat_rec_cl[is.na(mat_rec_cl)] = 0
+  mat_both_cl = mat_lig_cl+mat_rec_cl
+  mat_both_cl[mat_both_cl==0] = NA
+  cor_mat_both_cl = cor(mat_both_cl, use="pairwise.complete.obs", method = "sp")
+  
+  scoring_mats_dir[[n]]$cor_mat_both = cor_mat_both_cl
 }
-
-# ligand vs receptor correlation
-cor_mat_each_simp = cor(mat_lig_simp, mat_rec_simp, use="pairwise.complete.obs", method = "sp")
-
-# sum(lig, reg) correlation
-mat_lig_simp[is.na(mat_lig_simp)] = 0
-mat_rec_simp[is.na(mat_rec_simp)] = 0
-mat_both_simp = mat_lig_simp+mat_rec_simp
-mat_both_simp[mat_both_simp==0] = NA
-cor_mat_both_simp = cor(mat_both_simp, use="pairwise.complete.obs", method = "sp")
+saveRDS(scoring_mats_dir, file = "results/cell_comm/scoring_mats_dir.RDS")
 ```
 
-Score number of interactions by correlation - clusters
+Count interactions of each type
 
 ```{r}
-pdf("results/cell_comm_healthy/interactions_score_cl.pdf")
-cor_mat_mod = cor_mat_both_cl
-inter_counts_mod = inter_counts_cl
+inter_counts_dir = list()
+for(n in names(reform_list)){
+  inter_counts_dir[[n]] = list()
+  for(i in c(0,1)){
+    cl_reform = reform_list[[n]]
+    cl_reform = cl_reform[cl_reform$dir==i,]
+    
+    n_dir_int = matrix(0, nrow = length(unique(cl_reform$ct1)),
+                       ncol = length(unique(cl_reform$ct2)))
+    rownames(n_dir_int) = colnames(n_dir_int) = unique(cl_reform$ct1)
+    for(c1 in unique(cl_reform$ct1)){
+      for(c2 in unique(cl_reform$ct1)){
+        n_dir_int[c1,c2] = nrow(cl_reform[cl_reform$ct1==c1 & cl_reform$ct2==c2,])
+        if(i==0){
+          n_dir_int[c1,c2] = n_dir_int[c1,c2]+nrow(cl_reform[cl_reform$ct1==c2 &
+                                                               cl_reform$ct2==c1,])
+        }
+      }
+    }
+    inter_counts_dir[[n]][[as.character(i)]] = n_dir_int
+  }
+}
+saveRDS(inter_counts_dir, file = "results/cell_comm/inter_counts_dir.RDS")
+```
 
-xx = inter_counts_mod*cor_mat_mod[rownames(inter_counts_mod),colnames(inter_counts_mod)]
-xx[xx<0] = 0
-pheatmap::pheatmap(xx, clustering_method = "ward.D2", main = "Ligands and receptors")
+Calculate mutual information for total interactions
 
-xx$ct = rownames(xx)
-df_net = reshape2::melt(xx)
-write.table(df_net, file = "results/cell_comm_healthy/df_net_corboth_healthy_cl.txt", 
-            sep = "\t", col.names = T, row.names = F, quote = F)
+```{r, fig.height=6, fig.width=6.2}
+mut_info_list = list()
+for(n in names(scoring_mats)){
+  mi_mat = matrix(0, nrow = ncol(scoring_mats[[n]]$mat_lig_ct), ncol = ncol(scoring_mats[[n]]$mat_rec_ct))
+  rownames(mi_mat) = colnames(mi_mat) = colnames(scoring_mats[[n]]$mat_lig_ct)
+  for(ct1 in colnames(scoring_mats[[n]]$mat_lig_ct)){
+    for(ct2 in colnames(scoring_mats[[n]]$mat_rec_ct)){
+      df = cbind(scoring_mats[[n]]$mat_lig_ct[,ct1], scoring_mats[[n]]$mat_rec_ct[,ct2])
+      df = df[complete.cases(df),]
+      norm_mi = mpmi::cmi(df)$mi[1,2] / sqrt(entropy::entropy(df[,1]) * entropy::entropy(df[,2]))
+      mi_mat[ct1, ct2] = norm_mi
+    }
+  }
+  m = data.frame(inter_counts_l[[n]], check.names = F)
+  m$r = rownames(m)
+  m = reshape2::melt(m)
+  mi_mat = reshape2::melt(mi_mat)
+  
+  mut_info_list[[n]] = merge(mi_mat, m, by = c(1,2))
+  colnames(mut_info_list[[n]]) = c("source", "target", "mi", "n")
+}
+saveRDS(mut_info_list, file = "results/cell_comm/mut_info_list.RDS")
+```
 
-cor_mat_mod = cor_mat_each_cl
-inter_counts_mod = inter_counts_cl
+Heatmaps for total interactions
 
-xx = inter_counts_mod*cor_mat_mod[rownames(inter_counts_mod),colnames(inter_counts_mod)]
-xx[xx<0] = 0
-pheatmap::pheatmap(xx, clustering_method = "ward.D2", main = "Ligands vs receptors")
+```{r}
+# interaction scores
+## healthy
+tmp = mut_info_list$healthy
+tmp$score = tmp$mi*test$n
+mm = reshape2::dcast(tmp, source~target, value.var = "score")
+rownames(mm) = mm[,1]
+mm = mm[,-1]
+pdf("results/cell_comm/healthy_total_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(mm, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
+dev.off()
 
-xx$ct = rownames(xx)
-df_net = reshape2::melt(xx)
-write.table(df_net, file = "results/cell_comm_healthy/df_net_coreach_healthy_cl.txt", 
-            sep = "\t", col.names = T, row.names = F, quote = F)
+## regenerating
+tmp = mut_info_list$regenerating
+tmp$score = tmp$mi*test$n
+mr = reshape2::dcast(tmp, source~target, value.var = "score")
+rownames(mr) = mr[,1]
+mr = mr[,-1]
+pdf("results/cell_comm/regenerating_total_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(mr, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
+dev.off()
+
+## difference between scores
+yy = mm-mr
+yy[yy>6] = 6
+yy[yy<(-10)] = -10
+pdf("results/cell_comm/HvR_total_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(yy, color = cols, breaks = rev(c(seq(max(yy), 0, length.out = 50), seq(-0.001, min(yy), length.out = 50))), clustering_method = "ward.D2")
+dev.off()
+
+# number of interactions
+pdf("results/cell_comm/healthy_total_interaction_number.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(inter_counts_l$healthy, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
+dev.off()
+pdf("results/cell_comm/regenerating_total_interaction_number.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(inter_counts_l$regenerating, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
+dev.off()
+
+## difference between scores
+x = inter_counts_l$healthy-inter_counts_l$regenerating
+cols = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdBu")))(100)
+brks =  seq(-max(abs(x)), max(abs(x)), length.out = 100)
+brks2 = brks[(max(x)-brks)>=0]
+pdf("results/cell_comm/HvR_total_interaction_number.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(x, color = cols, breaks = rev(c(seq(max(x), 0, length.out = 50), seq(-0.001, min(x), length.out = 50))), clustering_method = "ward.D2")
 dev.off()
 ```
 
-Score number of interactions by correlation - simplified
+Calculate mutual information for directed interactions
+
+```{r, fig.height=6, fig.width=6.2}
+mut_info_dir_list = list()
+for(n in names(scoring_mats_dir)){
+  mi_mat = matrix(0, nrow = ncol(scoring_mats_dir[[n]]$mat_lig_ct), ncol = ncol(scoring_mats_dir[[n]]$mat_rec_ct))
+  rownames(mi_mat) = colnames(mi_mat) = colnames(scoring_mats_dir[[n]]$mat_lig_ct)
+  for(ct1 in colnames(scoring_mats_dir[[n]]$mat_lig_ct)){
+    for(ct2 in colnames(scoring_mats_dir[[n]]$mat_rec_ct)){
+      df = cbind(scoring_mats_dir[[n]]$mat_lig_ct[,ct1], scoring_mats_dir[[n]]$mat_rec_ct[,ct2])
+      df = df[complete.cases(df),]
+      norm_mi = mpmi::cmi(df)$mi[1,2] / sqrt(entropy::entropy(df[,1]) * entropy::entropy(df[,2]))
+      mi_mat[ct1, ct2] = norm_mi
+    }
+  }
+  mi_mat[mi_mat<0] = 0 # some values are negative because of the adjustment
+  
+  mut_info_dir_list[[n]] = mi_mat
+  
+  m = data.frame(inter_counts_dir[[n]]$`1`, check.names = F)
+  m$r = rownames(m)
+  m = reshape2::melt(m)
+  mi_mat = reshape2::melt(mi_mat)
+  
+  mut_info_dir_list[[n]] = merge(mi_mat, m, by = c(1,2))
+  colnames(mut_info_dir_list[[n]]) = c("source", "target", "mi", "n")
+}
+saveRDS(mut_info_dir_list, file = "results/cell_comm/mut_info_dir_list.RDS")
+```
+
+Heatmaps for directed interactions
 
 ```{r}
-pdf("results/cell_comm_healthy/interactions_score_simp.pdf")
-cor_mat_mod = cor_mat_both_simp
-inter_counts_mod = inter_counts_simp
+# interaction scores
+## healthy
+tmp = mut_info_dir_list$healthy
+tmp$score = tmp$mi*test$n
+mm = reshape2::dcast(tmp, source~target, value.var = "score")
+rownames(mm) = mm[,1]
+mm = mm[,-1]
+pdf("results/cell_comm/healthy_directed_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(mm, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
+dev.off()
 
-xx = inter_counts_mod*cor_mat_mod[rownames(inter_counts_mod),colnames(inter_counts_mod)]
-xx[xx<0] = 0
-pheatmap::pheatmap(xx, clustering_method = "ward.D2", main = "Ligands and receptors")
+## regenerating
+tmp = mut_info_dir_list$regenerating
+tmp$score = tmp$mi*test$n
+mr = reshape2::dcast(tmp, source~target, value.var = "score")
+rownames(mr) = mr[,1]
+mr = mr[,-1]
+pdf("results/cell_comm/regenerating_directed_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(mr, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
+dev.off()
 
-xx$ct = rownames(xx)
-df_net = reshape2::melt(xx)
-write.table(df_net, file = "results/cell_comm_healthy/df_net_corboth_healthy_simp.txt", 
-            sep = "\t", col.names = T, row.names = F, quote = F)
+## difference between scores
+yy = mm-mr
+yy[yy>3] = 3
+yy[yy<(-2)] = -2
+pdf("results/cell_comm/HvR_directed_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(yy, color = cols, breaks = rev(c(seq(max(yy), 0, length.out = 50), seq(-0.001, min(yy), length.out = 50))), clustering_method = "ward.D2")
+dev.off()
 
-cor_mat_mod = cor_mat_each_simp
-inter_counts_mod = inter_counts_simp
+# number of interactions
+pdf("results/cell_comm/healthy_directed_interaction_number.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(inter_counts_dir$healthy$`1`, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
+dev.off()
+pdf("results/cell_comm/regenerating_directed_interaction_number.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(inter_counts_dir$regenerating$`1`, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
+dev.off()
 
-xx = inter_counts_mod*cor_mat_mod[rownames(inter_counts_mod),colnames(inter_counts_mod)]
-xx[xx<0] = 0
-pheatmap::pheatmap(xx, clustering_method = "ward.D2", main = "Ligands vs receptors")
-
-xx$ct = rownames(xx)
-df_net = reshape2::melt(xx)
-write.table(df_net, file = "results/cell_comm_healthy/df_net_coreach_healthy_simp.txt", 
-            sep = "\t", col.names = T, row.names = F, quote = F)
+## difference between scores
+x = inter_counts_dir$healthy$`1`-inter_counts_dir$regenerating$`1`
+cols = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdBu")))(100)
+brks =  seq(-max(abs(x)), max(abs(x)), length.out = 100)
+brks2 = brks[(max(x)-brks)>=0]
+pdf("results/cell_comm/HvR_directed_interaction_number.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(x, color = cols, breaks = rev(c(seq(max(x), 0, length.out = 50), seq(-0.001, min(x), length.out = 50))), clustering_method = "ward.D2")
 dev.off()
 ```
 
@@ -438,11 +547,8 @@ dev.off()
 
 
 
-# Embolised/Regenerating
-Load data
 
-```{r}
 
-```
+
 
 
