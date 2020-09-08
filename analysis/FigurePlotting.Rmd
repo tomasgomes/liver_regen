@@ -1,0 +1,278 @@
+---
+title: "Figure Plotting"
+output: html_notebook
+---
+
+Notebook to make the panels for the paper figures
+
+# General Setup
+Setup chunk
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 8)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_knit$get("root.dir")
+```
+
+Setup reticulate
+
+```{r}
+library(reticulate)
+knitr::knit_engines$set(python = reticulate::eng_python)
+py_available(initialize = FALSE)
+use_python(Sys.which("python"))
+py_config()
+```
+
+Load libraries
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(ggridges)
+```
+
+Define plot theme(s)
+
+```{r}
+th_gen = theme(axis.text = element_text(size = 7, colour = "black"),
+               axis.title = element_text(size = 8, colour = "black"),
+               axis.line = element_line(colour = "black"),
+               plot.background = element_blank(),
+               axis.ticks = element_blank(), 
+               legend.background = element_blank(), 
+               legend.key.size = unit(0.35, "cm"),
+               legend.key = element_blank(), legend.spacing = unit(0.5, "cm"),
+               legend.text = element_text(size = 8),
+               legend.title = element_text(size = 9),
+               legend.box.margin = margin(0.1,0.1,0.1,0.1),
+               legend.box.spacing = unit(0.5,"cm"))
+pntsize = 0.3
+theme_set(th_gen)
+```
+
+Colour palettes
+
+```{r}
+colsmajor = c("Cholangiocytes" = "bisque2", "Endothelial" = "aquamarine4",  
+              "Hepatocytes" = "tomato3", "Immune" = "skyblue", 
+              "Mesenchymal" = "sandybrown")
+colsub = c("rosybrown4","thistle4","thistle3","aquamarine4","aquamarine3",
+           "forestgreen","tomato4","tomato3","darksalmon","skyblue",
+           "cadetblue","sandybrown","palegoldenrod")
+```
+
+
+
+# Figure 1
+## Main Figure
+UMAP with all cell types
+
+```{r}
+hcells_css = readRDS("data/processed/hcells_css.RDS")
+```
+
+```{r, fig.height=2, fig.width=3}
+plot_df = data.frame(hcells_css@reductions$umap_css@cell.embeddings)
+plot_df$names_major = as.character(hcells_css@meta.data$names_major)
+plot_df$names_major[plot_df$names_major=="T cells" | 
+                      plot_df$names_major=="B cells" | 
+                      plot_df$names_major=="DCs"] = "Immune"
+plt = ggplot(plot_df, aes(x = UMACSS_1, y = UMACSS_2, colour = names_major))+
+  geom_point(size = pntsize)+
+  guides(colour = guide_legend(override.aes = list(size = 3), title = NULL))+
+  theme_classic()+
+  th_gen+
+  theme(axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        aspect.ratio = 1)
+
+pdf("figure_panels/fig1/umap_fresh_major.pdf", 
+    useDingbats = F, height = 4, width = 5)
+print(plt)
+dev.off()
+```
+
+Heatmap for cell type markers
+
+```{r}
+markers = c("")
+```
+
+```{r}
+
+```
+
+Cell type proportions
+
+```{r}
+plot_df = data.frame("names_major" = as.character(hcells_css@meta.data$names_major),
+                     "Donor" = as.character(hcells_css@meta.data$Donor),
+                     stringsAsFactors = F)
+plot_df$names_major[plot_df$names_major=="T cells" | 
+                      plot_df$names_major=="B cells" | 
+                      plot_df$names_major=="Macrophages" | 
+                      plot_df$names_major=="DCs"] = "Immune"
+plot_df$names_major[plot_df$names_major=="Endothelial cells"] = "Endothelial"
+plot_df$names_major[plot_df$names_major=="Stellate cells"] = "Mesenchymal"
+plot_df = plot_df[plot_df$names_major!="Doublets",]
+cnts_ct = table(plot_df$names_major, plot_df$Donor)
+plot_df = reshape2::melt(apply(cnts_ct, 1, function(x) x/sum(x)))
+
+plt = ggplot(plot_df, aes(x = Var2, y = value*100, fill = Var1))+
+  geom_bar(stat = "identity")+
+  scale_y_continuous(expand = c(0,0))+
+  labs(y = "Cell type proportion [%]", x = NULL)+
+  theme_classic()+
+  th_gen+
+  theme(legend.position = "none", 
+        axis.line.x = element_blank(),
+        axis.ticks.y = element_line(),
+        axis.ticks.x = element_blank())
+
+pdf("figure_panels/fig1/proportions_fresh_major_donor.pdf", 
+    useDingbats = F, height = 4, width = 5)
+print(plt)
+dev.off()
+```
+
+
+
+
+
+## Supplementary
+
+
+```{r}
+
+```
+
+
+
+# Figure 2
+## Main Figure
+Ternary plot for conditions
+
+```{r}
+cond_comp_chr = readRDS("results/cond_effect/cond_comp_chr.RDS")
+```
+
+```{r}
+groups_trin_list = list()
+for(gg in names(cond_comp_chr$healthy_v_embolised)){
+  groups_trin_list[[gg]] = list()
+  
+  cts = unique(c(cond_comp_chr$healthy_v_embolised[[gg]]$celltype,
+                 cond_comp_chr$healthy_v_regenerating[[gg]]$celltype,
+                 cond_comp_chr$embolised_v_regenerating[[gg]]$celltype))
+  for(ct in cts){
+    groups_trin_list[[gg]][[ct]] = list()
+    for(n in names(cond_comp_chr)){
+      hep_dat = cond_comp_chr[[n]][[gg]]
+      hep_dat = hep_dat[hep_dat$celltype==ct,c(1,4,6)]
+      
+      if(n=="healthy_v_regenerating"){
+        hep_dat$avg_logFC = hep_dat$avg_logFC*(-1)
+        hep_dat$condition[hep_dat$avg_logFC>0] = "regenerating"
+        hep_dat$condition[hep_dat$avg_logFC<0] = "healthy"
+      }
+      if(n==names(cond_comp_chr)[1]){
+        res_df = hep_dat
+        colnames(res_df)[2:3] = c("healthy","healthy_l")
+      } else{
+        res_df = merge(res_df, hep_dat, by = 1, all = T)
+      }
+    }
+    colnames(res_df)[c(2,4,6)] = c("healthy", "regenerating", "embolised")
+    colnames(res_df)[c(3,5,7)] = c("healthy_l", "regenerating_l", "embolised_l")
+    
+    for(cc in colnames(res_df)[c(2,4,6)]){
+      res_df[is.na(res_df[,cc]),paste0(cc,"_l")] = "healthy"
+      res_df[is.na(res_df[,cc]),cc] = 0
+      # new_value = (old_value - old_bottom) / (old_top - old_bottom) * (new_top - new_bottom) + new_bottom
+      new_value = (abs(res_df[,cc])-0)/(max(abs(res_df[,cc]))-0)*(100 - 0)+0
+      new_value[res_df[,paste0(cc,"_l")]!=cc] = new_value[res_df[,paste0(cc,"_l")]!=cc]*(-1)
+      res_df[,cc] = (new_value-(-100))/(max(abs(new_value))-(-100))*(100 - 0)+0
+    }
+    res_df = unique(res_df)
+    
+    # scores for colours
+    scores_list = list(
+    healthy = res_df$healthy+100-res_df$regenerating,
+    embolised = 100-res_df$healthy+res_df$embolised,
+    regenerating = res_df$regenerating+100-res_df$embolised
+    )
+    scores_list = data.frame(scores_list)
+    res_df$cols = apply(scores_list, 1, function(x) colnames(scores_list)[which.max(x)])
+    res_df$cols = apply(res_df, 1, 
+                        function(x) ifelse(any(abs(as.numeric(x[c(2,4,6)])-50)>=10), 
+                                           x[8], "none"))
+    res_df$cols = factor(res_df$cols, 
+                         levels = c("healthy", "embolised", "regenerating", "none"))
+    
+    groups_trin_list[[gg]][[ct]] = res_df
+  }
+}
+
+chr_tab = read.csv("../../gene_refs/human/biomart_ens_gn_hgnc_chr.csv", 
+                   header = T, stringsAsFactors = F)
+library(ggtern)
+ggtern(groups_trin_list$allcells_major$Cholangiocytes, 
+       aes(healthy, embolised, regenerating,  colour = cols))+
+  geom_point()+
+  scale_colour_manual(values = c("green3", "red", "blue", "grey80"))+
+  theme_bw()
+```
+
+
+
+## Supplementary
+
+
+```{r}
+
+```
+
+
+# Figure 3
+## Main Figure
+
+
+```{r}
+
+```
+
+
+
+## Supplementary
+
+
+```{r}
+
+```
+
+
+# Figure 4
+## Main Figure
+
+
+```{r}
+
+```
+
+
+
+## Supplementary
+
+
+```{r}
+
+```
+
+
+
+
+
+

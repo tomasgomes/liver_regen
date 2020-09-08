@@ -31,6 +31,7 @@ library(Seurat)
 library(ggplot2)
 library(ggridges)
 library(dplyr)
+library(data.table)
 ```
 
 
@@ -155,8 +156,7 @@ Reformat significant means matrix
 ```{r}
 reform_list = list()
 for(n in names(meta_l)){
-  simp_reform = reshape2::melt(sig_means_names_l[[n]][,c(1:4, 7:9,
-                                                         13:ncol(sig_means_names_l[[n]]))])
+  simp_reform = reshape2::melt(sig_means_names_l[[n]][,c(1:4,7:9,13:ncol(sig_means_names_l[[n]]))])
   simp_reform = simp_reform[complete.cases(simp_reform),]
   
   lr1 = c()
@@ -411,56 +411,6 @@ for(n in names(scoring_mats)){
 saveRDS(mut_info_list, file = "results/cell_comm/mut_info_list.RDS")
 ```
 
-Heatmaps for total interactions
-
-```{r}
-# interaction scores
-## healthy
-tmp = mut_info_list$healthy
-tmp$score = tmp$mi*test$n
-mm = reshape2::dcast(tmp, source~target, value.var = "score")
-rownames(mm) = mm[,1]
-mm = mm[,-1]
-pdf("results/cell_comm/healthy_total_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(mm, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
-dev.off()
-
-## regenerating
-tmp = mut_info_list$regenerating
-tmp$score = tmp$mi*test$n
-mr = reshape2::dcast(tmp, source~target, value.var = "score")
-rownames(mr) = mr[,1]
-mr = mr[,-1]
-pdf("results/cell_comm/regenerating_total_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(mr, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
-dev.off()
-
-## difference between scores
-yy = mm-mr
-yy[yy>6] = 6
-yy[yy<(-10)] = -10
-pdf("results/cell_comm/HvR_total_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(yy, color = cols, breaks = rev(c(seq(max(yy), 0, length.out = 50), seq(-0.001, min(yy), length.out = 50))), clustering_method = "ward.D2")
-dev.off()
-
-# number of interactions
-pdf("results/cell_comm/healthy_total_interaction_number.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(inter_counts_l$healthy, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
-dev.off()
-pdf("results/cell_comm/regenerating_total_interaction_number.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(inter_counts_l$regenerating, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
-dev.off()
-
-## difference between scores
-x = inter_counts_l$healthy-inter_counts_l$regenerating
-cols = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdBu")))(100)
-brks =  seq(-max(abs(x)), max(abs(x)), length.out = 100)
-brks2 = brks[(max(x)-brks)>=0]
-pdf("results/cell_comm/HvR_total_interaction_number.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(x, color = cols, breaks = rev(c(seq(max(x), 0, length.out = 50), seq(-0.001, min(x), length.out = 50))), clustering_method = "ward.D2")
-dev.off()
-```
-
 Calculate mutual information for directed interactions
 
 ```{r, fig.height=6, fig.width=6.2}
@@ -491,44 +441,153 @@ for(n in names(scoring_mats_dir)){
 saveRDS(mut_info_dir_list, file = "results/cell_comm/mut_info_dir_list.RDS")
 ```
 
+Counting interactions
+
+```{r}
+ninter_all = lapply(inter_counts_l, function(x) data.frame("interactions" = rowSums(x)))
+ninter_send = lapply(inter_counts_dir, function(x) data.frame("interactions" = rowSums(x$`1`)))
+ninter_recv = lapply(inter_counts_dir, function(x) data.frame("interactions" = colSums(x$`1`)))
+```
+
+Heatmaps for total interactions
+
+```{r}
+# interaction scores
+## healthy
+tmp = mut_info_list$healthy
+tmp$score = tmp$mi*mut_info_list$healthy$n
+mm = reshape2::dcast(tmp, source~target, value.var = "score")
+rownames(mm) = mm[,1]
+mm = mm[,-1]
+pdf("results/cell_comm/healthy_total_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(mm, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100),
+                   annotation_col = ninter_all$healthy)
+dev.off()
+
+## regenerating
+tmp = mut_info_list$regenerating
+tmp$score = tmp$mi*mut_info_list$regenerating$n
+mr = reshape2::dcast(tmp, source~target, value.var = "score")
+rownames(mr) = mr[,1]
+mr = mr[,-1]
+pdf("results/cell_comm/regenerating_total_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
+pheatmap::pheatmap(mr, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100),
+                   annotation_col = ninter_all$regenerating)
+dev.off()
+
+cols = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdBu")))(100)
+## difference between scores
+yy = mm-mr
+yy[yy>6] = 6
+yy[yy<(-10)] = -10
+cols_n = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "OrRd"))(100)
+lims_cols_h = c(round(min(ninter_all$healthy$interactions)*1/min(ninter_all$regenerating$interactions), 0),
+                round(max(ninter_all$healthy$interactions)*100/max(ninter_all$regenerating$interactions), 0))
+cols_h = cols_n[(lims_cols_h[1]):(lims_cols_h[2])]
+pdf("results/cell_comm/HvR_total_interaction_scores.pdf", useDingbats = F, 
+    width = 6.2, height = 6)
+pheatmap::pheatmap(yy, color = cols, 
+                   breaks = rev(c(seq(max(yy), 0, length.out = 50), 
+                                  seq(-0.001, min(yy), length.out = 50))),
+                   clustering_method = "ward.D2", 
+                   annotation_col = data.frame(row.names = rownames(ninter_all$healthy),
+                                               "H" = ninter_all$healthy$interactions, 
+                                               "R" = ninter_all$regenerating$interactions),
+                   annotation_colors = list("H" = cols_h,
+                                            "R" = cols_n))
+dev.off()
+
+# number of interactions
+pdf("results/cell_comm/healthy_total_interaction_number.pdf", useDingbats = F, 
+    width = 6.2, height = 6)
+pheatmap::pheatmap(inter_counts_l$healthy, clustering_method = "ward.D2", 
+                   color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100),
+                   annotation_col = ninter_all$healthy)
+dev.off()
+pdf("results/cell_comm/regenerating_total_interaction_number.pdf", useDingbats = F, 
+    width = 6.2, height = 6)
+pheatmap::pheatmap(inter_counts_l$regenerating, clustering_method = "ward.D2", 
+                   color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100),
+                   annotation_col = ninter_all$regenerating)
+dev.off()
+
+## difference between number of interactins
+x = inter_counts_l$healthy-inter_counts_l$regenerating
+brks =  seq(-max(abs(x)), max(abs(x)), length.out = 100)
+brks2 = brks[(max(x)-brks)>=0]
+pdf("results/cell_comm/HvR_total_interaction_number.pdf", useDingbats = F, 
+    width = 6.2, height = 6)
+pheatmap::pheatmap(x, color = cols, breaks = rev(c(seq(max(x), 0, length.out = 50), seq(-0.001, min(x), length.out = 50))), 
+                   clustering_method = "ward.D2", annotation_col = data.frame(row.names = rownames(ninter_all$healthy),
+                                                                              "H" = ninter_all$healthy$interactions, 
+                                                                              "R" = ninter_all$regenerating$interactions),
+                   annotation_colors = list("H" = cols_h,
+                                            "R" = cols_n))
+dev.off()
+```
+
 Heatmaps for directed interactions
 
 ```{r}
 # interaction scores
 ## healthy
 tmp = mut_info_dir_list$healthy
-tmp$score = tmp$mi*test$n
+tmp$score = tmp$mi*mut_info_dir_list$healthy$n
 mm = reshape2::dcast(tmp, source~target, value.var = "score")
 rownames(mm) = mm[,1]
 mm = mm[,-1]
 pdf("results/cell_comm/healthy_directed_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(mm, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
+pheatmap::pheatmap(mm, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100),
+                   annotation_row = ninter_send$healthy, annotation_col = ninter_recv$healthy)
 dev.off()
 
 ## regenerating
 tmp = mut_info_dir_list$regenerating
-tmp$score = tmp$mi*test$n
+tmp$score = tmp$mi*mut_info_dir_list$regenerating$n
 mr = reshape2::dcast(tmp, source~target, value.var = "score")
 rownames(mr) = mr[,1]
 mr = mr[,-1]
 pdf("results/cell_comm/regenerating_directed_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(mr, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
+pheatmap::pheatmap(mr, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100),
+                   annotation_row = ninter_send$regenerating, annotation_col = ninter_recv$regenerating)
 dev.off()
 
+cols = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdBu")))(100)
 ## difference between scores
 yy = mm-mr
 yy[yy>3] = 3
 yy[yy<(-2)] = -2
+cols_n = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "Purples"))(100)
+lims_cols_h = c(round(min(ninter_recv$healthy$interactions)*1/min(ninter_recv$regenerating$interactions), 0),
+                round(max(ninter_recv$healthy$interactions)*100/max(ninter_recv$regenerating$interactions), 0))
+cols_hr = cols_n[(lims_cols_h[1]):(lims_cols_h[2])]
 pdf("results/cell_comm/HvR_directed_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(yy, color = cols, breaks = rev(c(seq(max(yy), 0, length.out = 50), seq(-0.001, min(yy), length.out = 50))), clustering_method = "ward.D2")
+pheatmap::pheatmap(yy, color = cols, breaks = rev(c(seq(max(yy), 0, length.out = 50), 
+                                                    seq(-0.001, min(yy), length.out = 50))), 
+                   clustering_method = "ward.D2", 
+                   annotation_col = data.frame(row.names = rownames(ninter_recv$healthy),
+                                               "H" = ninter_recv$healthy$interactions, 
+                                               "R" = ninter_recv$regenerating$interactions),
+                   annotation_row = data.frame(row.names = rownames(ninter_send$healthy),
+                                               "H" = ninter_send$healthy$interactions, 
+                                               "R" = ninter_send$regenerating$interactions),
+                   annotation_colors = list("H" = cols_hr,
+                                            "R" = cols_n))
 dev.off()
 
 # number of interactions
 pdf("results/cell_comm/healthy_directed_interaction_number.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(inter_counts_dir$healthy$`1`, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
+pheatmap::pheatmap(inter_counts_dir$healthy$`1`, clustering_method = "ward.D2", 
+                   color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, 
+                                                                     name = "PuBuGn"))(100),
+                   annotation_col = ninter_recv$healthy, annotation_row = ninter_send$healthy)
 dev.off()
-pdf("results/cell_comm/regenerating_directed_interaction_number.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(inter_counts_dir$regenerating$`1`, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100))
+pdf("results/cell_comm/regenerating_directed_interaction_number.pdf", useDingbats = F, 
+    width = 6.2, height = 6)
+pheatmap::pheatmap(inter_counts_dir$regenerating$`1`, clustering_method = "ward.D2", 
+                   color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, 
+                                                                     name = "PuBuGn"))(100),
+                   annotation_col = ninter_recv$regenerating, annotation_row = ninter_send$regenerating)
 dev.off()
 
 ## difference between scores
@@ -536,16 +595,256 @@ x = inter_counts_dir$healthy$`1`-inter_counts_dir$regenerating$`1`
 cols = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdBu")))(100)
 brks =  seq(-max(abs(x)), max(abs(x)), length.out = 100)
 brks2 = brks[(max(x)-brks)>=0]
-pdf("results/cell_comm/HvR_directed_interaction_number.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(x, color = cols, breaks = rev(c(seq(max(x), 0, length.out = 50), seq(-0.001, min(x), length.out = 50))), clustering_method = "ward.D2")
+pdf("results/cell_comm/HvR_directed_interaction_number.pdf", useDingbats = F, 
+    width = 6.2, height = 6)
+pheatmap::pheatmap(x, color = cols, breaks = rev(c(seq(max(x), 0, length.out = 50), 
+                                                   seq(-0.001, min(x), length.out = 50))), 
+                   clustering_method = "ward.D2",
+                   annotation_col = data.frame(row.names = rownames(ninter_recv$healthy),
+                                               "H" = ninter_recv$healthy$interactions, 
+                                               "R" = ninter_recv$regenerating$interactions),
+                   annotation_row = data.frame(row.names = rownames(ninter_send$healthy),
+                                               "H" = ninter_send$healthy$interactions, 
+                                               "R" = ninter_send$regenerating$interactions),
+                   annotation_colors = list("H" = cols_hr,
+                                            "R" = cols_n))
 dev.off()
+```
+
+Compare detected interactions with condition DE genes (include: gene name of complex, if interaction is unique to condition, if elements of interaction are DE in that cell type) 
+
+```{r}
+cond_comparison_list = readRDS(file = "results/cond_effect/cond_comparison_list.RDS")
+
+# get unique interactions
+ints_regen = setdiff(unique(reform_list$regenerating[,"id_cp_interaction"]),
+                     unique(reform_list$healthy[,"id_cp_interaction"]))
+ints_healthy = setdiff(unique(reform_list$healthy[,"id_cp_interaction"]),
+                       unique(reform_list$regenerating[,"id_cp_interaction"]))
+
+# add genes from complexes
+complex_ref = unique(rbind(dec_l$healthy[dec_l$healthy$is_complex=="True",c(1,5)], 
+                             dec_l$regenerating[dec_l$regenerating$is_complex=="True",c(1,5)]))
+inter_df = list()
+for(n in c("healthy", "regenerating")){
+  tmp = merge(reform_list[[n]], complex_ref, by.x = 4, by.y = 2, all.x = T)[,c(2,3,4,1,5,8,6,7)]
+  inter_df[[n]] = merge(tmp, complex_ref, by.x = 5, by.y = 2, all.x = T)[,c(2,3,4,5,6,1,9,7,8)]
+  inter_df[[n]]$gene_name.x[is.na(inter_df[[n]]$gene_name.x)] = inter_df[[n]]$lr1[is.na(inter_df[[n]]$gene_name.x)]
+  inter_df[[n]]$gene_name.y[is.na(inter_df[[n]]$gene_name.y)] = inter_df[[n]]$lr2[is.na(inter_df[[n]]$gene_name.y)]
+  colnames(inter_df[[n]])[c(5,7)] = c("gn1", "gn2")
+}
+
+# add info on DE genes
+for(n in names(inter_df)){
+  gn1_isDE = c()
+  gn2_isDE = c()
+  mod = ifelse(n=="healthy", 1, -1)
+  for(i in 1:nrow(inter_df[[n]])){
+    ct1cond = cond_comparison_list$healthy_v_regenerating$cell_type$celltype==inter_df[[n]]$ct1[i]
+    ct2cond = cond_comparison_list$healthy_v_regenerating$cell_type$celltype==inter_df[[n]]$ct2[i]
+    gn1cond = cond_comparison_list$healthy_v_regenerating$cell_type$gene==as.character(inter_df[[n]]$gn1[i])
+    gn2cond = cond_comparison_list$healthy_v_regenerating$cell_type$gene==as.character(inter_df[[n]]$gn2[i])
+    
+    if(sum(ct1cond & gn1cond)>0){
+      gn1_isDE = c(gn1_isDE, cond_comparison_list$healthy_v_regenerating$cell_type$avg_logFC[ct1cond & gn1cond]*mod>0)
+    } else{
+      gn1_isDE = c(gn1_isDE, FALSE)
+    }
+    if(sum(ct2cond & gn2cond)>0){
+      gn2_isDE = c(gn2_isDE, cond_comparison_list$healthy_v_regenerating$cell_type$avg_logFC[ct2cond & gn2cond]*mod>0)
+    } else{
+      gn2_isDE = c(gn2_isDE, FALSE)
+    }
+  }
+  inter_df[[n]]$gn1_isDE = gn1_isDE
+  inter_df[[n]]$gn2_isDE = gn2_isDE
+}
+
+# add info on unique interactions
+inter_df$healthy$isUnique = inter_df$healthy$id_cp_interaction %in% ints_healthy
+inter_df$regenerating$isUnique = inter_df$regenerating$id_cp_interaction %in% ints_regen
+
+saveRDS(inter_df, file = "results/cell_comm/interaction_de_unique_HvR.RDS")
+```
+
+
+
+```{r}
+xxx = inter_df$healthy[(inter_df$healthy$gn1_isDE | inter_df$healthy$gn2_isDE) & inter_df$healthy$dir==1,c(1,2,3)]
+xxx = unique(xxx)
+pheatmap::pheatmap(table(xxx$ct1, xxx$ct2))
+xxx = inter_df$regenerating[(inter_df$regenerating$gn1_isDE | inter_df$regenerating$gn2_isDE) & inter_df$regenerating$dir==1,c(1,2,3)]
+xxx = unique(xxx)
+pheatmap::pheatmap(table(xxx$ct1, xxx$ct2))
+
+
+xxx = inter_df$healthy[inter_df$healthy$isUnique & inter_df$healthy$dir==1,c(1,2,3)]
+xxx = unique(xxx)
+pheatmap::pheatmap(table(xxx$ct1, xxx$ct2))
+xxx = inter_df$regenerating[inter_df$regenerating$isUnique & inter_df$regenerating$dir==1,c(1,2,3)]
+xxx = unique(xxx)
+pheatmap::pheatmap(table(xxx$ct1, xxx$ct2))
 ```
 
 
 
 
 
+# Pseudotime bins
 
+To save the data, run `run_saveCPDBbinnedData.R`
+
+## Running CellPhoneDB
+Commands for runnin CellPhoneDB will be written here. Results are output to the `local1` disk to avoid I/O issues, but the output folders should then be copied to: `results/cell_comm_healthy/CellPhoneDB_runs`.  
+NOTE: for some reason I'm getting a SegFault when trying to run the heatmap_plot command. This was run on the Euler server instead.
+
+```{r}
+for(n in unique(allcells_css@meta.data$Condition)){
+  comm1 = paste0("cellphonedb method statistical_analysis results/cell_comm/CellPhoneDB_runs/", n, 
+                 "_meta_names_bins.txt results/cell_comm/CellPhoneDB_runs/", n, 
+                 "_exp_norm_bins.txt --threads=8 --output-path=/local1/USERS/tomasgomes/liver/CellPhoneDB_res --project-name ", n, 
+                 "_bins --counts-data gene_name")
+  comm2 = paste0("cp -r /local1/USERS/tomasgomes/liver/CellPhoneDB_res/", n, 
+                 "_bins results/cell_comm/CellPhoneDB_runs/")
+  comm3 = paste0("cellphonedb plot heatmap_plot --pvalues-path ./results/cell_comm/CellPhoneDB_runs/", n, 
+                 "_bins/pvalues.txt --output-path ./results/cell_comm/CellPhoneDB_runs/", n, 
+                 "_bins/ --count-name counts_heat.pdf --count-network-name count_net.txt --interaction-count-name count_inter.txt ./results/cell_comm/CellPhoneDB_runs/", n, 
+                 "_meta_names_bins.txt")
+  
+  print(n)
+  print(comm1)
+  print(comm2)
+  print(comm3)
+  print(".")
+}
+```
+
+Load pseudotime-varying genes
+
+```{r}
+load("results/zonation_cond/hep_traj_qval_fits.RData")
+hep_fits = fits_list
+hep_traj = traj_list
+load("results/zonation_cond/end_traj_qval_fits.RData")
+end_fits = fits_list
+end_traj = traj_list
+
+inter_df = readRDS(file = "results/cell_comm/interaction_de_unique_HvR.RDS")
+inter_hr = rbind(inter_df$healthy[,1:9], inter_df$regenerating[,1:9])
+inter_hr$cond = c(rep("healthy", nrow(inter_df$healthy)),
+                  rep("regenerating", nrow(inter_df$regenerating)))
+inter_hr = inter_hr[grepl("LSEC_", inter_hr$ct1) | grepl("Hepa", inter_hr$ct1) |
+                      grepl("LSEC_", inter_hr$ct2) | grepl("Hepa", inter_hr$ct2), ]
+
+inter_diff = inter_hr[inter_hr$ct1!=inter_hr$ct2,]
+```
+
+```{r, fig.height=5, fig.width=5.2}
+hep_genes_h_0 = unique(c(as.character(inter_diff$gn1)[grepl("Hepa", inter_diff$ct1) &
+                                                      inter_diff$cond=="healthy"],
+                         as.character(inter_diff$gn2)[grepl("Hepa", inter_diff$ct2) &
+                                                      inter_diff$cond=="healthy"]))
+hep_genes_r_0 = unique(c(as.character(inter_diff$gn1)[grepl("Hepa", inter_diff$ct1) &
+                                                      inter_diff$cond=="regenerating"],
+                         as.character(inter_diff$gn2)[grepl("Hepa", inter_diff$ct2) &
+                                                      inter_diff$cond=="regenerating"]))
+
+nbins = 100
+df_h = data.table("zonation_pt" = hep_traj$healthy)
+df_h$zonation_int = cut(df_h$zonation_pt, nbins)
+
+df_r = data.table("zonation_pt" = hep_traj$regenerating)
+df_r = df_h[df_r, on="zonation_pt", roll=Inf, rollends = T]
+
+mean_bins_h = apply(hep_cells$healthy@assays$SCT@data, 1, 
+                    function(x) tapply(x, df_h$zonation_int, mean))
+mean_bins_r = apply(hep_cells$regenerating@assays$SCT@data, 1, 
+                    function(x) tapply(x, df_r$zonation_int, mean))
+
+hep_h_max = apply(mean_bins_h, 2, function(x) mean(order(x, decreasing = T)[1:10]))
+hep_r_max = apply(mean_bins_r, 2, function(x) mean(order(x, decreasing = T)[1:10]))
+
+xxx = data.frame(row.names = hep_genes_h_0, "h" = hep_h_max[hep_genes_h_0], 
+                 "r" = hep_r_max[hep_genes_h_0])
+xxx = xxx[complete.cases(xxx),]
+ggplot(xxx, aes(x = h, y = r))+geom_hex()+theme_bw()+theme(aspect.ratio = 1)
+cor(xxx)
+
+par(mfrow = c(2,2))
+plot(mean_bins_h[,"COL18A1"], pch = 19, cex = 0.85)
+plot(mean_bins_r[,"COL18A1"], pch = 19, cex = 0.85)
+plot(hep_fits$healthy[,"COL18A1"], pch = 19, cex = 0.85)
+plot(hep_fits$regenerating[,"COL18A1"], pch = 19, cex = 0.85)
+```
+
+```{r, fig.height=5, fig.width=5.2}
+end_genes_h = unique(c(as.character(inter_diff$gn1)[grepl("LSEC_", inter_diff$ct1) &
+                                                        inter_hr$cond=="healthy"],
+                         as.character(inter_diff$gn2)[grepl("LSEC_", inter_diff$ct2) &
+                                                        inter_diff$cond=="healthy"]))
+end_genes_r = unique(c(as.character(inter_diff$gn1)[grepl("LSEC_", inter_diff$ct1) &
+                                                      inter_hr$cond=="regenerating"],
+                       as.character(inter_diff$gn2)[grepl("LSEC_", inter_diff$ct2) &
+                                                      inter_diff$cond=="regenerating"]))
+
+nbins = 100
+df_h = data.table("zonation_pt" = end_traj$healthy)
+df_h$zonation_int = cut(df_h$zonation_pt, nbins)
+
+df_r = data.table("zonation_pt" = end_traj$regenerating)
+df_r = df_h[df_r, on="zonation_pt", roll=Inf, rollends = T]
+
+end_mean_bins_h = apply(end_cells$healthy@assays$SCT@data, 1, 
+                    function(x) tapply(x, df_h$zonation_int, mean))
+end_mean_bins_r = apply(end_cells$regenerating@assays$SCT@data, 1, 
+                    function(x) tapply(x, df_r$zonation_int, mean))
+
+end_h_max = apply(end_mean_bins_h, 2, function(x) mean(order(x, decreasing = T)[1:10]))
+end_r_max = apply(end_mean_bins_r, 2, function(x) mean(order(x, decreasing = T)[1:10]))
+
+xxx = data.frame(row.names = end_genes_h, "h" = end_h_max[end_genes_h], 
+                 "r" = end_r_max[end_genes_h])
+xxx = xxx[complete.cases(xxx),]
+ggplot(xxx, aes(x = h, y = r))+geom_hex()+theme_bw()+theme(aspect.ratio = 1)
+cor(xxx)
+
+par(mfrow = c(2,2))
+plot(end_mean_bins_h[,"PECAM1"], pch = 19, cex = 0.85)
+plot(end_mean_bins_r[,"PECAM1"], pch = 19, cex = 0.85)
+plot(end_fits$healthy[,"PECAM1"], pch = 19, cex = 0.85)
+plot(end_fits$regenerating[,"PECAM1"], pch = 19, cex = 0.85)
+```
+
+
+
+```{r}
+ct1 = inter_diff[grepl("Hepa", inter_diff$ct1),
+                 c("gn1", "ct2")]
+ct2 = inter_diff[grepl("Hepa", inter_diff$ct2),
+                 c("gn2", "ct1")]
+ct = unique(rbind(as.matrix(ct1), as.matrix(ct2)))
+
+ctg = merge(xxx, ct, by.x = 0, by.y = 1)
+
+ggplot(ctg, aes(x = h, y = r))+geom_hex()+theme_bw()+theme(aspect.ratio = 1)
+ggplot(ctg, aes(x = ct2, y = h, fill = ct2))+
+  geom_boxplot()+
+  theme_bw()+theme(aspect.ratio = 1)
+
+
+ct1 = inter_diff[grepl("LSEC_", inter_diff$ct1),
+                 c("gn1", "ct2")]
+ct2 = inter_diff[grepl("LSEC_", inter_diff$ct2),
+                 c("gn2", "ct1")]
+ct = unique(rbind(as.matrix(ct1), as.matrix(ct2)))
+
+ctg = merge(xxx, ct, by.x = 0, by.y = 1)
+
+ggplot(ctg, aes(x = h, y = r))+geom_hex()+theme_bw()+theme(aspect.ratio = 1)
+ggplot(ctg, aes(x = ct2, y = h, fill = ct2))+
+  geom_boxplot()+
+  theme_bw()+theme(aspect.ratio = 1)
+```
 
 
 

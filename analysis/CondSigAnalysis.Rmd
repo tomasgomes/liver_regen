@@ -1,0 +1,170 @@
+---
+title: "Condition effects and gene signatures"
+output: html_notebook
+---
+
+
+
+# General Setup
+Setup chunk
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 8)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_knit$get("root.dir")
+```
+
+Setup reticulate
+
+```{r}
+library(reticulate)
+knitr::knit_engines$set(python = reticulate::eng_python)
+py_available(initialize = FALSE)
+use_python(Sys.which("python"))
+py_config()
+```
+
+Load libraries
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(ggridges)
+library(dplyr)
+library(topGO)
+```
+
+
+
+# Load and preprocess data
+Load data (from all cells)
+
+```{r}
+allcells_css = readRDS(file = "data/processed/allcells_css.RDS")
+end_cells = readRDS(file = "results/zonation_cond/end_cells_zonation.RDS")
+hep_cells = readRDS(file = "results/zonation_cond/hep_cells_zonation.RDS")
+```
+
+Add zonation labels. This revised metadata will also be filtered to avoid contaminaiting cells (and we'll also remove doublets)
+
+```{r}
+meta = data.frame(row.names = rownames(allcells_css@meta.data),
+                  "cell_type" = as.character(allcells_css@meta.data$allcells_simp),
+                  stringsAsFactors = F)
+
+for(cond in names(hep_cells)){
+  hep_zones = hep_cells[[cond]]@meta.data$zonation_int
+  levels(hep_zones) = c("(-0.0688,-0.0253]" = "Hepatocytes_Z1",
+                        "(-0.0253,0.018]" = "Hepatocytes_Z2",
+                        "(0.018,0.0615]" = "Hepatocytes_Z3")
+  hep_zones = as.character(hep_zones)
+  names(hep_zones) = colnames(hep_cells[[cond]])
+  meta[names(hep_zones),"cell_type"] = hep_zones
+  
+  end_zones = end_cells[[cond]]@meta.data$zonation_int
+  levels(end_zones) = c("(-0.0194,6.47]" = "LSEC_Z1",
+                        "(6.47,12.9]" = "LSEC_Z2",
+                        "(12.9,19.4]" = "LSEC_Z3")
+  end_zones = as.character(end_zones)
+  names(end_zones) = colnames(end_cells[[cond]])
+  meta[names(end_zones),"cell_type"] = end_zones
+}
+
+meta = subset(meta, !(cell_type %in% c("Macrophage-T cell interaction",
+                                       "Macrophage-Endothelial interaction",
+                                       "Lymphoid-Endothelial interaction",
+                                       "LSEC periportal", "LSEC pericentral",
+                                       "Kupffer-Endothelial interaction",
+                                       "Hepatocytes (portal/midzone)",
+                                       "Hepatocytes (portal)","Hepatocytes (midzone)",
+                                       "Hepatocytes (central/detox)", "Hepatocytes (central)",
+                                       "Hepatocyte-T cell interaction",
+                                       "Hepatocyte-Myeloid interaction",
+                                       "Hepatocyte-Endothelial interaction")))
+allcells_css = AddMetaData(allcells_css, meta)
+```
+
+Calculate DE (only for cell types with more than 10 cells in one condition)
+
+```{r}
+comb_cond = combn(unique(allcells_css@meta.data$Condition), 2)
+cond_comparison_list = list()
+for(i in 1:ncol(comb_cond)){
+  comp = paste0(comb_cond[1,i], "_v_", comb_cond[2,i])
+  cond_comparison_list[[comp]] = list()
+  for(g in c("allcells_clusters", "allcells_simp", "allcells_major", "cell_type")){
+    tab_cond = table(allcells_css@meta.data[,g], allcells_css@meta.data$Condition)
+    tab_cond = tab_cond[apply(tab_cond, 1, function(x) all(x>10)),]
+    for(ct in rownames(tab_cond)){
+      allcells_css = SetIdent(allcells_css, value = g)
+      mk = FindMarkers(allcells_css, ident.1 = comb_cond[1,i], ident.2 = comb_cond[2,i],
+                       group.by = "Condition", subset.ident = ct, pseudocount.use = 0.1, 
+                       assay = "SCT")
+      mk = mk[mk$p_val_adj<=0.05,]
+      mk$gene = rownames(mk)
+      mk$group = g
+      mk$celltype = ct
+      mk$condition = ifelse(mk$avg_logFC<0, comb_cond[2,i], comb_cond[1,i])
+      mk = mk[,c("group", "celltype", "gene", "avg_logFC", 
+                 "p_val_adj", "condition", "pct.1", "pct.2")]
+      
+      if(comp %in% names(cond_comparison_list)){
+        cond_comparison_list[[comp]][[g]] = rbind(cond_comparison_list[[comp]][[g]], mk)
+      } else{
+        cond_comparison_list[[comp]][[g]] = mk
+      }
+    }
+  }
+}
+saveRDS(cond_comparison_list, file = "results/cond_effect/cond_comparison_list.RDS")
+```
+
+Add chromosome information
+
+```{r}
+chr_tab = read.csv("../../gene_refs/human/biomart_ens_gn_hgnc_chr.csv", 
+                   header = T, stringsAsFactors = F)
+
+cond_comp_chr = list()
+for(n in names(cond_comparison_list)){
+  cond_comp_chr[[n]] = list()
+  for(i in names(cond_comparison_list[[n]])){
+    cond_comp_chr[[n]][[i]] = merge(cond_comparison_list[[n]][[i]], chr_tab[,c(2,4)], by.x = "gene", by.y = 1, all.x = T)
+  }
+}
+saveRDS(cond_comp_chr, file = "results/cond_effect/cond_comp_chr.RDS")
+```
+
+Load cell type markers
+
+```{r}
+
+```
+
+Get GO Term enrichment
+
+```{r}
+
+testdf = cond_comp_chr$healthy_v_regenerating$cell_type
+testdf = unique(testdf[testdf$celltype=="Kupffer cells",c("avg_logFC","gene")])
+genes = testdf$avg_logFC
+names(genes) = testdf$gene
+sampleGOdata <- new("topGOdata",
+                    description = "test", ontology = "BP",
+                    allGenes = genes, geneSel = function(x) return(x<(-0.5)),
+                    nodeSize = 10,
+                    annot = annFUN.org, mapping = "org.Hs.eg.db", ID = "symbol")
+
+resultFisher <- runTest(sampleGOdata, algorithm = "parentchild", statistic = "fisher")
+resultKS <- runTest(sampleGOdata, algorithm = "weight01", statistic = "ks")
+resultKS.elim <- runTest(sampleGOdata, algorithm = "elim", statistic = "ks")
+
+allRes <- GenTable(sampleGOdata, classicFisher = resultFisher,
+                   classicKS = resultKS, elimKS = resultKS.elim,
+                   orderBy = "classicFisher", ranksOf = "classicFisher", topNodes = 25)
+
+showSigOfNodes(sampleGOdata, score(resultFisher), firstSigNodes = 10, useInfo = 'all')
+```
+
+
+

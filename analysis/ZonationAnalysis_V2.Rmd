@@ -96,8 +96,8 @@ hep_cells$healthy = FindNeighbors(hep_cells$healthy, reduction = "pca", dims = 1
                                   force.recalc = T, graph.name = "hep")
 hep_cells$healthy = FindClusters(hep_cells$healthy, graph.name = "hep", algorithm = 4, 
                                  resolution = seq(0.1,0.8,0.1), verbose = F)
-DimPlot(hep_cells$healthy, reduction = "umap", group.by = "hep_res.0.2")
-hep_cells$healthy = SetIdent(hep_cells$healthy, value = "hep_res.0.2")
+DimPlot(hep_cells$healthy, reduction = "umap", group.by = "hep_res.0.3")
+hep_cells$healthy = SetIdent(hep_cells$healthy, value = "hep_res.0.6")
 mk_hep_h = FindAllMarkers(hep_cells$healthy, assay = "SCT")
 
 saveRDS(hep_cells$healthy, file = "results/zonation_healthy/hep_healthy_srat.RDS")
@@ -263,11 +263,17 @@ Find varying genes
 ```{r}
 qvals_list = list()
 fits_list = list()
+
+# get HVG from all conditions
+hvg = unique(c(hep_cells[["healthy"]]@assays$SCT@var.features,
+               hep_cells[["embolised"]]@assays$SCT@var.features,
+               hep_cells[["regenerating"]]@assays$SCT@var.features))
+hvg = hvg[hvg %in% rownames(hep_cells[["healthy"]]@assays$SCT@data) &
+            hvg %in% rownames(hep_cells[["embolised"]]@assays$SCT@data) &
+            hvg %in% rownames(hep_cells[["regenerating"]]@assays$SCT@data)]
+
 for(cond in names(hep_cells)){
   print(cond)
-  # will only use variable genes
-  hvg = hep_cells[[cond]]@assays$SCT@var.features
-  
   # Fit GAM for each gene using pseudotime as independent variable.
   t = traj_list[[cond]]
   gene_fit_p = c()
@@ -288,6 +294,9 @@ for(cond in names(hep_cells)){
     names(gene_fit_p)[length(gene_fit_p)] = g
   }
   
+  if(sum(is.na(gene_fit_p))>0){
+    gene_fit_p[is.na(gene_fit_p)] = 1
+  }
   gene_fit_p = fdrtool::fdrtool(gene_fit_p, statistic="pvalue", plot=F, 
                                 verbose=F, cutoff.method="pct0", pct0=0.9)$qval
   
@@ -478,7 +487,7 @@ for(n in names(traj_list)){
             col.names = T, row.names = T, quote = F)
 }
 
-saveRDS(hep_cells, file = "../results/zonation_cond/hep_cells_zonation.RDS")
+saveRDS(hep_cells, file = "results/zonation_cond/hep_cells_zonation.RDS")
 ```
 
 
@@ -512,7 +521,7 @@ for(cond in unique(allcells_css@meta.data$Condition)){
 For healthy cells (which will serve as reference), do additional filtering and reprocessing
 
 ```{r}
-DimPlot(end_cells$healthy, reduction = "umap", group.by = "unique_name")
+DimPlot(end_cells$healthy, reduction = "umap", group.by = "allcells_clusters")
 gfresh = c("CLEC1B", "CLEC4G", "LYVE1", "CD14",  # central 
            "PECAM1", "AQP1", "VWF", "CD34", # portal
            "ALB", "MKI67", "TRAC", "DCN") 
@@ -746,11 +755,17 @@ traj_list = list("healthy" = df_dc$DPT, "embolised" = emb_pred, "regenerating" =
 
 qvals_list = list()
 fits_list = list()
+
+# get HVG from all conditions
+hvg = unique(c(end_cells[["healthy"]]@assays$SCT@var.features,
+               end_cells[["embolised"]]@assays$SCT@var.features,
+               end_cells[["regenerating"]]@assays$SCT@var.features))
+hvg = hvg[hvg %in% rownames(end_cells[["healthy"]]@assays$SCT@data) &
+            hvg %in% rownames(end_cells[["embolised"]]@assays$SCT@data) &
+            hvg %in% rownames(end_cells[["regenerating"]]@assays$SCT@data)]
+
 for(cond in names(end_cells)){
   print(cond)
-  # will only use variable genes
-  hvg = end_cells[[cond]]@assays$SCT@var.features
-  
   # Fit GAM for each gene using pseudotime as independent variable.
   t = traj_list[[cond]]
   gene_fit_p = c()
@@ -771,6 +786,9 @@ for(cond in names(end_cells)){
     names(gene_fit_p)[length(gene_fit_p)] = g
   }
   
+  if(sum(is.na(gene_fit_p))>0){
+    gene_fit_p[is.na(gene_fit_p)] = 1
+  }
   gene_fit_p = fdrtool::fdrtool(gene_fit_p, statistic="pvalue", plot=F, 
                                 verbose=F, cutoff.method="pct0", pct0=0.9)$qval
   
@@ -779,7 +797,7 @@ for(cond in names(end_cells)){
 }
 ```
 
-Sabe trajectories and genes
+Save trajectories and genes
 
 ```{r}
 save(fits_list, qvals_list, traj_list, 
@@ -939,7 +957,109 @@ saveRDS(end_cells, file = "results/zonation_cond/end_cells_zonation.RDS")
 
 
 
+# Comparing genes between conditions
+Load data
 
+```{r}
+end_cells = readRDS(file = "results/zonation_cond/end_cells_zonation.RDS")
+hep_cells = readRDS(file = "results/zonation_cond/hep_cells_zonation.RDS")
+```
+
+Load fits
+
+```{r}
+load("results/zonation_cond/hep_traj_qval_fits.RData")
+hep_fits = fits_list
+hep_traj = traj_list
+load("results/zonation_cond/end_traj_qval_fits.RData")
+end_fits = fits_list
+end_traj = traj_list
+```
+
+Calculate expression per bins
+
+```{r}
+nbins = 100
+
+dfhep_h = data.table("zonation_pt" = hep_traj$healthy)
+dfhep_h$zonation_int = cut(dfhep_h$zonation_pt, nbins)
+dfhep_e = data.table("zonation_pt" = hep_traj$embolised)
+dfhep_e = dfhep_h[dfhep_e, on="zonation_pt", roll=Inf, rollends = T]
+dfhep_r = data.table("zonation_pt" = hep_traj$regenerating)
+dfhep_r = dfhep_h[dfhep_r, on="zonation_pt", roll=Inf, rollends = T]
+
+hep_mean_bins = list(
+healthy = apply(hep_cells$healthy@assays$SCT@data, 1, 
+                        function(x) tapply(x, dfhep_h$zonation_int, mean)),
+embolised = apply(hep_cells$embolised@assays$SCT@data, 1, 
+                        function(x) tapply(x, dfhep_e$zonation_int, mean)),
+regenerating = apply(hep_cells$regenerating@assays$SCT@data, 1, 
+                        function(x) tapply(x, dfhep_r$zonation_int, mean))
+)
+for(n in names(hep_mean_bins)){ hep_mean_bins[[n]][is.na(hep_mean_bins[[n]])] = 0 }
+
+
+dfend_h = data.table("zonation_pt" = end_traj$healthy)
+dfend_h$zonation_int = cut(dfend_h$zonation_pt, nbins)
+dfend_e = data.table("zonation_pt" = end_traj$embolised)
+dfend_e = dfend_h[dfend_e, on="zonation_pt", roll=Inf, rollends = T]
+dfend_r = data.table("zonation_pt" = end_traj$regenerating)
+dfend_r = dfend_h[dfend_r, on="zonation_pt", roll=Inf, rollends = T]
+
+end_mean_bins = list(
+healthy = apply(end_cells$healthy@assays$SCT@data, 1, 
+                        function(x) tapply(x, dfend_h$zonation_int, mean)),
+embolised = apply(end_cells$embolised@assays$SCT@data, 1, 
+                        function(x) tapply(x, dfend_e$zonation_int, mean)),
+regenerating = apply(end_cells$regenerating@assays$SCT@data, 1, 
+                        function(x) tapply(x, dfend_r$zonation_int, mean))
+)
+for(n in names(end_mean_bins)){ end_mean_bins[[n]][is.na(end_mean_bins[[n]])] = 0 }
+```
+
+Correlate binned expression
+
+```{r}
+comb_cond = combn(names(end_cells), 2)
+hep_cor_list = list()
+for(i in 1:ncol(comb_cond)){
+  c1 = comb_cond[1,i]
+  c2 = comb_cond[2,i]
+  
+  genes = intersect(colnames(hep_mean_bins[[c1]]),colnames(hep_mean_bins[[c2]]))
+  
+  for(g in genes){
+    hep_cor_list[[paste0(c1,"_",c2)]][[g]] = cor(cbind(hep_mean_bins[[c1]][,g],
+                                                       hep_mean_bins[[c2]][,g]),
+                                                 method = "sp")[1,2]
+  }
+}
+hep_cor_list = lapply(hep_cor_list, data.frame)
+hep_cor_list = lapply(hep_cor_list, function(x) cbind(rownames(x), x))
+
+end_cor_list = list()
+for(i in 1:ncol(comb_cond)){
+  c1 = comb_cond[1,i]
+  c2 = comb_cond[2,i]
+  
+  genes = intersect(colnames(end_mean_bins[[c1]]),colnames(end_mean_bins[[c2]]))
+  
+  for(g in genes){
+    end_cor_list[[paste0(c1,"_",c2)]][[g]] = cor(cbind(end_mean_bins[[c1]][,g],
+                                                       end_mean_bins[[c2]][,g]),
+                                                 method = "sp")[1,2]
+  }
+}
+end_cor_list = lapply(end_cor_list, data.frame)
+end_cor_list = lapply(end_cor_list, function(x) cbind(rownames(x), x))
+```
+
+Save correlations
+
+```{r}
+save(hep_cor_list, end_cor_list, 
+     file = "results/zonation_cond/zonation_cor_cond_lists.RData")
+```
 
 
 
@@ -1058,6 +1178,5 @@ yyy = dtw::dtw(x = df2$h, y = df2$r)
 plot(yyy)
 abline(0,1)
 ```
-
 
 
