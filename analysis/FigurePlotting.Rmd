@@ -30,6 +30,7 @@ Load libraries
 library(Seurat)
 library(ggplot2)
 library(ggridges)
+library(RColorBrewer)
 ```
 
 Define plot theme(s)
@@ -40,14 +41,16 @@ th_gen = theme(axis.text = element_text(size = 7, colour = "black"),
                axis.line = element_line(colour = "black"),
                plot.background = element_blank(),
                axis.ticks = element_blank(), 
+               panel.background = element_blank(),
+               panel.grid = element_blank(),
                legend.background = element_blank(), 
                legend.key.size = unit(0.35, "cm"),
-               legend.key = element_blank(), legend.spacing = unit(0.5, "cm"),
-               legend.text = element_text(size = 8),
-               legend.title = element_text(size = 9),
+               legend.key = element_blank(), legend.spacing = unit(0.7, "cm"),
+               legend.text = element_text(size = 9),
+               legend.title = element_text(size = 10),
                legend.box.margin = margin(0.1,0.1,0.1,0.1),
                legend.box.spacing = unit(0.5,"cm"))
-pntsize = 0.3
+pointsize = 0.3
 theme_set(th_gen)
 ```
 
@@ -56,7 +59,10 @@ Colour palettes
 ```{r}
 colsmajor = c("Cholangiocytes" = "bisque2", "Endothelial" = "aquamarine4",  
               "Hepatocytes" = "tomato3", "Immune" = "skyblue", 
-              "Mesenchymal" = "sandybrown")
+              "Mesenchymal" = "sandybrown", "Doublets" = "grey90")
+colcond = c("healthy" = "orange", "regenerating" = "salmon", "embolised" = "darkred")
+coldon = c("sc_H1" = "plum4", "sc_H2" = "salmon4", "sc_H3" = "lightsalmon3")
+
 colsub = c("rosybrown4","thistle4","thistle3","aquamarine4","aquamarine3",
            "forestgreen","tomato4","tomato3","darksalmon","skyblue",
            "cadetblue","sandybrown","palegoldenrod")
@@ -70,6 +76,7 @@ UMAP with all cell types
 
 ```{r}
 hcells_css = readRDS("data/processed/hcells_css.RDS")
+allcells_css = readRDS(file = "data/processed/allcells_css_reannot.RDS")
 ```
 
 ```{r, fig.height=2, fig.width=3}
@@ -77,32 +84,192 @@ plot_df = data.frame(hcells_css@reductions$umap_css@cell.embeddings)
 plot_df$names_major = as.character(hcells_css@meta.data$names_major)
 plot_df$names_major[plot_df$names_major=="T cells" | 
                       plot_df$names_major=="B cells" | 
+                      plot_df$names_major=="Macrophages" |
                       plot_df$names_major=="DCs"] = "Immune"
+plot_df$names_major[plot_df$names_major=="Stellate cells"] = "Mesenchymal"
+plot_df$names_major[plot_df$names_major=="Endothelial cells"] = "Endothelial"
 plt = ggplot(plot_df, aes(x = UMACSS_1, y = UMACSS_2, colour = names_major))+
-  geom_point(size = pntsize)+
-  guides(colour = guide_legend(override.aes = list(size = 3), title = NULL))+
+  geom_point(size = pointsize)+
+  guides(colour = guide_legend(override.aes = list(size = 3), title = "Cell Type"))+
+  scale_colour_manual(values = colsmajor)+
   theme_classic()+
   th_gen+
   theme(axis.line = element_blank(),
         axis.ticks = element_blank(),
         axis.title = element_blank(),
         axis.text = element_blank(),
+        legend.title = element_text(hjust = 0),
         aspect.ratio = 1)
 
 pdf("figure_panels/fig1/umap_fresh_major.pdf", 
     useDingbats = F, height = 4, width = 5)
 print(plt)
 dev.off()
+png("figure_panels/fig1/umap_fresh_major.png", 
+    height=8, width=8, unit="cm", res=600, antialias = "subpixel")
+print(plt)
+dev.off()
+pdf("figure_panels/fig1/umap_fresh_major_noLeg.pdf", 
+    useDingbats = F, height = 4, width = 5)
+print(plt+theme(legend.position = "none"))
+dev.off()
+png("figure_panels/fig1/umap_fresh_major_noLeg.png", 
+    height=8, width=8, unit="cm", res=600, antialias = "subpixel")
+print(plt+theme(legend.position = "none"))
 ```
 
-Heatmap for cell type markers
+UMAP with healthy donors
 
-```{r}
-markers = c("")
+```{r, fig.height=2, fig.width=3}
+plot_df = data.frame(hcells_css@reductions$umap_css@cell.embeddings)
+plot_df$Donor = factor(hcells_css@meta.data$Donor)
+plot_df$Donor = plyr::revalue(plot_df$Donor, c("HD1" = "sc_H1", "HD2" = "sc_H2", "HD3" = "sc_H3"))
+
+plt = ggplot(plot_df[sample(1:nrow(plot_df), nrow(plot_df), replace = F),], 
+             aes(x = UMACSS_1, y = UMACSS_2, colour = Donor))+
+  geom_point(size = pointsize)+
+  guides(colour = guide_legend(override.aes = list(size = 3), title = "Donors"))+
+  scale_colour_manual(values = coldon)+
+  theme_classic()+
+  th_gen+
+  theme(axis.line = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        legend.title = element_text(hjust = 0),
+        aspect.ratio = 1)
+
+pdf("figure_panels/fig1/umap_fresh_donors.pdf", 
+    useDingbats = F, height = 4, width = 5)
+print(plt)
+dev.off()
+png("figure_panels/fig1/umap_fresh_donors.png", 
+    height=8, width=8, unit="cm", res=600, antialias = "subpixel")
+print(plt)
+dev.off()
+pdf("figure_panels/fig1/umap_fresh_donors_noLeg.pdf", 
+    useDingbats = F, height = 4, width = 5)
+print(plt+theme(legend.position = "none"))
+dev.off()
+png("figure_panels/fig1/umap_fresh_donors_noLeg.png", 
+    height=8, width=8, unit="cm", res=600, antialias = "subpixel")
+print(plt+theme(legend.position = "none"))
+dev.off()
 ```
 
-```{r}
+Violins for cell type markers
 
+```{r}
+markers = c("ASGR1", "APOB", "APOC3",
+            "KRT7","CLDN4","EPCAM",
+            "CLEC4G","PECAM1","CD36",
+            "DCN","COLEC11","ACTA2",
+            "PTPRC","HLA-DQA1","LYZ")
+```
+
+```{r, fig.width=3.4, fig.height=4.6}
+exp_mk = data.frame(Matrix::t(hcells_css@assays$SCT@data[markers,]))
+plot_df = cbind(exp_mk, 
+                data.frame(names_major = as.character(hcells_css@meta.data[,c("names_major")]), 
+                           stringsAsFactors = F))
+plot_df$names_major[plot_df$names_major=="T cells" | 
+                      plot_df$names_major=="B cells" | 
+                      plot_df$names_major=="Macrophages" | 
+                      plot_df$names_major=="DCs"] = "Immune"
+plot_df$names_major[plot_df$names_major=="Endothelial cells"] = "Endothelial"
+plot_df$names_major[plot_df$names_major=="Stellate cells"] = "Mesenchymal"
+plot_df = plot_df[plot_df$names_major!="Doublets",]
+plot_df$names_major = factor(plot_df$names_major, 
+                             levels = c("Hepatocytes", "Cholangiocytes", "Endothelial", "Mesenchymal",
+                                        "Immune"))
+plot_df = reshape2::melt(plot_df)
+plot_df$variable = factor(gsub(".", "-", plot_df$variable, fixed = T), levels = markers)
+
+vio_mk = ggplot(plot_df, aes(x = names_major, y = value, fill = names_major))+
+  facet_grid(variable~names_major, scales = "free")+
+  geom_violin(scale = "width", size = 0.3)+
+  scale_y_continuous(breaks = seq(0,10,2), labels = seq(0,10,2), name = "log(exp+1)")+
+  scale_fill_manual(values = colsmajor)+
+  theme(strip.background.y = element_blank(),
+        strip.background.x = element_rect(fill = "transparent", 
+                                          colour = "black", size = 0.8),
+        strip.text.y = element_text(angle = 0, size = 6.5, colour = "black", face = "bold"),
+        strip.text.x = element_text(face = "bold", size = 6.5, colour = "black"),
+        legend.position = "none",
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank(), 
+        axis.line.x.bottom = element_blank())
+
+pdf("figure_panels/fig1/violin_markers_major.pdf", 
+    useDingbats = F, height = 5, width = 5.5)
+print(vio_mk)
+dev.off()
+png("figure_panels/fig1/violin_markers_major.png", height = 425, width = 450, antialias = "subpixel")
+print(vio_mk)
+dev.off()
+```
+
+Heatmap for major cell types
+
+```{r}
+# removed HHIP
+nmg=c("PDGFRA","CALD1","COL6A1","PDGFRB",
+      "CSF1R","CD163","MARCO","CD69","IL7R","PCK1","CYP2A7","CYP3A4","CRP",
+      "ROBO4","EGFL7","CLEC4M","FCN2","KRT7","CFTR","ONECUT1")
+plot_df = data.frame(row.names = rownames(hcells_css@meta.data),
+                     names_major = as.character(hcells_css@meta.data[,c("names_major")]),
+                     donor = as.character(hcells_css@meta.data[,c("Donor")]),
+                     stringsAsFactors = F) 
+plot_df$names_major[plot_df$names_major=="T cells" | 
+                      plot_df$names_major=="B cells" | 
+                      plot_df$names_major=="Macrophages" | 
+                      plot_df$names_major=="DCs"] = "Immune"
+plot_df$names_major[plot_df$names_major=="Endothelial cells"] = "Endothelial"
+plot_df$names_major[plot_df$names_major=="Stellate cells"] = "Mesenchymal"
+plot_df = plot_df[plot_df$names_major!="Doublets",]
+plot_df = plot_df[order(plot_df$names_major),]
+m1=GetAssayData(hcells_css, slot="data")[nmg,rownames(plot_df)]
+m1 = t(apply(m1, 1, scale, scale = F))
+colnames(m1)=rep("",ncol(m1))
+coul <- colorRampPalette(brewer.pal(9, "Greys"))(100)[-c(1:5)]
+m1[m1>1] = 1
+#m1[m1<=(-2)] = -2
+heatmap(m1,Rowv = NA,Colv = NA, col=coul)
+```
+
+Violins for all cell types
+
+```{r, fig.width=3.4, fig.height=4.6}
+exp_mk = data.frame(Matrix::t(hcells_css@assays$SCT@data[markers,]))
+plot_df = cbind(exp_mk, 
+                hcells_css@meta.data[,c("names_major","names_clusters")])
+plot_df$names_major = as.character(plot_df$names_major)
+plot_df$names_major[plot_df$names_major=="T cells" | 
+                      plot_df$names_major=="B cells" | 
+                      plot_df$names_major=="Macrophages" | 
+                      plot_df$names_major=="DCs"] = "Immune"
+plot_df$names_major[plot_df$names_major=="Endothelial cells"] = "Endothelial"
+plot_df$names_major[plot_df$names_major=="Stellate cells"] = "Mesenchymal"
+plot_df = plot_df[plot_df$names_major!="Doublets",]
+plot_df$names_major = factor(plot_df$names_major, 
+                             levels = c("Hepatocytes", "Cholangiocytes", "Endothelial", "Mesenchymal",
+                                        "Immune"))
+plot_df = reshape2::melt(plot_df)
+plot_df$variable = factor(gsub(".", "-", plot_df$variable, fixed = T), levels = markers)
+
+ggplot(plot_df, aes(x = names_clusters, y = value, fill = names_clusters))+
+  facet_grid(variable~names_major, scales = "free")+
+  geom_violin(scale = "width")+
+  scale_y_continuous(breaks = seq(0,10,2), labels = seq(0,10,2), name = "log(exp+1)")+
+  #scale_fill_manual(values = colsmajor)+
+  theme(strip.background.y = element_blank(),
+        strip.background.x = element_rect(fill = "transparent", 
+                                          colour = "black", size = 0.8),
+        strip.text.y = element_text(angle = 0, size = 6.5, colour = "black", face = "bold"),
+        strip.text.x = element_text(face = "bold", size = 6.5, colour = "black"),
+        legend.position = "none",
+        axis.text.x = element_text(angle = -35, hjust = 0, vjust = 0.1),
+        axis.line.x.bottom = element_blank())
 ```
 
 Cell type proportions
@@ -120,21 +287,37 @@ plot_df$names_major[plot_df$names_major=="Stellate cells"] = "Mesenchymal"
 plot_df = plot_df[plot_df$names_major!="Doublets",]
 cnts_ct = table(plot_df$names_major, plot_df$Donor)
 plot_df = reshape2::melt(apply(cnts_ct, 1, function(x) x/sum(x)))
+#plot_df$Var2 = factor(plot_df$Var2, 
+#                      levels = c("Hepatocytes", "Cholangiocytes", "Endothelial","Mesenchymal", "Immune"))
+plot_df$Var1 = plyr::revalue(plot_df$Var1, c("HD1" = "sc_H1", "HD2" = "sc_H2", "HD3" = "sc_H3"))
+plot_df$Var1 = factor(plot_df$Var1, levels = rev(levels(plot_df$Var1)))
 
 plt = ggplot(plot_df, aes(x = Var2, y = value*100, fill = Var1))+
   geom_bar(stat = "identity")+
   scale_y_continuous(expand = c(0,0))+
+  scale_fill_manual(values = coldon)+
   labs(y = "Cell type proportion [%]", x = NULL)+
   theme_classic()+
   th_gen+
-  theme(legend.position = "none", 
-        axis.line.x = element_blank(),
+  theme(axis.line.x = element_blank(),
         axis.ticks.y = element_line(),
         axis.ticks.x = element_blank())
 
 pdf("figure_panels/fig1/proportions_fresh_major_donor.pdf", 
     useDingbats = F, height = 4, width = 5)
 print(plt)
+dev.off()
+png("figure_panels/fig1/proportions_fresh_major_donor.png", 
+    height = 325, width = 400, antialias = "subpixel")
+print(plt)
+dev.off()
+pdf("figure_panels/fig1/proportions_fresh_major_donor_noLeg.pdf", 
+    useDingbats = F, height = 4, width = 5)
+print(plt+theme(legend.position = "none"))
+dev.off()
+png("figure_panels/fig1/proportions_fresh_major_donor_noLeg.png", 
+    height = 325, width = 400, antialias = "subpixel")
+print(plt+theme(legend.position = "none"))
 dev.off()
 ```
 
@@ -153,24 +336,82 @@ dev.off()
 
 # Figure 2
 ## Main Figure
-Ternary plot for conditions
+UMAP with cell types
 
 ```{r}
-cond_comp_chr = readRDS("results/cond_effect/cond_comp_chr.RDS")
+allcells_css = readRDS(file = "data/processed/allcells_css_reannot.RDS")
 ```
 
 ```{r}
+plot_df = allcells_css@meta.data
+plot_df = cbind(plot_df, allcells_css@reductions$umap_css@cell.embeddings)
+plot_df$Condition = factor(plot_df$Condition, levels = c("healthy", "embolised", "regenerating"))
+plot_df$major_ct[is.na(plot_df$major_ct)] = plot_df$allcells_major[is.na(plot_df$major_ct)]
+plot_df$major_ct[plot_df$major_ct=="Dividing cells"] = "Immune" # the detected dividing cells are mostly (if not all) immune 
+plot_df$major_ct = factor(plot_df$major_ct, levels = c("Hepatocytes", "Endothelial", "Cholangiocytes", "Immune", "Mesenchymal", "Doublets"))
+
+pltumap = ggplot(plot_df, aes(y = UMAPCSS_2, x = UMAPCSS_1, colour = major_ct))+
+  geom_point(size = pointsize)+
+  labs(colour = "Cell Type")+
+  scale_colour_manual(values = c(colsmajor, "Doublets" = "grey90"))+
+  guides(colour = guide_legend(override.aes = list(size = 2)))+
+  theme(aspect.ratio = 1,
+        legend.title = element_text(hjust = 0),
+        axis.line = element_blank(),
+        axis.text = element_blank())
+
+pdf("figure_panels/fig2/umap_major_celltypes.pdf", height = 5, width = 6, useDingbats = F)
+print(pltumap)
+dev.off()
+png("figure_panels/fig2/umap_major_celltypes.png", height = 325, width = 400, antialias = "subpixel")
+print(pltumap)
+dev.off()
+```
+
+UMAP with conditions
+
+```{r}
+randomrows = sample(1:nrow(plot_df), size = nrow(plot_df), replace = F)
+pltumapcond = ggplot(plot_df[randomrows,], aes(y = UMAPCSS_2, x = UMAPCSS_1, colour = Condition))+
+  geom_point(size = pointsize)+
+  labs(colour = "Condition")+
+  scale_colour_manual(values = colcond)+
+  guides(colour = guide_legend(override.aes = list(size = 2)))+
+  theme(aspect.ratio = 1,
+        legend.title = element_text(hjust = 0),
+        axis.line = element_blank(),
+        axis.text = element_blank())
+
+pdf("figure_panels/fig2/umap_condition.pdf", height = 5, width = 6, useDingbats = F)
+print(pltumapcond)
+dev.off()
+png("figure_panels/fig2/umap_condition.png", height = 325, width = 400, antialias = "subpixel")
+print(pltumapcond)
+dev.off()
+```
+
+
+Ternary plot for conditions
+
+```{r}
+filt_comps = readRDS(file = "results/cond_effect/all_filt_comps.RDS")
+```
+
+```{r}
+# WARNING! GGTERN CHANGES THE GGPLOT THEMES - ONLY RUN THIS CHUNCK IN A DIFFERENT SESSION
+library(ggtern)
+
 groups_trin_list = list()
-for(gg in names(cond_comp_chr$healthy_v_embolised)){
+for(gg in names(filt_comps)){
   groups_trin_list[[gg]] = list()
   
-  cts = unique(c(cond_comp_chr$healthy_v_embolised[[gg]]$celltype,
-                 cond_comp_chr$healthy_v_regenerating[[gg]]$celltype,
-                 cond_comp_chr$embolised_v_regenerating[[gg]]$celltype))
+  cts = unique(c(filt_comps[[gg]]$healthy_v_embolised$celltype,
+                 filt_comps[[gg]]$healthy_v_regenerating$celltype,
+                 filt_comps[[gg]]$embolised_v_regenerating$celltype))
   for(ct in cts){
     groups_trin_list[[gg]][[ct]] = list()
-    for(n in names(cond_comp_chr)){
-      hep_dat = cond_comp_chr[[n]][[gg]]
+    for(n in names(filt_comps[[gg]])){
+      hep_dat = filt_comps[[gg]][[n]]
       hep_dat = hep_dat[hep_dat$celltype==ct,c(1,4,6)]
       
       if(n=="healthy_v_regenerating"){
@@ -178,7 +419,7 @@ for(gg in names(cond_comp_chr$healthy_v_embolised)){
         hep_dat$condition[hep_dat$avg_logFC>0] = "regenerating"
         hep_dat$condition[hep_dat$avg_logFC<0] = "healthy"
       }
-      if(n==names(cond_comp_chr)[1]){
+      if(n==names(filt_comps[[gg]])[1]){
         res_df = hep_dat
         colnames(res_df)[2:3] = c("healthy","healthy_l")
       } else{
@@ -212,23 +453,128 @@ for(gg in names(cond_comp_chr$healthy_v_embolised)){
     res_df$cols = factor(res_df$cols, 
                          levels = c("healthy", "embolised", "regenerating", "none"))
     
-    groups_trin_list[[gg]][[ct]] = res_df
+    groups_trin_list[[gg]][[ct]] = res_df[order(res_df$cols, decreasing = T),]
   }
 }
 
-chr_tab = read.csv("../../gene_refs/human/biomart_ens_gn_hgnc_chr.csv", 
-                   header = T, stringsAsFactors = F)
-library(ggtern)
-ggtern(groups_trin_list$allcells_major$Cholangiocytes, 
+
+ggtern(groups_trin_list$major_ct_hep$Hepatocytes, 
        aes(healthy, embolised, regenerating,  colour = cols))+
   geom_point()+
-  scale_colour_manual(values = c("green3", "red", "blue", "grey80"))+
+  scale_colour_manual(values = colcond)+
   theme_bw()
 ```
 
 
 
 ## Supplementary
+UMI counts per major cell type and condition
+
+```{r}
+plot_df = allcells_css@meta.data
+plot_df$Condition = factor(plot_df$Condition, levels = c("healthy", "embolised", "regenerating"))
+plot_df$major_ct = factor(plot_df$major_ct, levels = c("Hepatocytes", "Endothelial", "Cholangiocytes", "Immune", "Mesenchymal"))
+
+vio_counts_ct = ggplot(plot_df[!is.na(plot_df$major_ct),], aes(y = nCount_SCT, x = Condition, fill = Condition))+
+  facet_wrap(~major_ct, scales = "free_x")+
+  geom_violin()+
+  scale_y_log10(name = "# UMI (normalised)")+
+  scale_fill_manual(values = colcond)+
+  theme(panel.grid.major.y = element_line(colour = "grey85"),
+        legend.position = "none",
+        axis.text = element_text(),
+        axis.text.x = element_text(size = 9),
+        axis.title.x = element_text(size = 10),
+        strip.text = element_text(size = 10),
+        strip.background = element_rect(fill = "transparent", colour = "black", size = 0.9))
+
+pdf("figure_panels/fig2/violin_ncounts_major_celltype.pdf", height = 4, width = 7, useDingbats = F)
+print(vio_counts_ct)
+dev.off()
+png("figure_panels/fig2/violin_ncounts_major_celltype.png", height = 425, width = 550, antialias = "subpixel")
+print(vio_counts_ct)
+dev.off()
+```
+
+
+# Figure 3
+## Main Figure
+Distribution of healthy hepatocytes
+
+```{r}
+end_cells = readRDS(file = "results/zonation_cond/end_cells_zonation.RDS")
+load(file = "results/zonation_cond/end_traj_qval_fits.RData")
+end_fits_list = fits_list
+end_qvals_list = qvals_list
+end_traj_list = traj_list
+end_mean_bins = readRDS(file = "results/zonation_cond/zonation_bins_end_list.RDS")
+hep_cells = readRDS(file = "results/zonation_cond/hep_cells_zonation.RDS")
+load(file = "results/zonation_cond/hep_traj_qval_fits.RData")
+hep_fits_list = fits_list
+hep_qvals_list = qvals_list
+hep_traj_list = traj_list
+hep_mean_bins = readRDS(file = "results/zonation_cond/zonation_bins_hep_list.RDS")
+```
+
+```{r}
+plot_df = hep_cells$healthy@meta.data
+
+hep_d_h = ggplot(plot_df[sample(1:nrow(plot_df), nrow(plot_df), replace = F),], aes(x = zonation_pt))+
+  geom_density(fill = "orange", alpha = 0.3, colour = "grey40")+
+  geom_rug(mapping = aes(colour = Donor), outside = F, length = unit(0.5, "cm"))+
+  scale_y_continuous(expand = c(0,0), limits = c(0, 17.5))+
+  scale_x_continuous(expand = c(0,0))+
+  theme(legend.position = c(0.03,0.9),
+        axis.line = element_blank(),
+        axis.text = element_blank(),
+        axis.title = element_blank())
+
+top_genes_h = names(hep_qvals_list$healthy[order(hep_qvals_list$healthy, decreasing = F)])[1:100]
+#scaled_bins = scale(t(hep_mean_bins$healthy[,top_genes_h]), center = T, scale = T)
+scaled_bins = t(apply(t(hep_mean_bins$healthy[,top_genes_h]), 1, rank))
+rownames(scaled_bins) = top_genes_h
+cl = hclust(dist(scaled_bins), method = "ward.D2")
+
+plot_df2 = reshape2::melt(scaled_bins)
+plot_df2$Var1 = factor(plot_df2$Var1, levels = cl$labels[cl$order])
+plot_df2$Var2 = factor(plot_df2$Var2, levels = colnames(scaled_bins))
+
+labs = ifelse(levels(plot_df2$Var1) %in% c("SAA1", "CYP2E1", "PLA2G2A", "GLUL", "C3", "IGFBP2","MT1M"),
+              levels(plot_df2$Var1), "")
+
+plt_heat_hep_h = ggplot(plot_df2, aes(x = Var2, y = Var1, fill = value))+
+  geom_tile()+
+  scale_fill_viridis_c(option = "A")+
+  scale_y_discrete(labels = labs)+
+  labs(x = "Zonation pseudotime")+
+  theme(axis.text.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_line(),
+        axis.line.x = element_blank(),
+        legend.position = "none")
+
+cowplot::plot_grid(hep_d_h, plt_heat_hep_h, nrow = 2, 
+                   align = "v", axis = "tblr", rel_heights = c(0.5, 1))
+```
+
+
+
+```{r}
+plot_df = rbind(hep_cells$healthy@meta.data[,c("Condition", "Donor", "zonation_pt", "zonation_int")],
+                hep_cells$embolised@meta.data[,c("Condition", "Donor", "zonation_pt", "zonation_int")],
+                hep_cells$regenerating@meta.data[,c("Condition", "Donor", "zonation_pt", "zonation_int")])
+
+plot_df$Condition = factor(plot_df$Condition, levels = rev(c("healthy", "embolised", "regenerating")))
+
+ggplot(plot_df[sample(1:nrow(plot_df), nrow(plot_df), replace = F),], 
+       aes(x = zonation_pt, y = Condition, fill = Condition))+
+  geom_density_ridges(alpha = 0.8)+
+  scale_x_continuous(expand = c(0,0))+
+  scale_y_discrete(expand = c(0.05,0))+
+  scale_fill_manual(values = colcond)+
+  theme(legend.position = "none",
+        axis.text.y = element_text(size = 8))
+```
 
 
 ```{r}
@@ -236,9 +582,12 @@ ggtern(groups_trin_list$allcells_major$Cholangiocytes,
 ```
 
 
-# Figure 3
-## Main Figure
 
+
+
+```{r}
+load("results/zonation_cond/zonation_cor_cond_lists.RData")
+```
 
 ```{r}
 

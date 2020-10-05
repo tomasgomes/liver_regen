@@ -38,6 +38,8 @@ library(fdrtool)
 library(gam)
 library(dtw)
 library(data.table)
+library(clusterProfiler)
+library(ReactomePA)
 ```
 
 
@@ -305,12 +307,157 @@ for(cond in names(hep_cells)){
 }
 ```
 
-Sabe trajectories and genes
+Save trajectories and genes
 
 ```{r}
 save(fits_list, qvals_list, traj_list, 
      file = "results/zonation_cond/hep_traj_qval_fits.RData")
 ```
+
+Find varying genes - normalised by bins
+
+```{r}
+qvals_b_list = list()
+fits_b_list = list()
+
+# get HVG from all conditions
+hvg = unique(c(hep_cells[["healthy"]]@assays$SCT@var.features,
+               hep_cells[["embolised"]]@assays$SCT@var.features,
+               hep_cells[["regenerating"]]@assays$SCT@var.features))
+hvg = hvg[hvg %in% rownames(hep_cells[["healthy"]]@assays$SCT@data) &
+            hvg %in% rownames(hep_cells[["embolised"]]@assays$SCT@data) &
+            hvg %in% rownames(hep_cells[["regenerating"]]@assays$SCT@data)]
+
+for(cond in names(hep_cells)){
+  print(cond)
+  set.seed(1)
+  # filtering the cells by bins
+  bins = cut(traj_list[[cond]], 100)
+  sampleif = function(x){
+    if(length(x)>=100){
+      res = sample(x, 100, replace = F)
+    } else if(length(x)>=25){
+      res = x
+    } else{
+      res = NULL
+    }
+    return(res)
+  }
+  whichcells = unlist(tapply(1:length(bins), bins, sampleif))
+  
+  # Fit GAM for each gene using pseudotime as independent variable.
+  t = traj_list[[cond]][whichcells]
+  gene_fit_p = c()
+  gene_fit_vals = data.frame(row.names = 1:100)
+  for(i in 1:length(hvg)){
+    g = hvg[i]
+    z = hep_cells[[cond]]@assays$SCT@data[g,whichcells]
+    
+    d = data.frame(z=z, t=t)
+    tmp = suppressMessages(gam(z ~ ns(t, df = 4), data=d))
+    
+    # bins for model fitting
+    bb = seq(min(t), max(t), length.out = 100)
+    gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                                 newdata = data.frame(t = bb)))
+    p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+    gene_fit_p = c(gene_fit_p, p)
+    names(gene_fit_p)[length(gene_fit_p)] = g
+  }
+  
+  if(sum(is.na(gene_fit_p))>0){
+    gene_fit_p[is.na(gene_fit_p)] = 1
+  }
+  gene_fit_p = fdrtool::fdrtool(gene_fit_p, statistic="pvalue", plot=F, 
+                                verbose=F, cutoff.method="pct0", pct0=0.9)$qval
+  
+  qvals_b_list[[cond]] = gene_fit_p
+  fits_b_list[[cond]] = gene_fit_vals
+}
+```
+
+Save trajectories and genes
+
+```{r}
+save(fits_b_list, qvals_b_list, traj_list, 
+     file = "results/zonation_cond/hep_binned_traj_qval_fits.RData")
+```
+
+```{r}
+qvals_b_list = list()
+fits_b_list = list()
+
+# get HVG from all conditions
+hvg = unique(c(hep_cells[["healthy"]]@assays$SCT@var.features,
+               hep_cells[["embolised"]]@assays$SCT@var.features,
+               hep_cells[["regenerating"]]@assays$SCT@var.features))
+hvg = hvg[hvg %in% rownames(hep_cells[["healthy"]]@assays$SCT@data) &
+            hvg %in% rownames(hep_cells[["embolised"]]@assays$SCT@data) &
+            hvg %in% rownames(hep_cells[["regenerating"]]@assays$SCT@data)]
+
+
+bins = cut(unlist(traj_list), 100)
+cond_v = c(hep_cells$healthy$Condition,hep_cells$embolised$Condition,hep_cells$regenerating$Condition)
+cells_list = list()
+for(cond in names(hep_cells)){
+  print(cond)
+  set.seed(1)
+  # filtering the cells by bins
+  sampleif = function(x){
+    if(length(x)>=100){
+      res = sample(x, 100, replace = F)
+    } else if(length(x)>=25){
+      res = x
+    } else{
+      res = NULL
+    }
+    return(res)
+  }
+  whichcells = tapply((1:length(bins))[cond_v==cond], bins[cond_v==cond], sampleif)
+  cells_list[[cond]] = whichcells
+}
+
+counts_bins = Reduce(rbind, lapply(cells_list, function(x) unlist(lapply(x, length))))
+cells_keep = colSums(counts_bins>0)==3
+
+allhep = merge(hep_cells[[1]], hep_cells[2:3])
+cells = unlist(lapply(cells_list, function(x) x[cells_keep]))
+
+# Fit GAM for each gene using pseudotime as independent variable.
+t = unlist(traj_list)[cells]
+gene_fit_p = c()
+gene_fit_vals = data.frame(row.names = 1:100)
+for(i in 1:length(hvg)){
+  g = hvg[i]
+  z = allhep@assays$SCT@data[g,cells]
+  cond = allhep$Condition[cells]
+  
+  d = data.frame(z=z, t=t, cond=cond)
+  d$z = unlist(tapply(d$z, d$cond, scale))
+  tmp = suppressMessages(gam(z ~ t*cond, data=d))
+  
+  # bins for model fitting
+  bb = seq(min(t), max(t), length.out = 100)
+  gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                               newdata = data.frame(t = bb)))
+  p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+  gene_fit_p = c(gene_fit_p, p)
+  names(gene_fit_p)[length(gene_fit_p)] = g
+}
+
+if(sum(is.na(gene_fit_p))>0){
+  gene_fit_p[is.na(gene_fit_p)] = 1
+}
+gene_fit_p = fdrtool::fdrtool(gene_fit_p, statistic="pvalue", plot=F, 
+                              verbose=F, cutoff.method="pct0", pct0=0.9)$qval
+
+qvals_b_list[[cond]] = gene_fit_p
+fits_b_list[[cond]] = gene_fit_vals
+```
+
+
+
+
 
 Calculate distances for all significant genes
 
@@ -804,6 +951,75 @@ save(fits_list, qvals_list, traj_list,
      file = "results/zonation_cond/end_traj_qval_fits.RData")
 ```
 
+Find varying genes - normalised by bins
+
+```{r}
+qvals_b_list = list()
+fits_b_list = list()
+
+# get HVG from all conditions
+hvg = unique(c(end_cells[["healthy"]]@assays$SCT@var.features,
+               end_cells[["embolised"]]@assays$SCT@var.features,
+               end_cells[["regenerating"]]@assays$SCT@var.features))
+hvg = hvg[hvg %in% rownames(end_cells[["healthy"]]@assays$SCT@data) &
+            hvg %in% rownames(end_cells[["embolised"]]@assays$SCT@data) &
+            hvg %in% rownames(end_cells[["regenerating"]]@assays$SCT@data)]
+
+for(cond in names(end_cells)){
+  print(cond)
+  set.seed(1)
+  # filtering the cells by bins
+  bins = cut(traj_list[[cond]], 100)
+  sampleif = function(x){
+    if(length(x)>=100){
+      res = sample(x, 100, replace = F)
+    } else if(length(x)>=25){
+      res = x
+    } else{
+      res = NULL
+    }
+    return(res)
+  }
+  whichcells = unlist(tapply(1:length(bins), bins, sampleif))
+  
+  # Fit GAM for each gene using pseudotime as independent variable.
+  t = traj_list[[cond]][whichcells]
+  gene_fit_p = c()
+  gene_fit_vals = data.frame(row.names = 1:100)
+  for(i in 1:length(hvg)){
+    g = hvg[i]
+    z = end_cells[[cond]]@assays$SCT@data[g,whichcells]
+    
+    d = data.frame(z=z, t=t)
+    tmp = suppressMessages(gam(z ~ ns(t, df = 4), data=d))
+    
+    # bins for model fitting
+    bb = seq(min(t), max(t), length.out = 100)
+    gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                                 newdata = data.frame(t = bb)))
+    p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+    gene_fit_p = c(gene_fit_p, p)
+    names(gene_fit_p)[length(gene_fit_p)] = g
+  }
+  
+  if(sum(is.na(gene_fit_p))>0){
+    gene_fit_p[is.na(gene_fit_p)] = 1
+  }
+  gene_fit_p = fdrtool::fdrtool(gene_fit_p, statistic="pvalue", plot=F, 
+                                verbose=F, cutoff.method="pct0", pct0=0.9)$qval
+  
+  qvals_b_list[[cond]] = gene_fit_p
+  fits_b_list[[cond]] = gene_fit_vals
+}
+```
+
+Save trajectories and genes
+
+```{r}
+save(fits_b_list, qvals_b_list, traj_list, 
+     file = "results/zonation_cond/end_binned_traj_qval_fits.RData")
+```
+
 Calculate distances for all significant genes
 
 ```{r}
@@ -970,10 +1186,18 @@ Load fits
 ```{r}
 load("results/zonation_cond/hep_traj_qval_fits.RData")
 hep_fits = fits_list
+hep_qval = qvals_list
 hep_traj = traj_list
 load("results/zonation_cond/end_traj_qval_fits.RData")
 end_fits = fits_list
+end_qval = qvals_list
 end_traj = traj_list
+load("results/zonation_cond/hep_binned_traj_qval_fits.RData")
+hep_fits_list = fits_b_list
+hep_qvals_list = qvals_b_list
+load("results/zonation_cond/end_binned_traj_qval_fits.RData")
+end_fits_list = fits_b_list
+end_qvals_list = qvals_b_list
 ```
 
 Calculate expression per bins
@@ -997,7 +1221,7 @@ regenerating = apply(hep_cells$regenerating@assays$SCT@data, 1,
                         function(x) tapply(x, dfhep_r$zonation_int, mean))
 )
 for(n in names(hep_mean_bins)){ hep_mean_bins[[n]][is.na(hep_mean_bins[[n]])] = 0 }
-
+saveRDS(hep_mean_bins, file = "results/zonation_cond/zonation_bins_hep_list.RDS")
 
 dfend_h = data.table("zonation_pt" = end_traj$healthy)
 dfend_h$zonation_int = cut(dfend_h$zonation_pt, nbins)
@@ -1015,6 +1239,7 @@ regenerating = apply(end_cells$regenerating@assays$SCT@data, 1,
                         function(x) tapply(x, dfend_r$zonation_int, mean))
 )
 for(n in names(end_mean_bins)){ end_mean_bins[[n]][is.na(end_mean_bins[[n]])] = 0 }
+saveRDS(end_mean_bins, file = "results/zonation_cond/zonation_bins_end_list.RDS")
 ```
 
 Correlate binned expression
@@ -1054,6 +1279,43 @@ end_cor_list = lapply(end_cor_list, data.frame)
 end_cor_list = lapply(end_cor_list, function(x) cbind(rownames(x), x))
 ```
 
+Correlate fitted expression
+
+```{r}
+comb_cond = combn(names(end_cells), 2)
+hep_cor_fit_list = list()
+for(i in 1:ncol(comb_cond)){
+  c1 = comb_cond[1,i]
+  c2 = comb_cond[2,i]
+  
+  genes = intersect(colnames(hep_fits_list[[c1]]),colnames(hep_fits_list[[c2]]))
+  
+  for(g in genes){
+    hep_cor_fit_list[[paste0(c1,"_",c2)]][[g]] = cor(cbind(hep_fits_list[[c1]][,g],
+                                                       hep_fits_list[[c2]][,g]),
+                                                 method = "sp")[1,2]
+  }
+}
+hep_cor_fit_list = lapply(hep_cor_fit_list, data.frame)
+hep_cor_fit_list = lapply(hep_cor_fit_list, function(x) cbind(rownames(x), x))
+
+end_cor_fit_list = list()
+for(i in 1:ncol(comb_cond)){
+  c1 = comb_cond[1,i]
+  c2 = comb_cond[2,i]
+  
+  genes = intersect(colnames(end_fits_list[[c1]]),colnames(end_fits_list[[c2]]))
+  
+  for(g in genes){
+    end_cor_fit_list[[paste0(c1,"_",c2)]][[g]] = cor(cbind(end_fits_list[[c1]][,g],
+                                                       end_fits_list[[c2]][,g]),
+                                                 method = "sp")[1,2]
+  }
+}
+end_cor_fit_list = lapply(end_cor_fit_list, data.frame)
+end_cor_fit_list = lapply(end_cor_fit_list, function(x) cbind(rownames(x), x))
+```
+
 Save correlations
 
 ```{r}
@@ -1061,11 +1323,497 @@ save(hep_cor_list, end_cor_list,
      file = "results/zonation_cond/zonation_cor_cond_lists.RData")
 ```
 
+Filter pathways with ribosomal genes
+
+```{r}
+rpfilter = function(x){
+  return(!grepl("^RPL", x$geneID) & !grepl("^RPS", x$geneID) & 
+           !grepl("/RPL", x$geneID, fixed = T) & !grepl("/RPS", x$geneID, fixed = T))
+}
+```
+
+## Hepatocytes
+Get the top genes for each condition
+
+```{r}
+# get signifficant genes showing variation (at least 0.1 range in the fitted values)
+genes_list = list()
+for(n in names(hep_fits_list)){
+  h_fc_sp = apply(hep_fits_list[[n]], 2, function(x) diff(range(x)))
+  genes_c = names(hep_qvals_list[[n]])[hep_qvals_list[[n]]<=0.05 &
+                    names(hep_qvals_list[[n]]) %in% names(h_fc_sp)[h_fc_sp>=0.1]]
+  genes_c = genes_c[genes_c %in% names(hep_qvals_list[[n]])[order(hep_qvals_list[[n]], decreasing = F)]]
+  genes_list[[n]] = genes_c
+}
+```
+
+Find enriched GO Terms and Reactome pathways
+
+```{r}
+comb_cond = combn(names(hep_fits_list), 2)
+all_genes_conds = list()
+terms_groups_list = list()
+df_cor_list = list()
+for(i in 1:ncol(comb_cond)){
+  comp = paste0(comb_cond[1,i],"_", comb_cond[2,i])
+  print(comb_cond[,i])
+  genes_conds = list("common" = intersect(genes_list[[comb_cond[1,i]]], genes_list[[comb_cond[2,i]]]))
+  genes_conds[[comb_cond[1,i]]] = setdiff(genes_list[[comb_cond[1,i]]], genes_list[[comb_cond[2,i]]])
+  genes_conds[[comb_cond[2,i]]] = setdiff(genes_list[[comb_cond[2,i]]], genes_list[[comb_cond[1,i]]])
+  all_genes_conds[[comp]] = genes_conds
+  
+  # put the genes in a data frame
+  df_cor = hep_cor_fit_list[[comp]]
+  df_cor[,comb_cond[1,i]] = df_cor$`rownames(x)` %in% genes_conds[[comb_cond[1,i]]]
+  df_cor[,comb_cond[2,i]]  = df_cor$`rownames(x)` %in% genes_conds[[comb_cond[2,i]]]
+  df_cor$common = df_cor$`rownames(x)` %in% genes_conds$common
+  colnames(df_cor)[1:2] = c("gene", "corr")
+  
+  # lists of gene groups to compare - most important is "all"
+  gene_groups_list = list(common = as.character(df_cor$gene[df_cor$common]),
+                          all = as.character(df_cor$gene[(df_cor[[comb_cond[2,i]]] |
+                                                            df_cor[[comb_cond[1,i]]] |
+                                                            df_cor$common)]))
+  gene_groups_list[[comb_cond[1,i]]] = as.character(df_cor$gene[df_cor[[comb_cond[1,i]]]])
+  gene_groups_list[[comb_cond[2,i]]] = as.character(df_cor$gene[df_cor[[comb_cond[2,i]]]])
+  
+  # get enriched go terms/pathways
+  terms_groups = list()
+  for(n in names(gene_groups_list)){
+    # convert gene IDs
+    eg = clusterProfiler::bitr(gene_groups_list[[n]], fromType="SYMBOL", 
+                               toType="ENTREZID", OrgDb="org.Hs.eg.db")
+    eg_all = clusterProfiler::bitr(as.character(df_cor$gene), fromType="SYMBOL", 
+                                   toType="ENTREZID", OrgDb="org.Hs.eg.db")
+    
+    # enrichment
+    reac = ReactomePA::enrichPathway(gene=eg$ENTREZID,pvalueCutoff=0.05, 
+                                     readable=T, universe = eg_all$ENTREZID)
+    got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                    OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                    qvalueCutoff  = 0.05, 
+                                    pAdjustMethod = "BH", readable = T)
+    
+    all_terms = rbind(as.data.frame(reac), as.data.frame(got))
+    all_terms$DB = c(rep("Reactome", nrow(as.data.frame(reac))), 
+                     rep("GO Term", nrow(as.data.frame(got))))
+    all_terms = all_terms[all_terms$qvalue<=0.05,]
+    
+    terms_groups[[n]] = all_terms
+  }
+  terms_groups_list[[comp]] = terms_groups
+  df_cor_list[[comp]] = df_cor
+}
+```
+
+Identify pathways more affected by one condition
+
+```{r}
+anot_list = list()
+for(n in names(terms_groups_list)){
+  terms_groups = terms_groups_list[[n]]
+  df_cor = df_cor_list[[n]]
+  
+  # get the pathways for all genes, minus those with ribosomal genes
+  all_path = terms_groups$all[rpfilter(terms_groups$all),]
+  all_path = all_path[order(all_path$qvalue, decreasing = F),]
+  
+  # get gene groups as a data frame
+  g_g = unlist(apply(df_cor[,c(1,3,4,5)], 1, 
+                     function(x) colnames(df_cor[,c(3,4,5)])[which(as.logical(x[2:4]))]))
+  gene_group = data.frame("gene" = names(g_g),
+                          "group" = g_g)
+  
+  # get fraction of genes from a condition that are present in a give pathway
+  n_g_group = list()
+  n_g_group[[levels(gene_group$group)[1]]] = c()
+  n_g_group[[levels(gene_group$group)[2]]] = c()
+  n_g_group[[levels(gene_group$group)[3]]] = c()
+  for(i in 1:nrow(all_path)){
+    genes_p = unlist(strsplit(all_path$geneID[i], "/"))
+    for(gg in unique(gene_group$group)){
+      ngg = sum(genes_p %in% gene_group$gene[gene_group$group==gg])/sum(gene_group$group==gg)
+      n_g_group[[gg]] = c(n_g_group[[gg]], ngg)
+    }
+  }
+  all_path = cbind(all_path, data.frame(n_g_group))
+  all_path$diff = all_path[,13] - all_path[,12] # add difference between cond and healthy
+  all_path$highest = colnames(all_path)[11:13][apply(all_path[,11:13], 1, which.max)]
+  
+  # group the detected pathways by similarity
+  go_path = all_path[all_path$DB=="GO Term",]
+  mat_path = matrix(0, nrow(go_path), nrow(go_path))
+  for(i in 1:nrow(go_path)){
+    g1 = go_path[i,"geneID"]
+    g1 = unlist(strsplit(g1, "/"))
+    for(j in 1:nrow(go_path)){
+        g2 = go_path[j,"geneID"]
+        g2 = unlist(strsplit(g2, "/"))
+        mat_path[i,j] = length(intersect(g1, g2))/mean(c(length(g1), length(g2)))
+    }
+  }
+  cl_go = hclust(dist(mat_path), method = "ward.D2")
+  cl_go = cutree(cl_go, 7)
+  rownames(mat_path) = go_path$Description
+  anot = data.frame(row.names = go_path$Description, 
+                    "cl" = paste0("cl",cl_go), 
+                    "n" = go_path$Count,
+                    "diff" = go_path$diff,
+                    "qval" = -log10(go_path$qvalue),
+                    "term" = go_path$Description)
+  pheatmap::pheatmap(mat_path, clustering_method = "ward.D2", 
+                     annotation_row = anot[,-5], show_rownames = F)
+  genes_per_gocl = tapply(anot$term, anot$cl, 
+         function(x) unique(unlist(strsplit(go_path[go_path$Description %in% x,"geneID"], "/"))))
+  genes_cond_gocl = lapply(genes_per_gocl, function(x) lapply(genes_conds, function(y) sum(y %in% x)))
+  genes_cond_gocl = Reduce(rbind, genes_cond_gocl)
+  rownames(genes_cond_gocl) = paste0("cl", 1:7)
+  
+  anot_list[[n]] = anot
+}
+```
+
+Plot top terms
+
+```{r}
+pdf("results/zonation_cond/hep_top_go_terms_genes.pdf", 
+    height = 6, width = 7, useDingbats = F)
+for(n in names(terms_groups_list)){
+  terms_groups = terms_groups_list[[n]]
+  
+  for(cond in names(terms_groups)){
+    plot_df = terms_groups[[cond]][rpfilter(terms_groups[[cond]]),]
+    plot_df = plot_df[order(plot_df$qvalue, decreasing = F),]
+    plot_df$Description = factor(plot_df$Description, levels = rev(plot_df$Description))
+    
+    plt = ggplot(plot_df[1:10,], aes(x = Description, y = -log10(qvalue)))+
+      geom_bar(stat = "identity")+
+      coord_flip()+
+      labs(title = paste0(n, ": ", cond))+
+      theme_bw()
+    print(plt)
+  }
+}
+dev.off()
+```
+
+Plot some genes
+
+```{r}
+# plot all genes from pathway in grey, average in colour for cond and healthy
+plot_list = list()
+exp_plt_list = list()
+for(comp in names(terms_groups_list)){
+  print(comp)
+  c1 = strsplit(comp, "_")[[1]][1]
+  c2 = strsplit(comp, "_")[[1]][2]
+  
+  plot_list[[comp]] = list()
+  exp_plt_list[[comp]] = list()
+  for(pw in c(c1, c2)){
+    goterms = terms_groups_list[[comp]][[pw]]
+    goterms = goterms[goterms$DB=="GO Term" & rpfilter(goterms),]
+    
+    exp_plt_list[[comp]][[pw]] = list()
+    plot_list[[comp]][[pw]] = list()
+    for(go in 1:nrow(goterms)){
+      genes_path = unlist(strsplit(goterms[go,"geneID"],"/"))
+      
+      exp_healthy = reshape2::melt(hep_fits_list[[c1]][,genes_path])
+      exp_healthy$xx = rep(1:100, length(genes_path))
+      exp_healthy$cond = c1
+      
+      exp_cond = reshape2::melt(hep_fits_list[[c2]][,genes_path])
+      exp_cond$xx = rep(1:100, length(genes_path))
+      exp_cond$cond = c2
+
+      exp_df = rbind(exp_healthy, exp_cond)
+
+      plt = ggplot(exp_df, aes(x = xx, y = value, group = interaction(variable, cond)))+
+        #geom_line(mapping = aes(colour = cond), alpha = 0.2)+
+        stat_smooth(mapping = aes(group = cond, colour = cond), show.legend = T)+
+        labs(title = goterms[go,"Description"], 
+             subtitle = paste0(c1, " vs ", c2, ", ", pw, " pathways"))+
+        theme_classic()
+      
+      plot_list[[comp]][[pw]][[goterms[go,"Description"]]] = plt
+      exp_plt_list[[comp]][[pw]][[goterms[go,"Description"]]] = exp_df
+    }
+  }
+}
+```
+
+
+```{r, fig.height=2.7, fig.width=4}
+pathway = "negative regulation of apoptotic signaling pathway"
+unique(exp_plt_list$healthy_regenerating$regenerating[[pathway]]$variable)
+gn = "ICAM1"
+plot_df = exp_plt_list$healthy_regenerating$regenerating[[pathway]]
+plot_df = plot_df[plot_df$variable==gn,]
+c1 = "healthy"
+c2 = "regenerating"
+pw = "regenerating"
+ggplot(plot_df, aes(x = xx, y = value, group = interaction(variable, cond)))+
+    geom_line(mapping = aes(colour = cond))+
+    labs(title = pathway, subtitle = paste0(c1, " vs ", c2, ", ", pw, " pathways"), 
+         y = paste0("log(norm exp) ", gn))+
+    theme_classic()
+```
+
+
+
+Save important lists
+
+```{r}
+save(terms_groups_list, anot_list, df_cor_list, genes_list, plot_list, exp_plt_list,
+     file = "results/zonation_cond/hep_go_results.RData")
+```
+
+## Endothelial cells
+Get the top genes for each condition
+
+```{r}
+# get signifficant genes showing variation (at least 0.1 range in the fitted values)
+genes_list = list()
+for(n in names(end_fits_list)){
+  h_fc_sp = apply(end_fits_list[[n]], 2, function(x) diff(range(x)))
+  genes_c = names(end_qvals_list[[n]])[end_qvals_list[[n]]<=0.05 &
+                    names(end_qvals_list[[n]]) %in% names(h_fc_sp)[h_fc_sp>=0.1]]
+  genes_c = genes_c[genes_c %in% names(end_qvals_list[[n]])[order(end_qvals_list[[n]], decreasing = F)]]
+  genes_list[[n]] = genes_c
+}
+```
+
+Find enriched GO Terms and Reactome pathways
+
+```{r}
+comb_cond = combn(names(end_fits_list), 2)
+all_genes_conds = list()
+terms_groups_list = list()
+df_cor_list = list()
+for(i in 1:ncol(comb_cond)){
+  comp = paste0(comb_cond[1,i],"_", comb_cond[2,i])
+  print(comb_cond[,i])
+  genes_conds = list("common" = intersect(genes_list[[comb_cond[1,i]]], genes_list[[comb_cond[2,i]]]))
+  genes_conds[[comb_cond[1,i]]] = setdiff(genes_list[[comb_cond[1,i]]], genes_list[[comb_cond[2,i]]])
+  genes_conds[[comb_cond[2,i]]] = setdiff(genes_list[[comb_cond[2,i]]], genes_list[[comb_cond[1,i]]])
+  all_genes_conds[[comp]] = genes_conds
+  
+  # put the genes in a data frame
+  df_cor = hep_cor_fit_list[[comp]]
+  df_cor[,comb_cond[1,i]] = df_cor$`rownames(x)` %in% genes_conds[[comb_cond[1,i]]]
+  df_cor[,comb_cond[2,i]]  = df_cor$`rownames(x)` %in% genes_conds[[comb_cond[2,i]]]
+  df_cor$common = df_cor$`rownames(x)` %in% genes_conds$common
+  colnames(df_cor)[1:2] = c("gene", "corr")
+  
+  # lists of gene groups to compare - most important is "all"
+  gene_groups_list = list(common = as.character(df_cor$gene[df_cor$common]),
+                          all = as.character(df_cor$gene[(df_cor[[comb_cond[2,i]]] |
+                                                            df_cor[[comb_cond[1,i]]] |
+                                                            df_cor$common)]))
+  gene_groups_list[[comb_cond[1,i]]] = as.character(df_cor$gene[df_cor[[comb_cond[1,i]]]])
+  gene_groups_list[[comb_cond[2,i]]] = as.character(df_cor$gene[df_cor[[comb_cond[2,i]]]])
+  
+  # get enriched go terms/pathways
+  terms_groups = list()
+  for(n in names(gene_groups_list)){
+    # convert gene IDs
+    eg = clusterProfiler::bitr(gene_groups_list[[n]], fromType="SYMBOL", 
+                               toType="ENTREZID", OrgDb="org.Hs.eg.db")
+    eg_all = clusterProfiler::bitr(as.character(df_cor$gene), fromType="SYMBOL", 
+                                   toType="ENTREZID", OrgDb="org.Hs.eg.db")
+    
+    # enrichment
+    reac = ReactomePA::enrichPathway(gene=eg$ENTREZID,pvalueCutoff=0.05, 
+                                     readable=T, universe = eg_all$ENTREZID)
+    got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                    OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                    qvalueCutoff  = 0.05, 
+                                    pAdjustMethod = "BH", readable = T)
+    
+    all_terms = rbind(as.data.frame(reac), as.data.frame(got))
+    all_terms$DB = c(rep("Reactome", nrow(as.data.frame(reac))), 
+                     rep("GO Term", nrow(as.data.frame(got))))
+    all_terms = all_terms[all_terms$qvalue<=0.05,]
+    
+    terms_groups[[n]] = all_terms
+  }
+  terms_groups_list[[comp]] = terms_groups
+  df_cor_list[[comp]] = df_cor
+}
+```
+
+Identify pathways more affected by one condition
+
+```{r}
+anot_list = list()
+for(n in names(terms_groups_list)){
+  terms_groups = terms_groups_list[[n]]
+  df_cor = df_cor_list[[n]]
+  
+  # get the pathways for all genes, minus those with ribosomal genes
+  all_path = terms_groups$all[rpfilter(terms_groups$all),]
+  all_path = all_path[order(all_path$qvalue, decreasing = F),]
+  
+  # get gene groups as a data frame
+  g_g = unlist(apply(df_cor[,c(1,3,4,5)], 1, 
+                     function(x) colnames(df_cor[,c(3,4,5)])[which(as.logical(x[2:4]))]))
+  gene_group = data.frame("gene" = names(g_g),
+                          "group" = g_g)
+  
+  # get fraction of genes from a condition that are present in a give pathway
+  n_g_group = list()
+  n_g_group[[levels(gene_group$group)[1]]] = c()
+  n_g_group[[levels(gene_group$group)[2]]] = c()
+  n_g_group[[levels(gene_group$group)[3]]] = c()
+  for(i in 1:nrow(all_path)){
+    genes_p = unlist(strsplit(all_path$geneID[i], "/"))
+    for(gg in unique(gene_group$group)){
+      ngg = sum(genes_p %in% gene_group$gene[gene_group$group==gg])/sum(gene_group$group==gg)
+      n_g_group[[gg]] = c(n_g_group[[gg]], ngg)
+    }
+  }
+  all_path = cbind(all_path, data.frame(n_g_group))
+  all_path$diff = all_path[,13] - all_path[,12] # add difference between cond and healthy
+  all_path$highest = colnames(all_path)[11:13][apply(all_path[,11:13], 1, which.max)]
+  
+  # group the detected pathways by similarity
+  go_path = all_path[all_path$DB=="GO Term",]
+  mat_path = matrix(0, nrow(go_path), nrow(go_path))
+  for(i in 1:nrow(go_path)){
+    g1 = go_path[i,"geneID"]
+    g1 = unlist(strsplit(g1, "/"))
+    for(j in 1:nrow(go_path)){
+        g2 = go_path[j,"geneID"]
+        g2 = unlist(strsplit(g2, "/"))
+        mat_path[i,j] = length(intersect(g1, g2))/mean(c(length(g1), length(g2)))
+    }
+  }
+  cl_go = hclust(dist(mat_path), method = "ward.D2")
+  cl_go = cutree(cl_go, 7)
+  rownames(mat_path) = go_path$Description
+  anot = data.frame(row.names = go_path$Description, 
+                    "cl" = paste0("cl",cl_go), 
+                    "n" = go_path$Count,
+                    "diff" = go_path$diff,
+                    "qval" = -log10(go_path$qvalue),
+                    "term" = go_path$Description)
+  pheatmap::pheatmap(mat_path, clustering_method = "ward.D2", 
+                     annotation_row = anot[,-5], show_rownames = F)
+  genes_per_gocl = tapply(anot$term, anot$cl, 
+         function(x) unique(unlist(strsplit(go_path[go_path$Description %in% x,"geneID"], "/"))))
+  genes_cond_gocl = lapply(genes_per_gocl, function(x) lapply(genes_conds, function(y) sum(y %in% x)))
+  genes_cond_gocl = Reduce(rbind, genes_cond_gocl)
+  rownames(genes_cond_gocl) = paste0("cl", 1:7)
+  
+  anot_list[[n]] = anot
+}
+```
+
+Plot top terms
+
+```{r}
+pdf("results/zonation_cond/end_top_go_terms_genes.pdf", 
+    height = 6, width = 7, useDingbats = F)
+for(n in names(terms_groups_list)){
+  terms_groups = terms_groups_list[[n]]
+  
+  for(cond in names(terms_groups)){
+    plot_df = terms_groups[[cond]][rpfilter(terms_groups[[cond]]),]
+    plot_df = plot_df[order(plot_df$qvalue, decreasing = F),]
+    plot_df$Description = factor(plot_df$Description, levels = rev(plot_df$Description))
+    
+    plt = ggplot(plot_df[1:10,], aes(x = Description, y = -log10(qvalue)))+
+      geom_bar(stat = "identity")+
+      coord_flip()+
+      labs(title = paste0(n, ": ", cond))+
+      theme_bw()
+    print(plt)
+  }
+}
+dev.off()
+```
+
+Plot some genes
+
+```{r}
+# plot all genes from pathway in grey, average in colour for cond and healthy
+plot_list = list()
+exp_plt_list = list()
+for(comp in names(terms_groups_list)){
+  print(comp)
+  c1 = strsplit(comp, "_")[[1]][1]
+  c2 = strsplit(comp, "_")[[1]][2]
+  
+  plot_list[[comp]] = list()
+  exp_plt_list[[comp]] = list()
+  for(pw in c(c1, c2)){
+    goterms = terms_groups_list[[comp]][[pw]]
+    goterms = goterms[goterms$DB=="GO Term" & rpfilter(goterms),]
+    
+    exp_plt_list[[comp]][[pw]] = list()
+    plot_list[[comp]][[pw]] = list()
+    if(nrow(goterms)>0){
+      for(go in 1:nrow(goterms)){
+        genes_path = unlist(strsplit(goterms[go,"geneID"],"/"))
+        
+        exp_healthy = reshape2::melt(end_fits_list[[c1]][,genes_path])
+        exp_healthy$xx = rep(1:100, length(genes_path))
+        exp_healthy$cond = c1
+        
+        exp_cond = reshape2::melt(end_fits_list[[c2]][,genes_path])
+        exp_cond$xx = rep(1:100, length(genes_path))
+        exp_cond$cond = c2
+  
+        exp_df = rbind(exp_healthy, exp_cond)
+  
+        plt = ggplot(exp_df, aes(x = xx, y = value, group = interaction(variable, cond)))+
+          #geom_line(mapping = aes(colour = cond), alpha = 0.2)+
+          stat_smooth(mapping = aes(group = cond, colour = cond), show.legend = T)+
+          labs(title = goterms[go,"Description"], 
+               subtitle = paste0(c1, " vs ", c2, ", ", pw, " pathways"))+
+          theme_classic()
+        
+        plot_list[[comp]][[pw]][[goterms[go,"Description"]]] = plt
+        exp_plt_list[[comp]][[pw]][[goterms[go,"Description"]]] = exp_df
+      }
+    }
+  }
+}
+```
+
+
+```{r, fig.height=2.7, fig.width=4}
+pathway = "cellular response to type I interferon"
+unique(exp_plt_list$healthy_regenerating$regenerating[[pathway]]$variable)
+gn = "EGR1"
+plot_df = exp_plt_list$healthy_regenerating$regenerating[[pathway]]
+plot_df = plot_df[plot_df$variable==gn,]
+c1 = "healthy"
+c2 = "regenerating"
+pw = "regenerating"
+ggplot(plot_df, aes(x = xx, y = value, group = interaction(variable, cond)))+
+    geom_line(mapping = aes(colour = cond))+
+    labs(title = pathway, subtitle = paste0(c1, " vs ", c2, ", ", pw, " pathways"), 
+         y = paste0("log(norm exp) ", gn))+
+    theme_classic()
+```
+
+Save important lists
+
+```{r}
+save(terms_groups_list, anot_list, df_cor_list, plot_list, exp_plt_list,
+     file = "results/zonation_cond/end_go_results.RData")
+```
 
 
 
 
-# LEGACY CODE
+
+
+
+
+# OLD CODE
 Find genes with differencial variation - not very interesting since most genes seem to be showing a variation
 
 ```{r}
@@ -1178,5 +1926,537 @@ yyy = dtw::dtw(x = df2$h, y = df2$r)
 plot(yyy)
 abline(0,1)
 ```
+
+
+
+
+Get GO Term enrichment
+
+```{r}
+library(topGO)
+cor_lists = list("hep" = hep_cor_list, "end" = end_cor_list)
+
+cc = -0.25
+go_enr_list = list()
+for(gr in names(cor_lists)){
+  cor_list = cor_lists[[gr]]
+
+  go_enr_list[[gr]] = list()
+  for(comp in names(cor_list)){
+    testdf = cor_list[[comp]]
+    
+    
+    
+    ncond = strsplit(comp, "_")[[1]]
+    go_enr_list[[gr]][[comp]] = list()
+    for(cond in ncond){
+      gsig = names(hep_qval[[cond]])[hep_qval[[cond]]<=0.05]
+      
+      subtestdf = merge(testdf, hep_qval[[cond]], by = 0)
+      
+      genes = subtestdf$X..i..
+      names(genes) = subtestdf[,1]
+      
+      # GO enrichment
+      fsel = function(x) return(x<cc & subtestdf$y<=0.05)
+      
+      sampleGOdata <- new("topGOdata",
+                          description = "test", ontology = "BP",
+                          allGenes = genes, geneSel = fsel,
+                          nodeSize = 5, annot = annFUN.org, 
+                          mapping = "org.Hs.eg.db", ID = "symbol")
+      
+      resultKS.elim <- runTest(sampleGOdata, algorithm = "elim", 
+                               statistic = "fisher")
+      
+      resGO = GenTable(object = sampleGOdata, elimKS = resultKS.elim,
+                       topNodes = resultKS.elim@geneData[4], numChar = 1000)
+      resGO$elimKS = score(resultKS.elim)[resGO$GO.ID]
+      resGO$cond = cond
+      
+      # get genes
+      relevant_genes = sampleGOdata@allGenes[sampleGOdata@geneSelectionFun(sampleGOdata@allScores)]
+      goGenes = t(data.frame(lapply(genesInTerm(sampleGOdata), function(x) paste(x[x %in% relevant_genes], collapse = ", "))))
+      rownames(goGenes) = gsub(".", ":", rownames(goGenes), fixed = T)
+      colnames(goGenes) = "genes"
+      resGO = merge(resGO, goGenes, by.x = 1, by.y = 0, all.x = T)
+      
+      if(cond==ncond[[1]]){
+        go_enr_list[[gr]][[comp]] = resGO[,c("GO.ID","Term","Annotated","Significant",
+                                             "Expected","elimKS","cond","genes")]
+      } else{
+        go_enr_list[[gr]][[comp]] = rbind(go_enr_list[[gr]][[comp]],
+                                          resGO[,c("GO.ID","Term","Annotated","Significant",
+                                                   "Expected","elimKS","cond","genes")])
+      }
+      
+    }
+  }
+}
+saveRDS(go_enr_list, file = "results/zonation_cond/go_enr_corsig_list.RDS")
+```
+
+
+```{r}
+gg = unique(c(names(end_qval$healthy)[order(end_qval$healthy, decreasing = F)][1:1000],
+              names(end_qval$regenerating)[order(end_qval$regenerating, decreasing = F)][1:1000]))
+diff_fits = apply(end_fits$healthy[,gg], 2, rank)-apply(end_fits$regenerating[,gg], 2, rank)
+cl = hclust(dist(t(diff_fits)), method = "ward.D")
+ct = cutree(cl, 6)
+df = data.frame("cor" = end_cor_fit_list$healthy_regenerating[gg,2],
+                 "score" = apply(apply(t(diff_fits), 1, range), 
+                                 2, function(x) sum(abs(x))))
+diff_genes = rownames(df)[df$cor<0.25]
+cl = hclust(dist(t(diff_fits)[diff_genes,]), method = "ward.D")
+ct = cutree(cl, 4)
+df = data.frame("cl" = factor(ct),
+                "cor" = 1-end_cor_fit_list$healthy_regenerating[diff_genes,2],
+                 "score" = apply(apply(t(diff_fits)[diff_genes,], 1, range), 
+                                 2, function(x) sum(abs(x))))
+pheatmap::pheatmap(t(diff_fits)[diff_genes,], cluster_cols = F, 
+                   clustering_method = "ward.D", fontsize_row = 8, annotation_row = df)
+
+plot(hep_fits$healthy[,"SAA2"])
+plot(hep_fits$regenerating[,"SAA2"])
+```
+
+```{r}
+fsel = function(x) return(x<0.25 & names(genes) %in% gg)
+fsel = function(x) return(names(genes) %in% gg)
+genes = end_cor_fit_list$healthy_regenerating$X..i..
+names(genes) = end_cor_fit_list$healthy_regenerating[,1]
+genes = genes[!is.na(genes)]
+
+eg = clusterProfiler::bitr(names(genes[fsel(genes)]), fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+eg_all = clusterProfiler::bitr(names(genes), fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+
+x <- ReactomePA::enrichPathway(gene=eg$ENTREZID,pvalueCutoff=0.05, 
+                               readable=T, universe = eg_all$ENTREZID)
+clusterProfiler::dotplot(x)
+head(as.data.frame(x))
+
+ego3 <- clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                               OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                               qvalueCutoff  = 0.05, 
+                               pAdjustMethod = "BH", readable = T)
+clusterProfiler::dotplot(ego3)
+```
+
+
+
+```{r}
+gg = unique(c(names(qvals_b_list$healthy)[order(qvals_b_list$healthy, decreasing = F)][1:1000],
+              names(qvals_b_list$regenerating)[order(qvals_b_list$regenerating, decreasing = F)][1:1000]))
+diff_fits = apply(fits_b_list$healthy[,gg], 2, rank)-apply(fits_b_list$regenerating[,gg], 2, rank)
+cl = hclust(dist(t(diff_fits)), method = "ward.D")
+ct = cutree(cl, 6)
+df = data.frame("cor" = hep_cor_fit_list$healthy_regenerating[gg,2],
+                 "score" = apply(apply(t(diff_fits), 1, range), 
+                                 2, function(x) sum(abs(x))))
+df = df[complete.cases(df),]
+diff_genes = rownames(df)[df$cor<0.25]
+cl = hclust(dist(t(diff_fits)[diff_genes,]), method = "ward.D")
+ct = cutree(cl, 4)
+df = data.frame("cl" = factor(ct),
+                "cor" = 1-hep_cor_fit_list$healthy_regenerating[diff_genes,2],
+                 "score" = apply(apply(t(diff_fits)[diff_genes,], 1, range), 
+                                 2, function(x) sum(abs(x))))
+pheatmap::pheatmap(t(diff_fits)[diff_genes,], cluster_cols = F, 
+                   clustering_method = "ward.D", fontsize_row = 8, annotation_row = df)
+
+plot(hep_fits$healthy[,"CPS1"])
+plot(hep_fits$regenerating[,"CPS1"])
+```
+
+
+```{r}
+genes_healthy = names(qvals_b_list$healthy)[order(qvals_b_list$healthy, decreasing = F)][qvals_b_list$healthy[order(qvals_b_list$healthy, decreasing = F)]<=0.05]
+genes_regen = names(qvals_b_list$regenerating)[order(qvals_b_list$regenerating, decreasing = F)][qvals_b_list$regenerating[order(qvals_b_list$regenerating, decreasing = F)]<=0.05]
+gg = unique(c(genes_healthy, genes_regen))
+
+eg = clusterProfiler::bitr(gg, fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+eg_all = clusterProfiler::bitr(names(qvals_b_list$healthy), fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+
+reac = ReactomePA::enrichPathway(gene=eg$ENTREZID,pvalueCutoff=0.05, 
+                               readable=T, universe = eg_all$ENTREZID)
+
+got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                qvalueCutoff  = 0.05, 
+                                pAdjustMethod = "BH", readable = T)
+
+all_terms = rbind(as.data.frame(reac), as.data.frame(got))
+all_terms$DB = c(rep("Reactome", nrow(as.data.frame(reac))), rep("GO Term", nrow(as.data.frame(got))))
+all_terms = all_terms[all_terms$qvalue<=0.05,]
+all_terms_noribo = all_terms[!grepl("RPL", all_terms$geneID) & !grepl("RPS", all_terms$geneID),]
+
+nhealthy = c()
+nregen = c()
+corhealthy = c()
+corregen = c()
+mean_traj_h = matrix(0, nrow(all_terms_noribo), 100)
+mean_traj_r = matrix(0, nrow(all_terms_noribo), 100)
+cor_mean = c()
+for(i in 1:nrow(all_terms_noribo)){
+  genes_path = unlist(strsplit(all_terms_noribo[i,"geneID"],"/"))
+  in_healthy = genes_path[genes_path %in% genes_healthy]
+  in_regen = genes_path[genes_path %in% genes_regen]
+  
+  nhealthy = c(nhealthy, length(in_healthy))
+  nregen = c(nregen, length(in_regen))
+  
+  if(length(in_healthy)>1){
+    ch = cor(fits_b_list$healthy[,in_healthy], method = "sp")
+    corhealthy = c(corhealthy, median(ch[upper.tri(ch)])) 
+  } else{ 
+    corhealthy = c(corhealthy,1)
+  }
+  if(length(in_regen)>1){
+    ch = cor(fits_b_list$regen[,in_regen], method = "sp")
+    corregen = c(corregen, median(ch[upper.tri(ch)])) 
+  } else{ 
+    corregen = c(corregen,1)
+  }
+  
+  mean_traj_h[i,] = if(length(in_healthy)>1){ rowMeans(fits_b_list$healthy[,in_healthy])} else if(length(in_healthy)>0){fits_b_list$healthy[,in_healthy]} else {rep(0,100)}
+  mean_traj_r[i,] = if(length(in_regen)>1){ rowMeans(fits_b_list$regenerating[,in_regen])} else if(length(in_regen)>0){fits_b_list$regenerating[,in_regen]} else {rep(0,100)}
+  
+  cor_mean = c(cor_mean, cor(mean_traj_h[i,], mean_traj_r[i,]))
+}
+all_terms_noribo = cbind(all_terms_noribo, nhealthy, nregen, corhealthy, corregen, cor_mean)
+rownames(mean_traj_h) = rownames(mean_traj_r) = all_terms_noribo$Description
+
+
+View(all_terms_noribo[all_terms_noribo$corhealthy>=0.25 & all_terms_noribo$corregen>=0.25 &
+                        all_terms_noribo$nhealthy>=2 & all_terms_noribo$nregen>=2,])
+i = which(all_terms_noribo$Description=="mRNA Splicing - Minor Pathway")
+```
+
+
+
+```{r}
+genes_healthy = names(qvals_b_list$healthy)[qvals_b_list$healthy<=0.05]
+genes_regen = names(qvals_b_list$regenerating)[qvals_b_list$regenerating<=0.05]
+genes_conds = list("healthy" = setdiff(genes_healthy, genes_regen), 
+                   "regen" = setdiff(genes_regen, genes_healthy),
+                   "common" = intersect(genes_healthy, genes_regen))
+
+terms_list = list()
+for(n in names(genes_conds)){
+  eg = clusterProfiler::bitr(genes_conds[[n]], fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+  eg_all = clusterProfiler::bitr(names(qvals_b_list$healthy), fromType="SYMBOL", 
+                             toType="ENTREZID", OrgDb="org.Hs.eg.db")
+  
+  reac = ReactomePA::enrichPathway(gene=eg$ENTREZID,pvalueCutoff=0.05, 
+                                 readable=T, universe = eg_all$ENTREZID)
+  
+  got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                  OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                  qvalueCutoff  = 0.05, 
+                                  pAdjustMethod = "BH", readable = T)
+  
+  all_terms = rbind(as.data.frame(reac), as.data.frame(got))
+  all_terms$DB = c(rep("Reactome", nrow(as.data.frame(reac))), rep("GO Term", nrow(as.data.frame(got))))
+  all_terms = all_terms[all_terms$qvalue<=0.05,]
+  all_terms_noribo = all_terms[!grepl("RPL", all_terms$geneID) & !grepl("RPS", all_terms$geneID),]
+  
+  nhealthy = c()
+  nregen = c()
+  corhealthy = c()
+  corregen = c()
+  mean_traj_h = matrix(0, nrow(all_terms_noribo), 100)
+  mean_traj_r = matrix(0, nrow(all_terms_noribo), 100)
+  cor_mean = c()
+  for(i in 1:nrow(all_terms_noribo)){
+    genes_path = unlist(strsplit(all_terms_noribo[i,"geneID"],"/"))
+    in_healthy = genes_path[genes_path %in% genes_healthy]
+    in_regen = genes_path[genes_path %in% genes_regen]
+    
+    nhealthy = c(nhealthy, length(in_healthy))
+    nregen = c(nregen, length(in_regen))
+    
+    if(length(in_healthy)>1){
+      ch = cor(fits_b_list$healthy[,in_healthy], method = "sp")
+      corhealthy = c(corhealthy, median(ch[upper.tri(ch)])) 
+    } else{ 
+      corhealthy = c(corhealthy,0)
+    }
+    if(length(in_regen)>1){
+      ch = cor(fits_b_list$regen[,in_regen], method = "sp")
+      corregen = c(corregen, median(ch[upper.tri(ch)])) 
+    } else{ 
+      corregen = c(corregen,0)
+    }
+    
+    mean_traj_h[i,] = if(length(in_healthy)>1){ rowMeans(fits_b_list$healthy[,in_healthy])} else if(length(in_healthy)>0){fits_b_list$healthy[,in_healthy]} else {rep(0,100)}
+    mean_traj_r[i,] = if(length(in_regen)>1){ rowMeans(fits_b_list$regenerating[,in_regen])} else if(length(in_regen)>0){fits_b_list$regenerating[,in_regen]} else {rep(0,100)}
+    
+    cor_mean = c(cor_mean, cor(mean_traj_h[i,], mean_traj_r[i,]))
+  }
+  all_terms_noribo = cbind(all_terms_noribo, nhealthy, nregen, corhealthy, corregen, cor_mean)
+  rownames(mean_traj_h) = rownames(mean_traj_r) = all_terms_noribo$Description
+  
+  terms_list[[n]] = all_terms_noribo
+}
+```
+
+
+
+
+
+
+
+```{r}
+cl = hclust(dist(t(diff_fits)), method = "ward.D")
+ct = cutree(cl, 1)
+
+term_list = list()
+for(i in unique(ct)){
+  fsel = function(x) return(x<0.25 & names(genes) %in% names(ct)[ct==i])
+  genes = hep_cor_fit_list$healthy_regenerating$X..i..
+  names(genes) = hep_cor_fit_list$healthy_regenerating[,1]
+  genes = genes[!is.na(genes)]
+  
+  eg = clusterProfiler::bitr(names(genes[fsel(genes)]), fromType="SYMBOL", 
+                             toType="ENTREZID", OrgDb="org.Hs.eg.db")
+  eg_all = clusterProfiler::bitr(names(genes), fromType="SYMBOL", 
+                             toType="ENTREZID", OrgDb="org.Hs.eg.db")
+  
+  x <- ReactomePA::enrichPathway(gene=eg$ENTREZID,pvalueCutoff=0.05, 
+                                 readable=T, universe = eg_all$ENTREZID)
+  
+  term_list[[paste0("reac_",i)]] = x
+  
+  ego3 <- clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                 OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                 qvalueCutoff  = 0.05, 
+                                 pAdjustMethod = "BH", readable = T)
+  
+  term_list[[paste0("go_",i)]] = ego3
+}
+```
+
+
+
+
+```{r}
+genes = hep_cor_fit_list$healthy_regenerating$X..i..
+names(genes) = hep_cor_fit_list$healthy_regenerating[,1]
+genes = genes[!is.na(genes)]
+
+# GO enrichment
+fsel = function(x) return(x<0.25 & names(genes) %in% gg)
+
+sampleGOdata <- new("topGOdata",
+                    description = "test", ontology = "BP",
+                    allGenes = genes, geneSel = fsel,
+                    nodeSize = 5, annot = annFUN.org, 
+                    mapping = "org.Hs.eg.db", ID = "symbol")
+
+resultKS.elim <- runTest(sampleGOdata, algorithm = "elim", 
+                         statistic = "fisher")
+
+resGO = GenTable(object = sampleGOdata, elimKS = resultKS.elim,
+                 topNodes = resultKS.elim@geneData[4], numChar = 1000)
+resGO$elimKS = score(resultKS.elim)[resGO$GO.ID]
+
+
+# get genes
+relevant_genes = sampleGOdata@allGenes[sampleGOdata@geneSelectionFun(sampleGOdata@allScores)]
+goGenes = t(data.frame(lapply(genesInTerm(sampleGOdata), function(x) paste(x[x %in% relevant_genes], collapse = ", "))))
+rownames(goGenes) = gsub(".", ":", rownames(goGenes), fixed = T)
+colnames(goGenes) = "genes"
+resGO = merge(resGO, goGenes, by.x = 1, by.y = 0, all.x = T)
+subresGO = resGO[!(grepl("RPL", resGO$genes) & grepl("RPS", resGO$genes)),]
+```
+
+```{r}
+sig_resGO = resGO[resGO$elimKS<=0.05,]
+hprof_go = list()
+rprof_go = list()
+for(l in 1:nrow(sig_resGO)){
+  genes_go = unlist(strsplit(as.character(sig_resGO[l,"genes"]), ", "))
+  
+  hprof_go[[sig_resGO[l,2]]] = t(hep_fits$healthy[,genes_go])
+  rprof_go[[sig_resGO[l,2]]] = t(hep_fits$regenerating[,genes_go])
+}
+hmax = unlist(lapply(hprof_go, function(x) which.max(colSums(x))))
+rmax = unlist(lapply(rprof_go, function(x) which.max(colSums(x))))
+names(hmax) = names(rmax) = sig_resGO$Term
+```
+
+```{r}
+sig_resGO = sig_resGO[order(sig_resGO$elimKS, decreasing = F),]
+go_short_list = list()
+for(i in 1:nrow(sig_resGO)){
+  g = unlist(strsplit(as.character(sig_resGO[i,"genes"]), ", "))
+  if(!any(g %in% unlist(go_short_list)) & length(g)>1){
+    go_short_list[[sig_resGO[i,2]]] = g
+  }
+}
+
+res = matrix(0, 1, 100)
+for(n in names(go_short_list)){
+  if(length(go_short_list[[n]])>1){
+    cl = hclust(dist(t(diff_fits[,go_short_list[[n]]])), method = "ward.D")
+    res = rbind(res, t(diff_fits[,go_short_list[[n]]])[cl$order,])
+  }
+}
+res = res[-1,]
+
+
+pheatmap::pheatmap(res, cluster_cols = F, cluster_rows = F, fontsize_row = 8, gaps_row = cumsum(unlist(lapply(go_short_list, length))))
+```
+
+```{r}
+sig_resGO = sig_resGO[order(sig_resGO$elimKS, decreasing = F),]
+go_med = matrix(0, 1, 100)
+for(i in 1:nrow(sig_resGO)){
+  g = unlist(strsplit(as.character(sig_resGO[i,"genes"]), ", "))
+  if(length(g)>1){
+    go_med = rbind(go_med, apply(t(diff_fits[,g]), 2, median))
+    rownames(go_med)[nrow(go_med)] = sig_resGO[i,2]
+  }
+}
+go_med = go_med[-1,]
+```
+
+```{r}
+eg = clusterProfiler::bitr(names(genes[fsel(genes)]), fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+eg_all = clusterProfiler::bitr(names(genes), fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+
+x <- as.data.frame(ReactomePA::enrichPathway(gene=eg$ENTREZID,pvalueCutoff=0.05, 
+                                             readable=T, universe = eg_all$ENTREZID))
+head(as.data.frame(x))
+
+go_med = matrix(0, 1, 100)
+for(i in 1:nrow(x)){
+  g = unlist(strsplit(as.character(x[i,"geneID"]), "/"))
+  if(length(g)>1){
+    go_med = rbind(go_med, apply(t(diff_fits[,g]), 2, median))
+    rownames(go_med)[nrow(go_med)] = x[i,2]
+  }
+}
+go_med = go_med[-1,]
+
+genes_reac = strsplit(x$geneID, "/")
+names(genes_reac) = x$Description
+genes_reac = reshape2::melt(genes_reac)
+dat = genes_reac[!duplicated(genes_reac$value),]
+dat = data.frame(row.names = dat[,1], "Reac" = dat[,2])
+pheatmap::pheatmap(t(diff_fits)[diff_genes,], cluster_cols = F, 
+                   clustering_method = "ward.D", fontsize_row = 8, annotation_row = dat)
+
+hprof_re = list()
+rprof_re = list()
+for(l in 1:nrow(x)){
+  genes_go = unlist(strsplit(as.character(x[l,"geneID"]), "/"))
+  
+  hprof_re[[x[l,2]]] = t(hep_fits$healthy[,genes_go])
+  rprof_re[[x[l,2]]] = t(hep_fits$regenerating[,genes_go])
+}
+
+
+hmet = ggplot(reshape2::melt(t(apply(hprof_re$`Metallothioneins bind metals`, 1, scale))), 
+              aes(x = Var2, y = value, group = Var1, colour = Var1))+
+  geom_line()+labs(title = "Healthy - Metallothioneins bind metals")
+rmet = ggplot(reshape2::melt(t(apply(rprof_re$`Metallothioneins bind metals`, 1, scale))), 
+              aes(x = Var2, y = value, group = Var1, colour = Var1))+
+  geom_line()+labs(title = "Regen - Metallothioneins bind metals")
+rlip = ggplot(reshape2::melt(t(apply(rprof_re$`Plasma lipoprotein remodeling`, 1, scale))), 
+              aes(x = Var2, y = value, group = Var1, colour = Var1))+
+  geom_line()+labs(title = "Regen - Plasma lipoprotein remodeling")
+hlip = ggplot(reshape2::melt(t(apply(hprof_re$`Plasma lipoprotein remodeling`, 1, scale))), 
+              aes(x = Var2, y = value, group = Var1, colour = Var1))+
+  geom_line()+labs(title = "Healthy - Plasma lipoprotein remodeling")
+cowplot::plot_grid(hmet, rmet, hlip, rlip, ncol = 2, row = 2, align = "hv")
+
+
+
+
+
+
+
+
+
+ego3 <- clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                               OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                               qvalueCutoff  = 0.05, 
+                               pAdjustMethod = "BH", readable = T)
+
+
+genes_ent = merge(eg_all, genes, by.x = 1, by.y = 0)
+tmp = genes_ent[,2]
+genes_ent = genes_ent[,3]
+names(genes_ent) = tmp
+ego4 <- clusterProfiler::gseGO(geneList = genes_ent[order(genes_ent, decreasing = T)], 
+                               OrgDb = org.Hs.eg.db, ont = "BP", nPerm = 1000, minGSSize = 100,
+                               maxGSSize = 500, pvalueCutoff = 0.05, verbose = FALSE)
+```
+
+
+
+
+
+```{r}
+plot_genes_fits = cbind(hep_fits$healthy[,c("SAA1", "HAMP", "CYP3A4", "GLUL", "CPS1", "ARG1")],
+                        hep_fits$embolised[,c("SAA1", "HAMP", "CYP3A4", "GLUL", "CPS1", "ARG1")],
+                        hep_fits$regenerating[,c("SAA1", "HAMP", "CYP3A4", "GLUL", "CPS1", "ARG1")])
+plot_genes_fits = apply(plot_genes_fits, 2, c)
+
+colnames(plot_genes_fits) = paste0(colnames(plot_genes_fits), 
+                                   rep(c("_healthy", "_embolised", "_regenerating"), each = 6))
+plot_genes_fits = reshape2::melt(plot_genes_fits)
+
+plot_genes_fits$cond = unlist(lapply(strsplit(as.character(plot_genes_fits$Var2), "_"), function(x) x[2]))
+
+plot_genes_fits$cond = factor(plot_genes_fits$cond, levels = c("healthy", "embolised", "regenerating"))
+
+plot_genes_fits$genes = unlist(lapply(strsplit(as.character(plot_genes_fits$Var2), "_"), function(x) x[1]))
+
+ggplot(plot_genes_fits, aes(x = Var1, y = value, colour = genes))+facet_wrap(~cond)+geom_line()
+```
+
+
+```{r}
+all_path = terms_groups$all[rpfilter(terms_groups$all),]
+all_path = all_path[order(all_path$qvalue, decreasing = F),]
+
+tab_go = reshape2::melt(lapply(df_cor$gene, function(g) all_path[which(grepl(g, all_path$geneID) & all_path$DB=="GO Term")[1],c("Description", "DB", "qvalue")][1,]))
+tab_go$gene = df_cor$gene
+tab_go = tab_go[,c(6,1,2,4)]
+tab_go$de = apply(df_cor[,c(1,3,4,5)], 1, function(x) colnames(df_cor[,c(3,4,5)])[which(as.logical(x[2:4]))])
+tab_go$de[nchar(tab_go$de)>10] = NA
+tab_go$de = unlist(tab_go$de)
+tab_go$corr = df_cor$corr
+tab_re = reshape2::melt(lapply(df_cor$gene, function(g) all_path[which(grepl(g, all_path$geneID) & all_path$DB=="Reactome")[1],c("Description", "DB", "qvalue")][1,]))
+tab_re$gene = df_cor$gene
+tab_re = tab_re[,c(6,1,2,4)]
+tab_re$de = apply(df_cor[,c(1,3,4,5)], 1, function(x) colnames(df_cor[,c(3,4,5)])[which(as.logical(x[2:4]))])
+tab_re$de[nchar(tab_re$de)>10] = NA
+tab_re$de = unlist(tab_re$de)
+tab_re$corr = df_cor$corr
+
+tab_all = rbind(tab_go, tab_re)
+tab_all = tab_all[complete.cases(tab_all),]
+
+xxx = table(tab_all$Description, tab_all$de)
+xxx = xxx[rowSums(xxx)>2,]
+xxx = xxx/rowSums(xxx)
+View(apply(xxx, 1, function(x) ifelse(any(x>0.5), colnames(xxx)[x>0.5], NA)))
+
+aaa = cbind(tapply(tab_all$corr, tab_all$Description, function(x) sum(x>=0.25)/length(x)), 
+            tapply(tab_all$corr, tab_all$Description, function(x) length(x)),
+            tapply(tab_all$de, tab_all$Description, function(x) names(table(x))[which.max(table(x))]))
+```
+
+
 
 
