@@ -149,6 +149,7 @@ for(n in unique(allcells_css@meta.data$Condition)){
   meta_l[[n]] = read.table(paste0(cpdb_path, "/", n, "_meta_names_simp.txt"),
                            header = T, sep = "\t")
 }
+saveRDS(dec_l, file = "results/cell_comm/deconvoluted_list.RDS")
 ```
 
 Reformat significant means matrix
@@ -719,16 +720,129 @@ for(n in unique(allcells_css@meta.data$Condition)){
 }
 ```
 
+## Analysis
 Load pseudotime-varying genes
 
 ```{r}
-load("results/zonation_cond/hep_traj_qval_fits.RData")
-hep_fits = fits_list
-hep_traj = traj_list
-load("results/zonation_cond/end_traj_qval_fits.RData")
-end_fits = fits_list
-end_traj = traj_list
+reform_list = readRDS(file = "results/cell_comm/reform_list.RDS")
+dec_l = readRDS(file = "results/cell_comm/deconvoluted_list.RDS")
 
+# add genes from complexes
+complex_ref = unique(rbind(dec_l$healthy[dec_l$healthy$is_complex=="True",c(1,5)], 
+                             dec_l$regenerating[dec_l$regenerating$is_complex=="True",c(1,5)]))
+inter_df = list()
+for(n in c("healthy", "embolised", "regenerating")){
+  tmp = merge(reform_list[[n]], complex_ref, by.x = 4, by.y = 2, all.x = T)[,c(2,3,4,1,5,8,6,7)]
+  inter_df[[n]] = merge(tmp, complex_ref, by.x = 5, by.y = 2, all.x = T)[,c(2,3,4,5,6,1,9,7,8)]
+  inter_df[[n]]$gene_name.x[is.na(inter_df[[n]]$gene_name.x)] = inter_df[[n]]$lr1[is.na(inter_df[[n]]$gene_name.x)]
+  inter_df[[n]]$gene_name.y[is.na(inter_df[[n]]$gene_name.y)] = inter_df[[n]]$lr2[is.na(inter_df[[n]]$gene_name.y)]
+  colnames(inter_df[[n]])[c(5,7)] = c("gn1", "gn2")
+}
+```
+
+
+
+```{r}
+load("results/zonation_cond/hep_binned_traj_qval_fits.RData")
+hep_fits = fits_b_list
+hep_traj = traj_list
+hep_qvals = qvals_b_list
+
+nbins = 100
+df_h = data.table("zonation_pt" = hep_traj$healthy)
+df_h$zonation_int = cut(df_h$zonation_pt, nbins)
+
+df_e = data.table("zonation_pt" = hep_traj$embolised)
+df_e = df_h[df_e, on="zonation_pt", roll=Inf, rollends = T]
+
+df_r = data.table("zonation_pt" = hep_traj$regenerating)
+df_r = df_h[df_r, on="zonation_pt", roll=Inf, rollends = T]
+
+mean_bins_h = apply(hep_cells$healthy@assays$SCT@data, 1, 
+                    function(x) tapply(x, df_h$zonation_int, mean))
+mean_bins_e = apply(hep_cells$embolised@assays$SCT@data, 1, 
+                    function(x) tapply(x, df_e$zonation_int, mean))
+mean_bins_r = apply(hep_cells$regenerating@assays$SCT@data, 1, 
+                    function(x) tapply(x, df_r$zonation_int, mean))
+
+hep_h_max = apply(hep_fits$healthy, 2, function(x) mean(order(x, decreasing = T)[1:10]))
+hep_e_max = apply(hep_fits$embolised, 2, function(x) mean(order(x, decreasing = T)[1:10]))
+hep_r_max = apply(hep_fits$regenerating, 2, function(x) mean(order(x, decreasing = T)[1:10]))
+std <- function(x) sd(x)/sqrt(length(x))
+hep_h_sdmax = apply(hep_fits$healthy, 2, function(x) std(order(x, decreasing = T)[1:10]))
+hep_e_sdmax = apply(hep_fits$embolised, 2, function(x) std(order(x, decreasing = T)[1:10]))
+hep_r_sdmax = apply(hep_fits$regenerating, 2, function(x) std(order(x, decreasing = T)[1:10]))
+```
+
+
+
+```{r}
+load("results/zonation_cond/end_binned_traj_qval_fits.RData")
+end_fits = fits_b_list
+end_traj = traj_list
+end_qvals = qvals_b_list
+
+nbins = 100
+df_h = data.table("zonation_pt" = end_traj$healthy)
+df_h$zonation_int = cut(df_h$zonation_pt, nbins)
+
+df_e = data.table("zonation_pt" = end_traj$embolised)
+df_e = df_h[df_e, on="zonation_pt", roll=Inf, rollends = T]
+
+df_r = data.table("zonation_pt" = end_traj$regenerating)
+df_r = df_h[df_r, on="zonation_pt", roll=Inf, rollends = T]
+
+mean_bins_h = apply(end_cells$healthy@assays$SCT@data, 1, 
+                    function(x) tapply(x, df_h$zonation_int, mean))
+mean_bins_e = apply(end_cells$embolised@assays$SCT@data, 1, 
+                    function(x) tapply(x, df_e$zonation_int, mean))
+mean_bins_r = apply(end_cells$regenerating@assays$SCT@data, 1, 
+                    function(x) tapply(x, df_r$zonation_int, mean))
+
+end_h_max = apply(mean_bins_h, 2, function(x) mean(order(x, decreasing = T)[1:10]))
+end_e_max = apply(mean_bins_e, 2, function(x) mean(order(x, decreasing = T)[1:10]))
+end_r_max = apply(mean_bins_r, 2, function(x) mean(order(x, decreasing = T)[1:10]))
+std <- function(x) sd(x)/sqrt(length(x))
+end_h_sdmax = apply(mean_bins_h, 2, function(x) std(order(x, decreasing = T)[1:10]))
+end_e_sdmax = apply(mean_bins_e, 2, function(x) std(order(x, decreasing = T)[1:10]))
+end_r_sdmax = apply(mean_bins_r, 2, function(x) std(order(x, decreasing = T)[1:10]))
+```
+
+
+
+```{r}
+hep_genes_list = lapply(inter_df, function(x) unique(c(as.character(x$gn1[grepl("Hepa", x$ct1)]), 
+                                                       as.character(x$gn2[grepl("Hepa", x$ct2)]))))
+
+hep_var_genes = names(hep_qvals$healthy)[hep_qvals$healthy<=0.05]
+
+xxx = data.frame("cell_type" = c(inter_df$healthy$ct1[grepl("Hepa", inter_df$healthy$ct2) & inter_df$healthy$gn2 %in% hep_genes_list$healthy], inter_df$healthy$ct2[grepl("Hepa", inter_df$healthy$ct1) & inter_df$healthy$gn1 %in% hep_genes_list$healthy]),
+           "gene_ct" = c(as.character(inter_df$healthy$gn1[grepl("Hepa", inter_df$healthy$ct2) & inter_df$healthy$gn2 %in% hep_genes_list$healthy]), as.character(inter_df$healthy$gn2[grepl("Hepa", inter_df$healthy$ct1) & inter_df$healthy$gn1 %in% hep_genes_list$healthy])),
+           "gene_zon" = c(as.character(inter_df$healthy$gn2[grepl("Hepa", inter_df$healthy$ct2) & inter_df$healthy$gn2 %in% hep_genes_list$healthy]), as.character(inter_df$healthy$gn1[grepl("Hepa", inter_df$healthy$ct1) & inter_df$healthy$gn1 %in% hep_genes_list$healthy])),
+           "interact" = c(as.character(inter_df$healthy$id_cp_interaction[grepl("Hepa", inter_df$healthy$ct2) & inter_df$healthy$gn2 %in% hep_genes_list$healthy]), as.character(inter_df$healthy$id_cp_interaction[grepl("Hepa", inter_df$healthy$ct1) & inter_df$healthy$gn1 %in% hep_genes_list$healthy])),
+           "dir" = c(as.character(inter_df$healthy$dir[grepl("Hepa", inter_df$healthy$ct2) & inter_df$healthy$gn2 %in% hep_genes_list$healthy]),
+                     as.character(inter_df$healthy$dir[grepl("Hepa", inter_df$healthy$ct1) & inter_df$healthy$gn1 %in% hep_genes_list$healthy])))
+
+xxx = merge(xxx, data.frame(hep_h_max), by.x = 3, by.y = 0, all.x = T)
+xxx = merge(xxx, data.frame(hep_h_sdmax), by.x = 1, by.y = 0, all.x = T)
+xxx = merge(xxx, data.frame("range" = apply(hep_fits$healthy, 2, function(x) diff(range(x)))), 
+            by.x = 1, by.y = 0, all.x = T)
+
+plot_df = unique(xxx[!grepl("Hepa", xxx$cell_type) & xxx$hep_h_sdmax<=5 & 
+                       xxx$range>=0.1 & xxx$gene_zon %in% hep_var_genes,-c(1,3)])
+
+plt = ggplot(plot_df, aes(x = hep_h_max, colour = cell_type))+
+  geom_density()+
+  scale_x_continuous(limits = c(0,100))+
+  theme_bw()
+
+plot(mean_bins_h[,"VEGFA"], pch = 19, cex = 0.85)
+plot(hep_fits$healthy[,"PROS1"], pch = 19, cex = 0.85)
+```
+
+
+
+```{r}
 inter_df = readRDS(file = "results/cell_comm/interaction_de_unique_HvR.RDS")
 inter_hr = rbind(inter_df$healthy[,1:9], inter_df$regenerating[,1:9])
 inter_hr$cond = c(rep("healthy", nrow(inter_df$healthy)),
@@ -738,6 +852,7 @@ inter_hr = inter_hr[grepl("LSEC_", inter_hr$ct1) | grepl("Hepa", inter_hr$ct1) |
 
 inter_diff = inter_hr[inter_hr$ct1!=inter_hr$ct2,]
 ```
+
 
 ```{r, fig.height=5, fig.width=5.2}
 hep_genes_h_0 = unique(c(as.character(inter_diff$gn1)[grepl("Hepa", inter_diff$ct1) &

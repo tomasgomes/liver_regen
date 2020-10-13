@@ -29,6 +29,7 @@ Load libraries
 ```{r}
 library(Seurat)
 library(ggplot2)
+library(ggrepel)
 library(ggridges)
 library(RColorBrewer)
 ```
@@ -320,6 +321,209 @@ png("figure_panels/fig1/proportions_fresh_major_donor_noLeg.png",
 print(plt+theme(legend.position = "none"))
 dev.off()
 ```
+
+Boxplot with nUMI
+
+```{r}
+plot_df = data.frame(hcells_css@reductions$umap_css@cell.embeddings)
+plot_df$names_major = as.character(hcells_css@meta.data$names_major)
+plot_df$names_major[plot_df$names_major=="T cells" | 
+                      plot_df$names_major=="B cells" | 
+                      plot_df$names_major=="Macrophages" |
+                      plot_df$names_major=="DCs"] = "Immune"
+plot_df$names_major[plot_df$names_major=="Stellate cells"] = "Mesenchymal"
+plot_df$names_major[plot_df$names_major=="Endothelial cells"] = "Endothelial"
+plot_df$nGene = hcells_css@meta.data$nFeature_SCT
+plot_df = plot_df[,3:5]
+saveRDS(plot_df, "./to_send/df_celltypes_umi_gene.RDS") # plotted by Aga
+```
+
+Import markers
+
+```{r}
+cell_type_mk = readRDS(file = "results/integr_allcells/cell_type_mk_major.RDS")
+fresh_de = list()
+for(n in unique(cell_type_mk$major_all$cluster)){
+  fresh_de[[n]] = cell_type_mk$major_all[cell_type_mk$major_all$cluster==n,]
+}
+
+load("data/processed/received_Aga/DE_tables_celltype_frozenSCT.rdata")
+frozen_de = list("Cholangiocytes" = cell_type_mk_cho, "Hepatocytes" = cell_type_mk_hep, 
+                 "Endothelial" = cell_type_mk_ec, "Immune" = cell_type_mk_imm, 
+                 "Mesenchymal" = cell_type_mk_mes)
+for(n in names(frozen_de)){
+  frozen_de[[n]]$cluster = n
+  frozen_de[[n]]$gene = rownames(frozen_de[[n]])
+}
+
+both_list = list()
+top_mk = list()
+for(n in names(fresh_de)){
+  both_DE = merge(fresh_de[[n]], frozen_de[[n]], by = "gene", all = T)[,c(1,3,6,9,12)]
+  colnames(both_DE) = c("gene", "FC_fresh", "pval_fresh", "FC_frozen", "pval_frozen")
+  both_DE$FC_fresh[is.na(both_DE$FC_fresh)] = 0
+  both_DE$pval_fresh[is.na(both_DE$pval_fresh)] = 1
+  both_DE$FC_frozen[is.na(both_DE$FC_frozen)] = 0
+  both_DE$pval_frozen[is.na(both_DE$pval_frozen)] = 1
+  both_DE$celltype = n
+  both_DE$s = both_DE$FC_fresh+both_DE$FC_frozen
+  both_DE = both_DE[order(both_DE$s, decreasing = T),]
+  cond_fc = both_DE$FC_fresh>=0.1 & both_DE$FC_frozen>=0.1
+  cond_pv = both_DE$pval_fresh<=0.05 | both_DE$pval_frozen<=0.05
+  both_DE$iscol = ifelse(cond_fc & cond_pv, 
+                         ifelse(both_DE$gene %in% mk_list[[n]], "istop", "isDE"), "notDE")
+  both_DE$iscol = factor(both_DE$iscol, levels = rev(c("istop", "isDE", "notDE")))
+  both_DE$istop = both_DE$gene %in% mk_list[[n]][1:3]
+  both_list[[n]] = both_DE
+  top_mk[[n]] = both_DE$gene[cond_fc & cond_pv][1:20]
+}
+top_mk = top_mk[c(4,1,3,5,2)]
+```
+
+Heatmap per cluster
+
+```{r}
+cell_type_mk = readRDS(file = "results/cond_effect/cell_type_mk.RDS")
+# cut markers here depending on the size you want for heatmap, then adjust figure
+markers = c("ASGR1", "APOB", "APOC3", "CYP2E1", "HAMP", "ORM1", "SAA1", "NNMT", "FABP1", "MT1G", "ORM2", "TTR", "HP", "APOC1", "APOA2","FGB","CYP3A4","CPS1","ARG1","SAA2",# Hep
+            "KRT7","CLDN4","EPCAM", "TACSTD2", "CD24", "KRT19", "ANXA4", "CXCL6", "FXYD2", "SOX4",  "CRYAB","DEFB1","SLC12A2","MMP7","TNFRSF12A","CXCL1","BICC1","S100A14","DCDC2","PLPP2",# Cho
+            "CLEC4G","PECAM1","CD36", "FCN3", "DNASE1L3", "CLEC1B", "CRHBP", "AKAP12", "IFI27", "GNG11", "IL33","FLT1","PRSS23","ENG","RAMP3","F8","VWF","CLDN5","CCL14","LYVE1",# End
+            "DCN","COLEC11","ACTA2", "CCL2", "TAGLN", "IGFBP3", "BGN", "LUM", "COL3A1", "MYL9", "TPM2","AEBP1","GGT5","ASPN","COL14A1","PTGDS","COL6A1","CYR61","COLEC10","CXCL12",# Mes
+            "PTPRC","HLA-DQA1","LYZ", "LILRB2", "MARCO", "C1QB", "FCGR3A",  "NKG7", "MS4A1", "MZB1", "CCL5","KLRD1","AREG","MS4A7","AXL","CD69","GPR183","TLR2","CD44","IL7R") # Imm
+markers_topboth = unlist(top_mk)
+markers = markers_topboth
+
+load("data/processed/received_Aga/mean_exp_celltype_frozen.rdata")
+hcells_css@meta.data$major_ct = as.character(hcells_css@meta.data$names_major)
+hcells_css@meta.data$major_ct[hcells_css@meta.data$major_ct=="T cells" | 
+                      hcells_css@meta.data$major_ct=="B cells" | 
+                      hcells_css@meta.data$major_ct=="Macrophages" |
+                      hcells_css@meta.data$major_ct=="DCs"] = "Immune"
+hcells_css@meta.data$major_ct[hcells_css@meta.data$major_ct=="Stellate cells"] = "Mesenchymal"
+hcells_css@meta.data$major_ct[hcells_css@meta.data$major_ct=="Endothelial cells"] = "Endothelial"
+m_ct_fresh = apply(as.matrix(hcells_css@assays$SCT@data), 1, 
+                   function(x) tapply(x, hcells_css@meta.data$major_ct, mean))
+
+m_ct_frozen = t(m_ct_frozen)
+m_ct_frozen = t(apply(m_ct_frozen, 1, scale))
+colnames(m_ct_frozen) = rownames(m_ct_fresh)[-2]
+m_ct_fresh = t(m_ct_fresh)[,-2]
+m_ct_fresh = t(apply(m_ct_fresh, 1, scale))
+colnames(m_ct_fresh) = colnames(m_ct_frozen)
+
+mean_ct = merge(m_ct_fresh, m_ct_frozen, by = 0)
+rownames(mean_ct) = mean_ct[,1]
+mean_ct = mean_ct[,-1]
+colnames(mean_ct) = paste0(rep(colnames(m_ct_fresh), 2), rep(c("_fresh", "_frozen"), each = 5))
+
+hcl = hclust(dist(t(mean_ct)), method = "ward.D2")
+plot(hcl)
+
+annot_df = data.frame(row.names = colnames(mean_ct),
+                      "cell type" = unlist(lapply(strsplit(colnames(mean_ct), "_"), function(x) x[1])),
+                      "processing" = unlist(lapply(strsplit(colnames(mean_ct), "_"), function(x) x[2])))
+
+callback = function(hc, mat){
+  sv = svd(t(mat))$v[,2]
+    dend = reorder(as.dendrogram(hc), c(1:4,))
+    as.hclust(dend)
+}
+
+pdf("figure_panels/fig1/major_celltypes_heatmap_freshfrozen_10.pdf", 
+    useDingbats = F, height = 7.5, width = 6)
+heat = pheatmap::pheatmap(mean_ct[markers[c(41:50, 61:70, 81:90,  1:10, 21:30)],], clustering_method = "ward.D2", treeheight_row = 0, 
+                   annotation_col = annot_df, cluster_rows = F, treeheight_col = 20, fontsize_row = 5.5,
+                   annotation_colors = list("processing" = c("fresh" = "#d4d4d4", "frozen" = "#5d5d5d"),
+                                            "cell.type" = colsmajor[-6]),
+                   show_colnames = F, #clustering_callback = callback,
+                   color = colorRampPalette(rev(brewer.pal(n = 9, name = "RdBu")))(100))
+dev.off()
+```
+
+FC fresh vs frozen
+
+```{r}
+mk_list = list("Hepatocytes" = markers[1:10], "Cholangiocytes" = markers[21:30], 
+               "Endothelial" = markers[41:50], "Mesenchymal" = markers[61:70], "Immune" = markers[81:90])
+
+plt_fc_list = list()
+pdf("figure_panels/fig1/major_celltypes_FCscatter_10.pdf", 
+    useDingbats = F, height = 5, width = 4.5)
+for(n in names(both_list)){
+  cc = cor(both_DE$FC_fresh, both_DE$FC_frozen)
+  both_DE = both_DE[order(both_DE$iscol),]
+  
+  cols_use = c("istop" = unname(colsmajor[n]), "isDE" = "grey35", "notDE" = "grey85")
+  plt = ggplot(both_DE, aes(x = FC_fresh, y = FC_frozen, colour = iscol))+
+    geom_vline(xintercept = 0, colour = "grey40")+
+    geom_hline(yintercept = 0, colour = "grey40")+
+    geom_point()+
+    geom_text_repel(data = both_DE[both_DE$istop,], mapping = aes(label = gene),
+                    fontface = "bold")+
+    theme_bw()+
+    scale_colour_manual(values = cols_use)+
+    labs(title = n, subtitle = paste0("PCC = ", round(cc, 2)))+
+    theme(aspect.ratio = 1,
+          axis.text = element_text(colour = "black"),
+          legend.position = "none", 
+          panel.grid = element_blank())
+  
+  plt_fc_list[[n]] = plt
+  print(plt)
+}
+dev.off()
+```
+
+
+
+
+Expression comparison fresh vs frozen
+
+```{r}
+load("data/processed/received_Aga/mean_exp_celltype_frozenCOUNTS.rdata")
+hcells_css@meta.data$major_ct = as.character(hcells_css@meta.data$names_major)
+hcells_css@meta.data$major_ct[hcells_css@meta.data$major_ct=="T cells" | 
+                      hcells_css@meta.data$major_ct=="B cells" | 
+                      hcells_css@meta.data$major_ct=="Macrophages" |
+                      hcells_css@meta.data$major_ct=="DCs"] = "Immune"
+hcells_css@meta.data$major_ct[hcells_css@meta.data$major_ct=="Stellate cells"] = "Mesenchymal"
+hcells_css@meta.data$major_ct[hcells_css@meta.data$major_ct=="Endothelial cells"] = "Endothelial"
+m_ct_fresh = apply(as.matrix(hcells_css@assays$SCT@counts), 1, 
+                   function(x) tapply(x, hcells_css@meta.data$major_ct, mean))
+
+m_ct_frozen = log(t(m_ct_frozen.counts))
+#m_ct_frozen = t(apply(m_ct_frozen, 1, scale))
+colnames(m_ct_frozen) = rownames(m_ct_fresh)[-2]
+m_ct_fresh = log(t(m_ct_fresh)[,-2])
+#m_ct_fresh = t(apply(m_ct_fresh, 1, scale))
+colnames(m_ct_fresh) = colnames(m_ct_frozen)
+
+mean_ct = merge(m_ct_fresh, m_ct_frozen, by = 0)
+rownames(mean_ct) = mean_ct[,1]
+mean_ct = mean_ct[,-1]
+colnames(mean_ct) = paste0(rep(colnames(m_ct_fresh), 2), rep(c("_fresh", "_frozen"), each = 5))
+
+par(mfrow = c(2,3))
+plot(mean_ct$Cholangiocytes_fresh, mean_ct$Cholangiocytes_frozen, pch = 20, cex = 0.5, xlim = c(-8,5), ylim = c(-8,5))
+title("Cholangiocytes")
+abline(0,1)
+plot(mean_ct$Endothelial_fresh, mean_ct$Endothelial_frozen, pch = 20, cex = 0.5, xlim = c(-8,5), ylim = c(-8,5))
+title("Endothelial")
+abline(0,1)
+plot(mean_ct$Hepatocytes_fresh, mean_ct$Hepatocytes_frozen, pch = 20, cex = 0.5, xlim = c(-10,6), ylim = c(-10,6))
+title("Hepatocytes")
+abline(0,1)
+plot(mean_ct$Immune_fresh, mean_ct$Immune_frozen, pch = 20, cex = 0.5, xlim = c(-8,5), ylim = c(-8,5))
+title("Immune")
+abline(0,1)
+plot(mean_ct$Mesenchymal_fresh, mean_ct$Mesenchymal_frozen, pch = 20, cex = 0.5, xlim = c(-8,5), ylim = c(-8,5))
+title("Mesenchymal")
+abline(0,1)
+plot(rowMeans(mean_ct[,1:5]), rowMeans(mean_ct[,6:10]), pch = 20, cex = 0.5, xlim = c(-8,5), ylim = c(-8,5))
+title("All")
+abline(0,1)
+```
+
 
 
 
