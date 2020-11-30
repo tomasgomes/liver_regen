@@ -32,8 +32,34 @@ library(ggplot2)
 library(ggrepel)
 library(ggridges)
 library(dplyr)
+library(seqgendiff)
 library(clusterProfiler)
 library(ReactomePA)
+library(org.Hs.eg.db)
+```
+
+Other functions
+
+```{r}
+# downsample taking the minimum median of UMI counts as a reference
+dsSeurat = function(srat, variable, assay = "SCT", numis = "nCount_SCT", seed = 1){
+  # input Seurat object and variable to do the downsample based on
+  # return Seurat object
+  
+  set.seed(seed)
+  
+  # downsample taking the minimum median of UMI counts as a reference
+  fact = srat@meta.data[,numis]/min(tapply(srat@meta.data[,numis], srat@meta.data[,variable], median))
+  fact = ifelse(fact<=1, 0, log2(fact))
+  thinned_counts = seqgendiff::thin_lib(as.matrix(srat@assays[[assay]]@counts), 
+                                        thinlog2 = fact, relative = T)
+  rownames(thinned_counts$mat) = rownames(srat@assays[[assay]]@data)
+  colnames(thinned_counts$mat) = colnames(srat@assays[[assay]]@data)
+  srat@assays$SCT@counts = Matrix::Matrix(thinned_counts$mat, sparse = T)
+  srat@assays$SCT@data = log1p(srat@assays[[assay]]@counts)
+  
+  return(srat)
+}
 ```
 
 
@@ -43,57 +69,50 @@ Load data (from all cells)
 
 ```{r}
 allcells_css = readRDS(file = "data/processed/allcells_css.RDS")
-end_cells = readRDS(file = "results/zonation_cond/end_cells_zonation.RDS")
-hep_cells = readRDS(file = "results/zonation_cond/hep_cells_zonation.RDS")
+end_cells = readRDS(file = "results/zonation_cond/end_cells_zonation_rank.RDS")
+hep_cells = readRDS(file = "results/zonation_cond/hep_cells_zonation_rank.RDS")
 ```
 
-Add zonation labels. This revised metadata will also be filtered to avoid contaminaiting cells (and we'll also remove doublets)
+Load chromosome information (important to add to tables)
 
 ```{r}
+chr_tab = read.csv("../../gene_refs/human/biomart_ens_gn_hgnc_chr.csv", 
+                   header = T, stringsAsFactors = F)
+```
+
+Add columns where LSEC and Hepatocytes are split by zonation
+
+```{r}
+load("results/zonation_cond/hep_binnedDonor_traj_qval_fits_rank.RData")
+sig_genes = names(qvals_db_list$healthy)[order(qvals_db_list$healthy, decreasing = F)[1:100]]
+bins = cut(hep_cells$embolised$zonation_pt, 100)
+m_bs = apply(hep_cells$embolised@assays$SCT@data[sig_genes,], 1, function(x) tapply(x, bins, mean))
+pca = prcomp(m_bs, center = T)
+plot(pca$x[,1:2], cex = 1:100/100)
+sum(pca$x[,2]>0)
+sum(pca$x[,2]<0 & pca$x[,1]<0)
+sum(pca$x[,2]<0 & pca$x[,1]>0)
+```
+
+
+
+
+# Cell Type markers
+Calculate cell type markers
+
+```{r}
+cell_type_mk = list()
 meta = data.frame(row.names = rownames(allcells_css@meta.data),
                   "cell_type" = as.character(allcells_css@meta.data$allcells_simp),
                   stringsAsFactors = F)
 
-for(cond in names(hep_cells)){
-  hep_zones = hep_cells[[cond]]@meta.data$zonation_int
-  levels(hep_zones) = c("(-0.0688,-0.0253]" = "Hepatocytes_Z1",
-                        "(-0.0253,0.018]" = "Hepatocytes_Z2",
-                        "(0.018,0.0615]" = "Hepatocytes_Z3")
-  hep_zones = as.character(hep_zones)
-  names(hep_zones) = colnames(hep_cells[[cond]])
-  meta[names(hep_zones),"cell_type"] = hep_zones
-  
-  end_zones = end_cells[[cond]]@meta.data$zonation_int
-  levels(end_zones) = c("(-0.0194,6.47]" = "LSEC_Z1",
-                        "(6.47,12.9]" = "LSEC_Z2",
-                        "(12.9,19.4]" = "LSEC_Z3")
-  end_zones = as.character(end_zones)
-  names(end_zones) = colnames(end_cells[[cond]])
-  meta[names(end_zones),"cell_type"] = end_zones
-}
-```
-
-Calculate cell type markers
-
-```{r}
-# remove contaminating cells (removed in pseudotime analysis)
-meta = subset(meta, !(cell_type %in% unique(meta$cell_type)[grepl("Hepatocytes (", unique(meta$cell_type), fixed = T) | 
-                                                              grepl("LSEC ", unique(meta$cell_type), fixed = T)]))
-allcells_css = AddMetaData(allcells_css, meta)
-
-cell_type_mk = list()
-allcells_css = SetIdent(allcells_css, value = "cell_type")
-cell_type_mk[["all"]] = FindAllMarkers(allcells_css[,!is.na(allcells_css@meta.data$cell_type)], 
-                                       assay = "SCT", test.use = "wilcox",
-                                       pseudocount.use = 0.1, logfc.threshold = 0.2,
-                                       max.cells.per.ident = 10000,
-                                       min.cells.feature = 10, verbose = T)
+meta[grepl("Hepatocytes ", meta$cell_type), "cell_type"] = "Hepatocytes" 
 
 # remove contaminating cells and interaction/doublets
 meta = subset(meta, !(cell_type %in% c("Macrophage-T cell interaction",
                                        "Macrophage-Endothelial interaction",
                                        "Lymphoid-Endothelial interaction",
-                                       "LSEC periportal", "LSEC pericentral",
+                                       #"LSEC periportal", "LSEC pericentral",
                                        "Kupffer-Endothelial interaction",
                                        "Hepatocytes (portal/midzone)",
                                        "Hepatocytes (portal)","Hepatocytes (midzone)",
@@ -102,8 +121,9 @@ meta = subset(meta, !(cell_type %in% c("Macrophage-T cell interaction",
                                        "Hepatocyte-Myeloid interaction",
                                        "Hepatocyte-Endothelial interaction",
                                        "Dividing cells")))
-allcells_css = AddMetaData(allcells_css, meta)
 
+allcells_css = AddMetaData(allcells_css, meta)
+allcells_css = SetIdent(allcells_css, value = "cell_type")
 cell_type_mk[["good"]] = FindAllMarkers(allcells_css[,!is.na(allcells_css@meta.data$cell_type)], 
                                         assay = "SCT", test.use = "wilcox",
                                         pseudocount.use = 0.1, logfc.threshold = 0.2,
@@ -123,6 +143,7 @@ plot_df$major_ct[plot_df$major_ct=="Endothelial cells"] = "Endothelial"
 plot_df$major_ct[plot_df$major_ct=="Stellate cells"] = "Mesenchymal"
 plot_df = plot_df[plot_df$major_ct!="Doublets",]
 plot_df = plot_df[plot_df$major_ct!="Dividing cells",]
+
 allcells_css = AddMetaData(allcells_css, plot_df)
 
 allcells_css = SetIdent(allcells_css, value = "major_ct")
@@ -132,22 +153,24 @@ cell_type_mk[["major"]] = FindAllMarkers(allcells_css[,!is.na(allcells_css@meta.
                                         max.cells.per.ident = 10000,
                                         min.cells.feature = 10, verbose = T)
 
-
-# using the good labels but only one label for hepatocytes
-meta$cell_type[grepl("Hepat", meta$cell_type)] = "Hepatocytes"
-lsec = rownames(meta)[grepl("LSEC_", meta$cell_type)]
-meta[lsec,"cell_type"] = allcells_css@meta.data[lsec,"allcells_simp"]
-colnames(meta) = "cell_type_simp"
-allcells_css = AddMetaData(allcells_css, meta)
-
-allcells_css = SetIdent(allcells_css, value = "cell_type_simp")
-cell_type_mk[["cell_type_simp_all"]] = FindAllMarkers(allcells_css[,!is.na(allcells_css@meta.data$cell_type_simp)], 
-                                                      assay = "SCT", test.use = "wilcox",
-                                                      pseudocount.use = 0.1, logfc.threshold = 0,
-                                                      max.cells.per.ident = 10000,
-                                                      min.cells.feature = 10, verbose = T)
-
 saveRDS(cell_type_mk, file = "results/cond_effect/cell_type_mk.RDS")
+```
+
+Intersection of number of genes in top 250
+
+```{r, fig.height=4, fig.width=5}
+top_genes = list()
+for(n in names(cell_type_mk)){
+  top_genes[[n]] = list()
+  for(ct in unique(cell_type_mk[[n]]$cluster)){
+    top_genes[[n]][[ct]] = cell_type_mk[[n]][cell_type_mk[[n]]$cluster==ct & 
+                                               cell_type_mk[[n]]$p_val_adj<=0.05 & 
+                                               cell_type_mk[[n]]$avg_logFC>0,]
+    top_genes[[n]][[ct]] = top_genes[[n]][[ct]][order(top_genes[[n]][[ct]]$avg_logFC, 
+                                                      decreasing = T),"gene"][1:250]
+  }
+}
+names(top_genes) = c("cell_type","major_ct")
 ```
 
 Save allcells_css again with the new annotations
@@ -156,53 +179,18 @@ Save allcells_css again with the new annotations
 saveRDS(allcells_css, file = "data/processed/allcells_css_reannot.RDS")
 ```
 
-Intersection of number of genes in top 250
 
-```{r, fig.height=4, fig.width=5}
-top_genes = list()
-for(ct in unique(cell_type_mk$good$cluster)){
-  top_genes[[ct]] = cell_type_mk$good[cell_type_mk$good$cluster==ct & 
-                                       cell_type_mk$good$p_val_adj<=0.05 & 
-                                       cell_type_mk$good$avg_logFC>0,]
-  top_genes[[ct]] = top_genes[[ct]][order(top_genes[[ct]]$avg_logFC, decreasing = T),"gene"][1:250]
-}
-
-major_genes = list()
-for(ct in unique(cell_type_mk$major$cluster)){
-  major_genes[[ct]] = cell_type_mk$major[cell_type_mk$major$cluster==ct & 
-                                           cell_type_mk$major$p_val_adj<=0.05 & 
-                                           cell_type_mk$major$avg_logFC>0,]
-  major_genes[[ct]] = major_genes[[ct]][order(major_genes[[ct]]$avg_logFC, decreasing = T),"gene"][1:250]
-}
-
-simp_genes = list()
-for(ct in unique(cell_type_mk$cell_type_simp_all$cluster)){
-  simp_genes[[ct]] = cell_type_mk$major[cell_type_mk$cell_type_simp_all$cluster==ct & 
-                                           cell_type_mk$cell_type_simp_all$p_val_adj<=0.05 & 
-                                           cell_type_mk$cell_type_simp_all$avg_logFC>0,]
-  simp_genes[[ct]] = simp_genes[[ct]][order(simp_genes[[ct]]$avg_logFC, decreasing = T),"gene"][1:250]
-}
-
-int_mat = matrix(0, nrow = length(top_genes), ncol = length(top_genes))
-rownames(int_mat) = colnames(int_mat) = names(top_genes)
-for(i in rownames(int_mat)){
-  for(j in colnames(int_mat)){
-    int_mat[i,j] = length(intersect(top_genes[[i]],top_genes[[j]]))
-  }
-}
-pheatmap::pheatmap(int_mat, clustering_method = "average", treeheight_col = 10, treeheight_row = 10)
-```
-
+# DE per cell type
+## Condition DE per cell type
 Calculate DE (only for cell types with more than 10 cells in one condition)
 
 ```{r}
 comb_cond = combn(unique(allcells_css@meta.data$Condition), 2)
-#cond_comparison_list = list()
+cond_comparison_list = list()
 for(i in 1:ncol(comb_cond)){
   comp = paste0(comb_cond[1,i], "_v_", comb_cond[2,i])
-  #cond_comparison_list[[comp]] = list()
-  #for(g in c("allcells_simp","cell_type","major_ct","cell_type_simp")){
-  for(g in c("cell_type_simp")){
+  cond_comparison_list[[comp]] = list()
+  for(g in c("cell_type", "major_ct")){
     print(g)
     tab_cond = table(allcells_css@meta.data[,g], allcells_css@meta.data$Condition)
     tab_cond = tab_cond[apply(tab_cond, 1, function(x) all(x>10)),]
@@ -227,6 +215,9 @@ for(i in 1:ncol(comb_cond)){
         cond_comparison_list[[comp]][[g]] = mk
       }
     }
+    # add chromosome infor
+    cond_comparison_list[[comp]][[g]] = merge(cond_comparison_list[[comp]][[g]], 
+                                              chr_tab[,c(2,4)], by.x = "gene", by.y = 1, all.x = T)
   }
 }
 saveRDS(cond_comparison_list, file = "results/cond_effect/cond_comparison_list.RDS")
@@ -240,7 +231,7 @@ cond_comparison_hepsub = list()
 for(i in 1:ncol(comb_cond)){
   comp = paste0(comb_cond[1,i], "_v_", comb_cond[2,i])
   cond_comparison_hepsub[[comp]] = list()
-  for(g in c("allcells_simp","cell_type","major_ct")){
+  for(g in c("cell_type", "major_ct")){
     print(g)
     tab_cond = table(allcells_css@meta.data[,g], allcells_css@meta.data$Condition)
     tab_cond = rownames(tab_cond)[apply(tab_cond, 1, function(x) all(x>10)) & 
@@ -248,19 +239,10 @@ for(i in 1:ncol(comb_cond)){
                           !grepl("interact", rownames(tab_cond))]
     for(ct in tab_cond){
       cat(ct)
-      set.seed(1)
       hep_cells = allcells_css[,allcells_css@meta.data[,g]==ct &
                                  !is.na(allcells_css@meta.data[,g])]
       
-      fact = hep_cells@meta.data$nCount_SCT/min(tapply(hep_cells@meta.data$nCount_SCT, 
-                                                       hep_cells@meta.data$Condition, median))
-      fact = ifelse(fact<=1, 0, log2(fact))
-      thinned_counts = seqgendiff::thin_lib(as.matrix(hep_cells@assays$SCT@counts), 
-                                            thinlog2 = fact, relative = T)
-      rownames(thinned_counts$mat) = rownames(hep_cells@assays$SCT@data)
-      colnames(thinned_counts$mat) = colnames(hep_cells@assays$SCT@data)
-      hep_cells@assays$SCT@counts = Matrix::Matrix(thinned_counts$mat, sparse = T)
-      hep_cells@assays$SCT@data = log1p(hep_cells@assays$SCT@counts)
+      hep_cells = dsSeurat(hep_cells, "Condition")
       
       hep_cells = SetIdent(hep_cells, value = g)
       mk = FindMarkers(hep_cells[,!is.na(hep_cells@meta.data[,g])], 
@@ -281,6 +263,9 @@ for(i in 1:ncol(comb_cond)){
         cond_comparison_hepsub[[comp]][[g]] = mk
       }
     }
+    # add chromosome infor
+    cond_comparison_hepsub[[comp]][[g]] = merge(cond_comparison_hepsub[[comp]][[g]] , 
+                                                chr_tab[,c(2,4)], by.x = "gene", by.y = 1, all.x = T)
   }
 }
 saveRDS(cond_comparison_hepsub, file = "results/cond_effect/cond_comparison_hepsub.RDS")
@@ -316,92 +301,127 @@ saveRDS(cond_comp_hep_chr, file = "results/cond_effect/cond_comp_hep_chr.RDS")
 Clean DE tables - remove Y chromosome genes and markers of different cell types
 
 ```{r}
-filt_cond_comp_chr = list()
-for(n in names(cond_comp_chr)){
-  df_cond_de = cond_comp_chr[[n]]$cell_type
-  for(ct in names(top_genes)){
-    okgenes = df_cond_de[df_cond_de$celltype==ct,"gene"]
-    okgenes = okgenes[!(okgenes %in% unlist(top_genes[-which(names(top_genes)==ct)]) &
-                          !(okgenes %in% top_genes[[ct]]))]
-    df_cond_de = df_cond_de[df_cond_de$celltype!=ct | (df_cond_de$celltype==ct &
-                                                         df_cond_de$gene %in% okgenes),]
+cond_comparison_list_filt = list()
+for(g in names(cond_comparison_list[[1]])){
+  cond_comparison_list_filt[[g]] = list()
+  for(n in names(cond_comparison_list)){
+    tg = top_genes[[g]]
+    df_cond_de = cond_comparison_list[[n]][[g]]
+    for(ct in names(tg)){
+      okgenes = df_cond_de[df_cond_de$celltype==ct,"gene"]
+      okgenes = okgenes[!(okgenes %in% unlist(tg[-which(names(tg)==ct)]) &
+                            !(okgenes %in% tg[[ct]]))]
+      df_cond_de = df_cond_de[df_cond_de$celltype!=ct | 
+                                (df_cond_de$celltype==ct &
+                                   df_cond_de$gene %in% okgenes),]
+    }
+    df_cond_de = df_cond_de[!grepl("CHR_", df_cond_de$Chromosome.scaffold.name) & 
+                              !(df_cond_de$Chromosome.scaffold.name %in% c("Y","KI270734.1")),]
+    df_cond_de = df_cond_de[df_cond_de$celltype %in% names(tg),]
+    cond_comparison_list_filt[[g]][[n]] = df_cond_de
   }
-  df_cond_de = df_cond_de[!grepl("CHR_", df_cond_de$Chromosome.scaffold.name) & 
-                            !(df_cond_de$Chromosome.scaffold.name %in% c("Y","KI270734.1")),]
-  df_cond_de = df_cond_de[df_cond_de$celltype %in% names(top_genes),]
-  filt_cond_comp_chr[[n]] = df_cond_de
 }
 
-simp_cond_comp_chr = list()
-for(n in names(cond_comp_chr)){
-  df_cond_de = cond_comp_chr[[n]]$cell_type_simp
-  for(ct in names(simp_genes)){
-    okgenes = df_cond_de[df_cond_de$celltype==ct,"gene"]
-    okgenes = okgenes[!(okgenes %in% unlist(simp_genes[-which(names(simp_genes)==ct)]) &
-                          !(okgenes %in% simp_genes[[ct]]))]
-    df_cond_de = df_cond_de[df_cond_de$celltype!=ct | (df_cond_de$celltype==ct &
-                                                         df_cond_de$gene %in% okgenes),]
+cond_comparison_hepsub_filt = list()
+for(g in names(cond_comparison_hepsub[[1]])){
+  cond_comparison_hepsub_filt[[g]] = list()
+  for(n in names(cond_comparison_hepsub)){
+    tg = top_genes[[g]]
+    df_cond_de = cond_comparison_hepsub[[n]][[g]]
+    for(ct in names(tg)){
+      okgenes = df_cond_de[df_cond_de$celltype==ct,"gene"]
+      okgenes = okgenes[!(okgenes %in% unlist(tg[-which(names(tg)==ct)]) &
+                            !(okgenes %in% tg[[ct]]))]
+      df_cond_de = df_cond_de[df_cond_de$celltype!=ct | 
+                                (df_cond_de$celltype==ct &
+                                   df_cond_de$gene %in% okgenes),]
+    }
+    df_cond_de = df_cond_de[!grepl("CHR_", df_cond_de$Chromosome.scaffold.name) & 
+                              !(df_cond_de$Chromosome.scaffold.name %in% c("Y","KI270734.1")),]
+    df_cond_de = df_cond_de[df_cond_de$celltype %in% names(tg),]
+    cond_comparison_hepsub_filt[[g]][[n]] = df_cond_de
   }
-  df_cond_de = df_cond_de[!grepl("CHR_", df_cond_de$Chromosome.scaffold.name) & 
-                            !(df_cond_de$Chromosome.scaffold.name %in% c("Y","KI270734.1")),]
-  df_cond_de = df_cond_de[df_cond_de$celltype %in% names(simp_genes),]
-  simp_cond_comp_chr[[n]] = df_cond_de
 }
 
-major_cond_comp_chr = list()
-for(n in names(cond_comp_chr)){
-  df_cond_de = cond_comp_chr[[n]]$major_ct
-  for(ct in names(major_genes)){
-    okgenes = df_cond_de[df_cond_de$celltype==ct,"gene"]
-    okgenes = okgenes[!(okgenes %in% unlist(major_genes[-which(names(major_genes)==ct)]) &
-                          !(okgenes %in% major_genes[[ct]]))]
-    df_cond_de = df_cond_de[df_cond_de$celltype!=ct | (df_cond_de$celltype==ct &
-                                                         df_cond_de$gene %in% okgenes),]
-  }
-  df_cond_de = df_cond_de[!grepl("CHR_", df_cond_de$Chromosome.scaffold.name) & 
-                            !(df_cond_de$Chromosome.scaffold.name %in% c("Y","KI270734.1")),]
-  df_cond_de = df_cond_de[df_cond_de$celltype %in% names(major_genes),]
-  major_cond_comp_chr[[n]] = df_cond_de
-}
+filt_comps = list("cell_type" = cond_comparison_list_filt$cell_type, 
+                  "major_ct" = cond_comparison_list_filt$major_ct, 
+                  "cell_type_hep" = cond_comparison_hepsub_filt$cell_type,
+                  "major_ct_hep" = cond_comparison_hepsub_filt$major_ct)
 
-filt_cond_comp_hep = list()
-for(n in names(cond_comp_hep_chr)){
-  df_cond_de = cond_comp_hep_chr[[n]]$cell_type
-  for(ct in names(top_genes)){
-    okgenes = df_cond_de[df_cond_de$celltype==ct,"gene"]
-    okgenes = okgenes[!(okgenes %in% unlist(top_genes[-which(names(top_genes)==ct)]) &
-                          !(okgenes %in% top_genes[[ct]]))]
-    df_cond_de = df_cond_de[df_cond_de$celltype!=ct | (df_cond_de$celltype==ct &
-                                                         df_cond_de$gene %in% okgenes),]
-  }
-  df_cond_de = df_cond_de[!grepl("CHR_", df_cond_de$Chromosome.scaffold.name) & 
-                            !(df_cond_de$Chromosome.scaffold.name %in% c("Y","KI270734.1")),]
-  df_cond_de = df_cond_de[df_cond_de$celltype %in% names(top_genes),]
-  filt_cond_comp_hep[[n]] = df_cond_de
-}
-
-major_cond_comp_hep = list()
-for(n in names(cond_comp_hep_chr)){
-  df_cond_de = cond_comp_hep_chr[[n]]$major_ct
-  for(ct in names(major_genes)){
-    okgenes = df_cond_de[df_cond_de$celltype==ct,"gene"]
-    okgenes = okgenes[!(okgenes %in% unlist(major_genes[-which(names(major_genes)==ct)]) &
-                          !(okgenes %in% major_genes[[ct]]))]
-    df_cond_de = df_cond_de[df_cond_de$celltype!=ct | (df_cond_de$celltype==ct &
-                                                         df_cond_de$gene %in% okgenes),]
-  }
-  df_cond_de = df_cond_de[!grepl("CHR_", df_cond_de$Chromosome.scaffold.name) & 
-                            !(df_cond_de$Chromosome.scaffold.name %in% c("Y","KI270734.1")),]
-  df_cond_de = df_cond_de[df_cond_de$celltype %in% names(major_genes),]
-  major_cond_comp_hep[[n]] = df_cond_de
-}
-
-filt_comps = list("major_ct" = major_cond_comp_chr, "cell_type" = filt_cond_comp_chr,
-                  "major_ct_hep" = major_cond_comp_hep, "cell_type_hep" = filt_cond_comp_hep,
-                  "cell_type_simp" = simp_cond_comp_chr)
-
-saveRDS(filt_comps, file = "results/cond_effect/all_filt_comps.RDS")
+saveRDS(filt_comps, file = "results/cond_effect/all_filt_cond_comps.RDS")
 ```
+
+
+## Donor DE per cell type
+Donor markers across the whole data
+
+```{r}
+allcells_css = SetIdent(allcells_css, value = "Donor")
+donor_markers = FindAllMarkers(allcells_css[,!is.na(allcells_css@meta.data$cell_type)], 
+                               assay = "SCT", test.use = "wilcox",
+                               pseudocount.use = 0.1, logfc.threshold = 0,
+                               max.cells.per.ident = 10000,
+                               min.cells.feature = 10, verbose = T)
+```
+
+Donor markers per cell type
+
+```{r}
+donor_submk_list = list()
+allcells_css = SetIdent(allcells_css, value = "Donor")
+for(g in c("cell_type", "major_ct", "Condition")){
+  print(g)
+  donor_submk_list[[g]] = list()
+  tab_cond = table(allcells_css@meta.data[,g], allcells_css@meta.data$Donor)
+  if(g!="Condition"){
+    tab_cond = tab_cond[apply(tab_cond, 1, function(x) all(x>5)),]
+  }
+  for(ct in rownames(tab_cond)){
+    cat(ct)
+    mk = FindAllMarkers(allcells_css[,allcells_css@meta.data[,g]==ct], 
+                        pseudocount.use = 0.1, 
+                        logfc.threshold = 0, min.cells.feature = 5,
+                        assay = "SCT", max.cells.per.ident = 10000)
+    mk$gene = rownames(mk)
+    mk$class = g
+    mk$group = ct
+    mk = mk[,c("class", "group", "gene", "cluster", "avg_logFC", 
+               "p_val_adj", "pct.1", "pct.2")]
+    
+    donor_submk_list[[g]][[ct]] = mk
+    
+    # add chromosome infor
+    donor_submk_list[[g]][[ct]] = merge(donor_submk_list[[g]][[ct]], chr_tab[,c(2,4)], 
+                                        by.x = "gene", by.y = 1, all.x = T)
+  }
+}
+
+donor_submk_list$all = donor_markers
+saveRDS(donor_submk_list, file = "results/cond_effect/donor_comparison_list.RDS")
+```
+
+
+```{r}
+donor_filt = donor_submk_list$all[donor_submk_list$all$p_val_adj<=0.05 &
+                                    donor_submk_list$all$avg_logFC>=0.2,]
+xxx = table(donor_filt$gene, donor_filt$cluster)
+ndon_genes = rowSums(xxx)
+ndonH_genes = rowSums(xxx[,grepl("HD", colnames(xxx))])
+ndonD_genes = rowSums(xxx[,grepl("DD", colnames(xxx))])
+conddiff = ndonH_genes>ndonD_genes | ndonH_genes<ndonD_genes
+
+g_c_l = list()
+dat = allcells_css@assays$SCT@data[,!is.na(allcells_css@meta.data$cell_type)]
+for(n in 1:nrow(allcells_css@assays$SCT@data)){
+  g_c_l[[n]] = tapply(dat[n,], allcells_css$Donor[!is.na(allcells_css@meta.data$cell_type)], 
+                      function(y) sum(y>0))
+}
+```
+
+
+
+
+# Explore results
 
 Filter pathways with ribosomal genes
 
@@ -458,12 +478,28 @@ for(gr in names(filt_comps)){
                                           OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
                                           qvalueCutoff  = 0.05, 
                                           pAdjustMethod = "BH", readable = T)
+          hf = "/links/groups/treutlein/USERS/tomasgomes/gene_refs/human/h.all.v7.2.entrez.gmt"
+          egmt = enricher(gene = eg$ENTREZID, universe = eg_all$ENTREZID, TERM2GENE=read.gmt(hf),
+                          pvalueCutoff = 1, qvalueCutoff = 1, pAdjustMethod = "BH",
+                          minGSSize = 0, maxGSSize = 1000000)
+          if(!is.null(egmt)){
+            egmt = egmt@result
+            egmt$geneID = lapply(egmt$geneID, 
+                                 function(x) unlist(paste0(bitr(unlist(strsplit(x, "/")),
+                                                                fromType="ENTREZID", toType="SYMBOL",
+                                                                OrgDb="org.Hs.eg.db")[,2],
+                                                           collapse = "/")))
+          }
+          else{
+            egmt = data.frame()
+          }
           
-          all_terms = rbind(as.data.frame(reac), as.data.frame(got))
+          all_terms = rbind(as.data.frame(reac), as.data.frame(got), egmt)
           if(nrow(all_terms)>0){
             all_terms$DB = c(rep("Reactome", nrow(as.data.frame(reac))), 
-                             rep("GO Term", nrow(as.data.frame(got))))
-            all_terms = all_terms[all_terms$qvalue<=0.05,]
+                             rep("GO Term", nrow(as.data.frame(got))),
+                             rep("Hallmark", nrow(egmt)))
+            #all_terms = all_terms[all_terms$qvalue<=0.05,]
             all_terms$cond = cond
             
             if(is.null(go_enr_list[[gr]][[comp]][[ct]])){
@@ -476,28 +512,23 @@ for(gr in names(filt_comps)){
       }
     }
   }
+  print(names(go_enr_list))
+  print(names(go_enr_list[[gr]]))
+  print(names(go_enr_list[[gr]][[comp]]))
 }
 saveRDS(go_enr_list, file = "results/cond_effect/go_enr_list.RDS")
 ```
 
-Tables for sending
+Tables of DE genes
 
 ```{r}
 for(g in names(filt_comps)){
   for(comp in names(filt_comps[[g]])){
     subdir = file.path("to_send", g)
     dir.create(subdir)
-    write.table(filt_comps[[g]][[comp]], file = paste0(subdir, "/DEconditions_", comp, "_", g, ".csv"), col.names = T, row.names = F, quote = F, sep = "\t")
-  }
-}
-
-for(g in names(gomf_enr_list)){
-  for(comp in names(gomf_enr_list[[g]])){
-    for(ct in names(gomf_enr_list[[g]][[comp]])){
-      subdir = file.path("to_send", paste0(g, "/GO_", ct))
-      dir.create(subdir)
-      write.table(gomf_enr_list[[g]][[comp]][[ct]], file = paste0(subdir, "/GOTermMF_", comp, "_", ct, "_", g, ".csv"), col.names = T, row.names = F, quote = F, sep = "\t")
-    }
+    write.table(filt_comps[[g]][[comp]], 
+                file = paste0(subdir, "/DEconditions_", comp, "_", g, ".csv"), 
+                col.names = T, row.names = F, quote = F, sep = "\t")
   }
 }
 
@@ -506,11 +537,144 @@ for(g in names(go_enr_list)){
     for(ct in names(go_enr_list[[g]][[comp]])){
       subdir = file.path("to_send/", paste0(g, "/GO_", ct))
       dir.create(subdir)
-      write.table(go_enr_list[[g]][[comp]][[ct]], file = paste0(subdir, "/GOTermBP_", comp, "_", ct, "_", g, ".csv"), col.names = T, row.names = F, quote = F, sep = "\t")
+      write.table(go_enr_list[[g]][[comp]][[ct]], 
+                  file = paste0(subdir, "/GOTermBP_", comp, "_", ct, "_", g, ".csv"), 
+                  col.names = T, row.names = F, quote = F, sep = "\t")
     }
   }
 }
 ```
+
+Exploring transcription factors and GO Terms
+
+```{r}
+tfdb = read.table("../../gene_refs/human/Homo_sapiens_TF_AnimalTFDB3.txt", 
+                  sep = "\t", header = T, stringsAsFactors = F)
+
+genes_to_plot = list("Hepatocytes" = c("HAMP", "SAA1", "FGA", "G0S2", "TNFRSF1A",
+                                       "CYP3A7", "MT1A", "DDX21", "IL1RAP", "MT1X",
+                                       "MGLL", "MFSD2A", "APOA4", "IRF7", "CEBPA"), 
+                      "Immune" = c("S100A9", "CD81", "FCGR1A", "GBP5", "RUNX3", 
+                                   "CD300E", "MNDA", "IL18BP", "IL4I1", "WDFY4",
+                                   "TRDC", "TRBC1", "IFNG", "CD160", "IFITM1"), 
+                      "Cholangiocytes" = c("CCL2", "IRF1", "KRT19", "CCL20", "ICAM1",
+                                           "MAP3K12", "EPSTI1", "P4HA1", "PEAK1", "SEC24A",
+                                           "LCN2", "RAMP1", "ITGB4", "BIK", "CCL28"), 
+                      "Mesenchymal" = c(), 
+                      "Endothelial" = c("SOX18", "PLCG2", "TFPI2", "KLF2", "STC1",
+                                        "CXXC5", "NPR3", "CDK6", "ADGRG6", "PDGFB",
+                                        "RFPL1", "ITGB3", "ADAMTS4", "KLF13", "GPR182"))
+
+plt_list_cond = list()
+df_list_cond = list()
+for(ct in unique(filt_comps$major_ct$healthy_v_embolised$celltype)){
+  g = if(ct=="Hepatocytes") "major_ct_hep" else "major_ct"
+  
+  plt_reg = filt_comps[[g]]$healthy_v_regenerating[,c(1,3,4,5)]
+  plt_reg = unique(plt_reg[plt_reg$celltype==ct,])
+  plt_emb = filt_comps[[g]]$healthy_v_embolised[,c(1,3,4,5)]
+  plt_emb = unique(plt_emb[plt_emb$celltype==ct,])
+  rownames(plt_reg) = plt_reg$gene
+  rownames(plt_emb) = plt_emb$gene
+  
+  plt_df = merge(plt_emb, plt_reg, by = 0, all = T)
+  rownames(plt_df) = plt_df[,1]
+  plt_df = plt_df[,-c(1,3,6,7)]
+  colnames(plt_df) = c("gene", "FC_emb", "pval_emb", "FC_reg", "pval_reg")
+  plt_df$gene = rownames(plt_df)
+  plt_df$FC_emb[is.na(plt_df$FC_emb)] = 0
+  plt_df$FC_reg[is.na(plt_df$FC_reg)] = 0
+  plt_df$pval_emb[is.na(plt_df$pval_emb)] = 1
+  plt_df$pval_reg[is.na(plt_df$pval_reg)] = 1
+  
+  # condition labels
+  plt_df$cond = ifelse(plt_df$FC_emb<=(-0.2) & plt_df$pval_emb<=0.05 & plt_df$FC_reg>=0, "embolised",
+                       ifelse(plt_df$FC_reg<=(-0.2) & plt_df$pval_reg<=0.05 & plt_df$FC_emb>=0, "regenerating",
+                              ifelse(plt_df$FC_reg<=(-0.2) & plt_df$pval_reg<=0.05 & plt_df$FC_emb<=(-0.2) &
+                                       plt_df$pval_emb<=0.05, "both","other")))
+  plt_df$cond = factor(plt_df$cond, levels = c("both", "embolised", "regenerating", "other"))
+  plt_df = plt_df[order(plt_df$cond, decreasing = T),]
+  
+  # genes from GO
+  if(!is.null(go_enr_list[[g]]$healthy_v_embolised[[ct]])){
+    t_emb = go_enr_list[[g]]$healthy_v_embolised[[ct]]
+    t_emb = t_emb[rpfilter(t_emb) & t_emb$cond=="embolised" & t_emb$DB=="GO Term",]
+    t_emb_genes = strsplit(as.character(t_emb$geneID), "/")
+    names(t_emb_genes) = t_emb$Description
+    t_emb_genes = reshape2::melt(t_emb_genes)
+    emb_ug = rownames(plt_df)[plt_df$FC_emb<=(-0.2) & plt_df$pval_emb<=0.05 & plt_df$FC_reg>=0]
+    emb_genes_go = unique(t_emb_genes[t_emb_genes$value %in% emb_ug,1])
+    
+    t_reg = go_enr_list[[g]]$healthy_v_regenerating[[ct]]
+    t_reg = t_reg[rpfilter(t_reg) & t_reg$cond=="regenerating" & t_reg$DB=="GO Term",]
+    t_reg_genes = strsplit(as.character(t_reg$geneID), "/")
+    names(t_reg_genes) = t_reg$Description
+    t_reg_genes = reshape2::melt(t_reg_genes)
+    reg_ug = rownames(plt_df)[plt_df$FC_reg<=(-0.2) & plt_df$pval_reg<=0.05 & plt_df$FC_emb>=0]
+    reg_genes_go = unique(t_reg_genes[t_reg_genes$value %in% reg_ug,1])
+    
+    t_both = rbind(t_emb, t_reg)
+    t_both_genes = strsplit(as.character(t_both$geneID), "/")
+    names(t_both_genes) = t_both$Description
+    t_both_genes = reshape2::melt(t_both_genes)
+    both_ug = rownames(plt_df)[plt_df$FC_reg<0 & plt_df$pval_reg<=0.05 & 
+                                 plt_df$FC_emb<0 & plt_df$pval_emb<=0.05]
+    both_genes_go = unique(t_both_genes[t_both_genes$value %in% both_ug,1])
+    
+      plt_df$cond_go = ifelse(plt_df$gene %in% emb_genes_go, "embolised", 
+                           ifelse(plt_df$gene %in% reg_genes_go, "regenerating", 
+                                  ifelse(plt_df$gene %in% both_genes_go, "both", "other")))
+      plt_df$cond_go = factor(plt_df$cond_go, levels = c("both", "embolised", "regenerating", "other"))
+  }
+  
+  plt_df$isTF = plt_df$gene %in% tfdb$Symbol
+  
+  emb_g_plt =  plt_df$gene[order(plt_df$FC_emb, decreasing = F)][plt_df$cond[order(plt_df$FC_emb, decreasing = F)]=="embolised"][1:5]
+  reg_g_plt = plt_df$gene[order(plt_df$FC_reg, decreasing = F)][plt_df$cond[order(plt_df$FC_reg, decreasing = F)]=="regenerating"][1:5]
+  b_g_plt = plt_df$gene[order(plt_df$FC_reg+plt_df$FC_emb, decreasing = F)][plt_df$cond[order(plt_df$FC_reg+plt_df$FC_emb, decreasing = F)]=="both"][1:5]
+  
+  cols = c("both" = "#C54635", "regenerating" = "salmon", "embolised" = "darkred", "other" = "grey85")
+  plt = ggplot(plt_df, aes(x = FC_emb, y = FC_reg, colour = cond))+
+    geom_vline(xintercept = 0)+
+    geom_hline(yintercept = 0)+
+    geom_point()+
+    geom_label_repel(data = plt_df[plt_df$gene %in% c(emb_g_plt, reg_g_plt, b_g_plt),], 
+                     mapping = aes(label = gene), show.legend = F)+
+    scale_colour_manual(values = cols)+
+    labs(title = ct, x = "logFC(healthy vs embolised)", 
+         y = "logFC(healthy vs regenerating)")+
+    theme_bw()
+  
+  plt_list_cond[[ct]] = plt
+  df_list_cond[[ct]] = plt_df
+  
+  write.csv(plt_df, file = paste0("to_send/FC_condVShealthy_", ct, ".csv"), 
+            col.names = T, row.names = F, quote = F)
+}
+
+terms_list = c("liver regeneration" = "GO:0097421", "regeneration" = "GO:0031099", 
+               "tissue regeneration" = "GO:0042246", "liver development" = "GO:0001889",
+               "cell migration" = "GO:0016477", "lipid metabolic process" = "GO:0006629", 
+               "monocarboxylic acid metabolic process" = "GO:0032787", 
+               "xenobiotic metabolic process" = "GO:0006805", "complement activation" = "GO:0006956")
+g_path = mget(terms_list,org.Hs.egGO2ALLEGS)
+refsymbol = org.Hs.egSYMBOL
+g_path = lapply(g_path, function(x) unlist(as.list(refsymbol[x])))
+names(g_path) = names(terms_list)
+
+g_path_df = data.frame("gene" = unlist(g_path[-c(1,3)]),
+                       "terms" = unlist(lapply(names(g_path[-c(1,3)]), function(x) rep(x, length(g_path[[x]])))),
+                       stringsAsFactors = F)
+g_path_df = g_path_df[!duplicated(g_path_df$gene),]
+
+plt_df = merge(plt_df, g_path_df, by = "gene", all.x = T)
+plt_df$terms[is.na(plt_df$terms)] = "other"
+plt_df$terms = factor(plt_df$terms, levels = c(unique(g_path_df$terms), "other"))
+plt_df = plt_df[order(plt_df$terms, decreasing = T),]
+```
+
+
+
 
 Cell types affected by condtions
 
@@ -593,62 +757,6 @@ ggplot(counts_de, aes(x = Var1, y = Freq, fill = Var2))+
   theme_classic()+
   theme(legend.justification=c(0,1), legend.position=c(0,1),
         axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
-
-
-
-
-
-
-
-
-
-
-
-mean_h = apply(as.matrix(allcells_css@assays$SCT@data[,allcells_css$Condition=="healthy"]), 1, 
-               function(x) tapply(x, allcells_css$cell_type[allcells_css$Condition=="healthy"], mean))
-mean_r = apply(as.matrix(allcells_css@assays$SCT@data[,allcells_css$Condition=="regenerating"]), 1, 
-               function(x) tapply(x, allcells_css$cell_type[allcells_css$Condition=="regenerating"], mean))
-mean_e = apply(as.matrix(allcells_css@assays$SCT@data[,allcells_css$Condition=="embolised"]), 1, 
-               function(x) tapply(x, allcells_css$cell_type[allcells_css$Condition=="embolised"], mean))
-mean_major_h = apply(as.matrix(allcells_css@assays$SCT@data[,allcells_css$Condition=="healthy"]), 1, 
-               function(x) tapply(x, allcells_css$major_ct[allcells_css$Condition=="healthy"], mean))
-mean_major_r = apply(as.matrix(allcells_css@assays$SCT@data[,allcells_css$Condition=="regenerating"]), 1, 
-               function(x) tapply(x, allcells_css$major_ct[allcells_css$Condition=="regenerating"], mean))
-mean_major_e = apply(as.matrix(allcells_css@assays$SCT@data[,allcells_css$Condition=="embolised"]), 1, 
-               function(x) tapply(x, allcells_css$major_ct[allcells_css$Condition=="embolised"], mean))
-
-g = unique(c(de_df_g$value, de_df_r_g$value))
-
-cor_he = cor(t(mean_major_h)[g,], t(mean_major_e)[g,], method = "pe")
-cor_hr = cor(t(mean_major_h)[g,], t(mean_major_r)[g,], method = "pe")
-
-
-
-
-
-for(gg in names(filt_comps)){
-  for(nn in names(filt_comps[[gg]])){
-    de_df = filt_comps[[gg]][[nn]]
-    de_df = de_df[de_df$p_val_adj<=0.05 & abs(de_df$avg_logFC)>=0.2,]
-    genes_up = tapply(de_df$gene[de_df$avg_logFC>0], de_df$celltype[de_df$avg_logFC>0], list)
-    genes_dn = tapply(de_df$gene[de_df$avg_logFC<0], de_df$celltype[de_df$avg_logFC<0], list)
-    de_hep = filt_comps$major_ct_hep[[nn]]
-    genes_up$Hepatocytes = de_hep$gene[de_hep$avg_logFC>=0.2 & de_hep$p_val_adj<=0.05]
-    genes_dn$Hepatocytes = de_hep$gene[de_hep$avg_logFC<=(-0.2) & de_hep$p_val_adj<=0.05]
-    
-    de_df_g = rbind(reshape2::melt(genes_up), reshape2::melt(genes_dn))
-    de_df_g$dedir = c(rep("up", length(unlist(genes_up))), rep("down", length(unlist(genes_dn))))
-    L1 = unique(de_df_g$L1)
-    de_df_g = cbind(de_df_g[,c(1,3)], sapply(levels(as.factor(de_df_g$L1)), function(x) as.numeric(x == de_df_g$L1)))
-    de_df_g$g_d = paste0(de_df_g$value, "_", de_df_g$dedir)
-    de_df_g = cbind(unique(de_df_g$g_d), data.frame(rowsum(as.matrix(de_df_g[,3:7]), de_df_g$g_d)))
-    de_df_g$gene = unlist(lapply(strsplit(as.character(de_df_g$`unique(de_df_g$g_d)`), "_"), function(x) x[1]))
-    de_df_g$dedir = unlist(lapply(strsplit(as.character(de_df_g$`unique(de_df_g$g_d)`), "_"), function(x) x[2]))
-    
-    library(ComplexUpset)
-    upset(de_df_g, L1, base_annotations = list('Intersection size'=intersection_size(counts=FALSE, aes=aes(fill=dedir))), width_ratio=0.1, min_size = 5)
-  }
-}
 ```
 
 
@@ -669,122 +777,10 @@ emb_genes_terms = reshape2::melt(emb_genes_terms)
 emb_genes_terms = merge(emb_genes_terms, emb_hep[,c(2,11)], by.x = 2, by.y = 1)
 
 emb_genes = setdiff(unique(emb_genes_terms$value[emb_genes_terms$cond=="embolised"]), unique(reg_genes_terms$value[reg_genes_terms$cond=="regenerating"]))
+reg_genes = setdiff(unique(reg_genes_terms$value[reg_genes_terms$cond=="regenerating"]), unique(emb_genes_terms$value[emb_genes_terms$cond=="embolised"]))
 ```
 
 
-
-```{r}
-tfdb = read.table("../../gene_refs/human/Homo_sapiens_TF_AnimalTFDB3.txt", sep = "\t", header = T, stringsAsFactors = F)
-
-plt_list_cond = list()
-df_list_cond = list()
-for(ct in unique(filt_comps$major_ct$healthy_v_embolised$celltype)){
-  g = if(ct=="Hepatocytes") "major_ct_hep" else "major_ct"
-  
-  plt_reg = filt_comps[[g]]$healthy_v_regenerating[,c(1,3,4,5)]
-  plt_reg = unique(plt_reg[plt_reg$celltype==ct,])
-  plt_emb = filt_comps[[g]]$healthy_v_embolised[,c(1,3,4,5)]
-  plt_emb = unique(plt_emb[plt_emb$celltype==ct,])
-  rownames(plt_reg) = plt_reg$gene
-  rownames(plt_emb) = plt_emb$gene
-  
-  plt_df = merge(plt_emb, plt_reg, by = 0, all = T)
-  rownames(plt_df) = plt_df[,1]
-  plt_df = plt_df[,-c(1,3,6,7)]
-  colnames(plt_df) = c("gene", "FC_emb", "pval_emb", "FC_reg", "pval_reg")
-  plt_df$gene = rownames(plt_df)
-  plt_df$FC_emb[is.na(plt_df$FC_emb)] = 0
-  plt_df$FC_reg[is.na(plt_df$FC_reg)] = 0
-  plt_df$pval_emb[is.na(plt_df$pval_emb)] = 1
-  plt_df$pval_reg[is.na(plt_df$pval_reg)] = 1
-  
-  # condition labels
-  plt_df$cond = ifelse(plt_df$FC_emb<=(-0.2) & plt_df$pval_emb<=0.05 & plt_df$FC_reg>=0, "embolised",
-                       ifelse(plt_df$FC_reg<=(-0.2) & plt_df$pval_reg<=0.05 & plt_df$FC_emb>=0, "regenerating",
-                              ifelse(plt_df$FC_reg<=(-0.2) & plt_df$pval_reg<=0.05 & plt_df$FC_emb<=(-0.2) & plt_df$pval_emb<=0.05, "both","other")))
-  plt_df$cond = factor(plt_df$cond, levels = c("both", "embolised", "regenerating", "other"))
-  plt_df = plt_df[order(plt_df$cond, decreasing = T),]
-  
-  # genes from GO
-  if(!is.null(go_enr_list[[g]]$healthy_v_embolised[[ct]])){
-    t_emb = go_enr_list[[g]]$healthy_v_embolised[[ct]]
-    t_emb = t_emb[rpfilter(t_emb) & t_emb$cond=="embolised" & t_emb$DB=="GO Term",]
-    t_emb_genes = strsplit(t_emb$geneID, "/")
-    names(t_emb_genes) = t_emb$Description
-    t_emb_genes = reshape2::melt(t_emb_genes)
-    emb_ug = rownames(plt_df)[plt_df$FC_emb<=(-0.2) & plt_df$pval_emb<=0.05 & plt_df$FC_reg>=0]
-    emb_genes_go = unique(t_emb_genes[t_emb_genes$value %in% emb_ug,1])
-    
-    t_reg = go_enr_list[[g]]$healthy_v_regenerating[[ct]]
-    t_reg = t_reg[rpfilter(t_reg) & t_reg$cond=="regenerating" & t_reg$DB=="GO Term",]
-    t_reg_genes = strsplit(t_reg$geneID, "/")
-    names(t_reg_genes) = t_reg$Description
-    t_reg_genes = reshape2::melt(t_reg_genes)
-    reg_ug = rownames(plt_df)[plt_df$FC_reg<=(-0.2) & plt_df$pval_reg<=0.05 & plt_df$FC_emb>=0]
-    reg_genes_go = unique(t_reg_genes[t_reg_genes$value %in% reg_ug,1])
-    
-    t_both = rbind(t_emb, t_reg)
-    t_both_genes = strsplit(t_both$geneID, "/")
-    names(t_both_genes) = t_both$Description
-    t_both_genes = reshape2::melt(t_both_genes)
-    both_ug = rownames(plt_df)[plt_df$FC_reg<0 & plt_df$pval_reg<=0.05 & plt_df$FC_emb<0 & plt_df$pval_emb<=0.05]
-    both_genes_go = unique(t_both_genes[t_both_genes$value %in% both_ug,1])
-    
-      plt_df$cond_go = ifelse(plt_df$gene %in% emb_genes_go, "embolised", 
-                           ifelse(plt_df$gene %in% reg_genes_go, "regenerating", 
-                                  ifelse(plt_df$gene %in% both_genes_go, "both", "other")))
-      plt_df$cond_go = factor(plt_df$cond_go, levels = c("both", "embolised", "regenerating", "other"))
-  }
-  
-  plt_df$isTF = plt_df$gene %in% tfdb$Symbol
-  
-  emb_g_plt =  plt_df$gene[order(plt_df$FC_emb, decreasing = F)][plt_df$cond[order(plt_df$FC_emb, decreasing = F)]=="embolised"][1:5]
-  reg_g_plt = plt_df$gene[order(plt_df$FC_reg, decreasing = F)][plt_df$cond[order(plt_df$FC_reg, decreasing = F)]=="regenerating"][1:5]
-  b_g_plt = plt_df$gene[order(plt_df$FC_reg+plt_df$FC_emb, decreasing = F)][plt_df$cond[order(plt_df$FC_reg+plt_df$FC_emb, decreasing = F)]=="both"][1:5]
-  
-  cols = c("both" = "#C54635", "regenerating" = "salmon", "embolised" = "darkred", "other" = "grey85")
-  plt = ggplot(plt_df, aes(x = FC_emb, y = FC_reg, colour = cond))+
-    geom_vline(xintercept = 0)+
-    geom_hline(yintercept = 0)+
-    geom_point()+
-    geom_label_repel(data = plt_df[plt_df$gene %in% c(emb_g_plt, reg_g_plt, b_g_plt),], mapping = aes(label = gene), show.legend = F)+
-    scale_colour_manual(values = cols)+
-    labs(title = ct, x = "logFC(healthy vs embolised)", 
-         y = "logFC(healthy vs regenerating)")+
-    theme_bw()
-  
-  plt_list_cond[[ct]] = plt
-  df_list_cond[[ct]] = plt_df
-  
-  write.csv(plt_df, file = paste0("to_send/FC_condVShealthy_", ct, ".csv"), col.names = T, row.names = F, quote = F)
-}
-
-
-
-
-library(org.Hs.eg.db)
-terms_list = c("liver regeneration" = "GO:0097421", "regeneration" = "GO:0031099", 
-               "tissue regeneration" = "GO:0042246", "liver development" = "GO:0001889",
-               "cell migration" = "GO:0016477", "lipid metabolic process" = "GO:0006629", 
-               "monocarboxylic acid metabolic process" = "GO:0032787", 
-               "xenobiotic metabolic process" = "GO:0006805", "complement activation" = "GO:0006956")
-g_path = mget(terms_list,org.Hs.egGO2ALLEGS)
-refsymbol = org.Hs.egSYMBOL
-g_path = lapply(g_path, function(x) unlist(as.list(refsymbol[x])))
-names(g_path) = names(terms_list)
-
-g_path_df = data.frame("gene" = unlist(g_path[-c(1,3)]),
-                       "terms" = unlist(lapply(names(g_path[-c(1,3)]), function(x) rep(x, length(g_path[[x]])))),
-                       stringsAsFactors = F)
-g_path_df = g_path_df[!duplicated(g_path_df$gene),]
-
-plt_df = merge(plt_df, g_path_df, by = "gene", all.x = T)
-plt_df$terms[is.na(plt_df$terms)] = "other"
-plt_df$terms = factor(plt_df$terms, levels = c(unique(g_path_df$terms), "other"))
-plt_df = plt_df[order(plt_df$terms, decreasing = T),]
-
-
-```
 
 
 
@@ -835,6 +831,15 @@ maxmat = apply(mat, 2, function(x) x/max(x))
 
 
 
+
+
+
+
+
+
+
+
+# OLD CODE
 
 ```{r}
 # Hep: H v R - no diff; H v E - H is more metab active
@@ -913,8 +918,52 @@ colnames(plot_df) = c("gene", "he", "hr", "er")
 plot(plot_df$he, -plot_df$er)
 ```
 
+Add zonation labels. This revised metadata will also be filtered to avoid contaminaiting cells (and we'll also remove doublets)
 
+```{r}
+meta = data.frame(row.names = rownames(allcells_css@meta.data),
+                  "cell_type" = as.character(allcells_css@meta.data$allcells_simp),
+                  stringsAsFactors = F)
 
+for(cond in names(hep_cells)){
+  hep_zones = hep_cells[[cond]]@meta.data$zonation_int
+  levels(hep_zones) = c("(-0.00099,0.333]" = "Hepatocytes_Z1",
+                        "(0.333,0.667]" = "Hepatocytes_Z2",
+                        "(0.667,1]" = "Hepatocytes_Z3")
+  hep_zones = as.character(hep_zones)
+  names(hep_zones) = colnames(hep_cells[[cond]])
+  meta[names(hep_zones),"cell_type"] = hep_zones
+  
+  end_zones = end_cells[[cond]]@meta.data$zonation_int
+  levels(end_zones) = c("(-0.00099,0.333]" = "LSEC_Z1",
+                        "(0.333,0.667]" = "LSEC_Z2",
+                        "(0.667,1]" = "LSEC_Z3")
+  end_zones = as.character(end_zones)
+  names(end_zones) = colnames(end_cells[[cond]])
+  meta[names(end_zones),"cell_type"] = end_zones
+}
+
+# remove contaminating cells (removed in pseudotime analysis)
+meta = subset(meta, !(cell_type %in% unique(meta$cell_type)[grepl("Hepatocytes (", unique(meta$cell_type), fixed = T) | 
+                                                              grepl("LSEC ", unique(meta$cell_type), fixed = T)]))
+
+# remove contaminating cells and interaction/doublets
+meta = subset(meta, !(cell_type %in% c("Macrophage-T cell interaction",
+                                       "Macrophage-Endothelial interaction",
+                                       "Lymphoid-Endothelial interaction",
+                                       "LSEC periportal", "LSEC pericentral",
+                                       "Kupffer-Endothelial interaction",
+                                       "Hepatocytes (portal/midzone)",
+                                       "Hepatocytes (portal)","Hepatocytes (midzone)",
+                                       "Hepatocytes (central/detox)", "Hepatocytes (central)",
+                                       "Hepatocyte-T cell interaction",
+                                       "Hepatocyte-Myeloid interaction",
+                                       "Hepatocyte-Endothelial interaction",
+                                       "Dividing cells")))
+
+meta[grepl("LSEC_", meta$cell_type),"cell_type"] = as.character(allcells_css@meta.data[rownames(meta)[grepl("LSEC_", meta$cell_type)],"allcells_simp"])
+meta[grepl("Hepatocytes_", meta$cell_type), "cell_type"] = "Hepatocytes"
+```
 
 
 
