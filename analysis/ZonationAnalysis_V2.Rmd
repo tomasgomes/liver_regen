@@ -39,6 +39,7 @@ library(dtw)
 library(data.table)
 library(clusterProfiler)
 library(ReactomePA)
+library(parallel)
 ```
 
 Function for cross-validation
@@ -1261,8 +1262,945 @@ Load data
 ```{r}
 end_cells = readRDS(file = "results/zonation_cond/end_cells_zonation_rank.RDS")
 hep_cells = readRDS(file = "results/zonation_cond/hep_cells_zonation_rank.RDS")
+
+top_genes = readRDS("results/cond_effect/top_genes_mk.RDS")
 ```
 
+Reformatting
+
+```{r}
+all_hep_cells = Reduce(merge, hep_cells)
+all_end_cells = Reduce(merge, end_cells)
+```
+
+
+Find varying genes - using all cells along the ranked pseudotime
+
+```{r}
+# get HVG from all conditions
+hvg = unique(c(hep_cells[["healthy"]]@assays$SCT@var.features,
+               hep_cells[["embolised"]]@assays$SCT@var.features,
+               hep_cells[["regenerating"]]@assays$SCT@var.features))
+
+exp_g = list("healthy" = Matrix::rowSums(hep_cells[["healthy"]]@assays$SCT@data>0)>=30,
+             "embolised" = Matrix::rowSums(hep_cells[["embolised"]]@assays$SCT@data>0)>=30,
+             "regenerating" = Matrix::rowSums(hep_cells[["regenerating"]]@assays$SCT@data>0)>=30)
+
+hvg = hvg[hvg %in% rownames(hep_cells[["healthy"]]@assays$SCT@data)[exp_g$healthy] &
+            hvg %in% rownames(hep_cells[["embolised"]]@assays$SCT@data)[exp_g$embolised] &
+            hvg %in% rownames(hep_cells[["regenerating"]]@assays$SCT@data)[exp_g$regenerating]]
+
+# remove HVG that are markers for other cell types
+hvg = hvg[!(hvg %in% unique(unlist(top_genes$cell_type[!grepl("Hepat", names(top_genes$cell_type))])))]
+
+
+fittingFunc = function(g){
+  t = sub_dat$zonation_pt
+  gene_fit_p = c()
+  gene_fit_vals = data.frame(row.names = 1:100)
+  z = sub_dat@assays$SCT@data[g,]
+    
+  d = data.frame(z=z, t=t)
+  tmp = suppressMessages(gam(z ~ ns(t, df = 3), data=d))
+  
+  # bins for model fitting
+  bb = seq(min(t), max(t), length.out = 100)
+  gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                               newdata = data.frame(t = bb)))
+  p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+  gene_fit_p = c(gene_fit_p, p)
+  names(gene_fit_p)[length(gene_fit_p)] = g
+  
+  return(list("fits" = gene_fit_vals, "pval" = gene_fit_p))
+}
+
+numCores = 12 #larger values resulted in problems
+start_time <- Sys.time()
+cond_fit75_list = list()
+for(cond in names(hep_cells)){
+  print(cond)
+  
+  sub_dat = hep_cells[[cond]][,hep_cells[[cond]]$zonation_pt<0.75]
+  # Fit GAM for each gene using pseudotime as independent variable.
+  cond_fit75_list[[cond]] = mclapply(hvg, fittingFunc, mc.cores = numCores)
+}
+hep75_fits_qval = list()
+for(cond in names(cond_fit75_list)){
+  fits_df = Reduce(cbind, lapply(cond_fit75_list[[cond]], function(x) x$fits))
+  
+  pval_list = unlist(lapply(cond_fit75_list[[cond]], function(x) x$pval))
+  names(pval_list) = hvg
+  
+  pval_df = data.frame(pval_list)
+  
+  hep75_fits_qval[[cond]] = list("fits" = fits_df, "pval" = pval_df,
+                                 "fdr" = apply(pval_df, 2, function(x) p.adjust(x, method = "fdr")))
+}
+end_time <- Sys.time()
+end_time - start_time
+
+
+processInput <- function(g) {
+  d = data.frame(z=sub_dat@assays$SCT@data[g,], t=sub_dat$zonation_pt, 
+                 cond=sub_dat$Condition, don = sub_dat$Donor)
+  d$cond = as.character(d$cond)
+  
+  pval_list = list("all" = list("nodon" = c(), "wdon" = c()), "h_v_e" = list("nodon" = c(), "wdon" = c()),
+                 "h_v_r" = list("nodon" = c(), "wdon" = c()), "e_v_r" = list("nodon" = c(), "wdon" = c()),
+                 "hr_v_e" = list("nodon" = c(), "wdon" = c()), "h_v_er" = list("nodon" = c(), "wdon" = c()),
+                 "he_v_r" = list("nodon" = c(), "wdon" = c()))
+  
+  for(comp in c("all", "h_v_e", "h_v_r", "e_v_r", "hr_v_e", "h_v_er", "he_v_r")){
+    sub_d = d
+    if(comp=="h_v_e"){
+      sub_d = sub_d[sub_d$cond!="regenerating",]
+    } else if(comp=="h_v_r"){
+      sub_d = sub_d[sub_d$cond!="embolised",]
+    } else if(comp=="e_v_r"){
+      sub_d = sub_d[sub_d$cond!="healthy",]
+      
+    } else if(comp=="hr_v_e"){
+      sub_d$cond[sub_d$cond!="embolised"] = "not_embolised"
+    } else if(comp=="h_v_er"){
+      sub_d$cond[sub_d$cond!="healthy"] = "not_healthy"
+    } else if(comp=="he_v_r"){
+      sub_d$cond[sub_d$cond!="regenerating"] = "not_regenerating"
+    }
+    
+    null1 = suppressMessages(gam(z ~ ns(t, df = 3), data=sub_d))
+    null2 = suppressMessages(gam(z ~ ns(t, df = 3) + don, data=sub_d))
+    alt1 = suppressMessages(gam(z ~ ns(t, df = 3) * cond, data=sub_d))
+    alt2 = suppressMessages(gam(z ~ ns(t, df = 3) * cond + don, data=sub_d))
+    
+    null1_anova = summary(null1)$parametric.anova
+    null2_anova = summary(null2)$parametric.anova
+    alt1_anova = summary(alt1)$parametric.anova
+    alt2_anova = summary(alt2)$parametric.anova
+    
+    f1 = alt1_anova$"Mean Sq"[4] / null1_anova$"Mean Sq"[2]
+  	p1 = pf(f1, alt1$df.residual, null1$df.residual, lower.tail=T)
+  	f2 = alt2_anova$"Mean Sq"[5] / null2_anova$"Mean Sq"[3]
+  	p2 = pf(f2, alt2$df.residual, null2$df.residual, lower.tail=T)
+    
+    pval_list[[comp]][["nodon"]] = c(pval_list[[comp]][["nodon"]], p1)
+    pval_list[[comp]][["wdon"]] = c(pval_list[[comp]][["wdon"]], p2)
+  }
+  return(pval_list)
+}
+ 
+numCores = 10 #larger values resulted in problems
+
+sub_dat = all_hep_cells[,all_hep_cells$zonation_pt<0.75]
+start_time <- Sys.time()
+pval_list = mclapply(hvg, processInput, mc.cores = numCores)
+names(pval_list) = hvg
+end_time <- Sys.time()
+end_time - start_time
+
+pval_df = data.frame(Reduce(rbind, pval_list))
+pval_df = apply(pval_df, 2, function(x) unlist(x))
+pval_nodon = pval_df[grepl("nodon", rownames(pval_df)),]
+pval_wdon = pval_df[grepl("wdon", rownames(pval_df)),]
+rownames(pval_nodon) = hvg
+rownames(pval_wdon) = hvg
+
+hep75_res_cond = list("pval_nodon" = pval_nodon,
+                      "pval_wdon" = pval_wdon,
+                      "fdr_nodon" = apply(pval_nodon, 2, function(x) p.adjust(x, method = "fdr")),
+                      "fdr_wdon" = apply(pval_wdon, 2, function(x) p.adjust(x, method = "fdr")))
+
+
+
+hep_g_diff_cond = apply(hep75_res_cond$fdr_nodon, 1, function(x) any(x<=0.05))
+
+hep_sig_fits = lapply(hep75_fits_qval, function(x) x$fits[,hep_g_diff_cond])
+gvar = apply(data.frame(lapply(hep_sig_fits, function(x) apply(x, 2, function(y) diff(range(y))>=0.05))), 1,
+             function(x) all(x))
+
+hep_sc_fits = lapply(hep_sig_fits, function(x) t(apply(x[,gvar], 2, 
+                     function(x) if(all(x==x[1])){rep(0, length(x))} else{scale(x)})))
+lapply(hep_sc_fits, dim)
+
+hcl = hclust(dist(Reduce(cbind, hep_sc_fits)), method = "ward.D2")
+
+
+cls = cutree(hcl, 8)
+
+plot_df_l = list()
+for(n in names(hep_sc_fits)){
+  plot_df = reshape2::melt(t(hep_sc_fits[[n]]))
+  plot_df = merge(plot_df, data.frame(cls), by.x = 2, by.y = 0)
+  plot_df = merge(plot_df, data.frame(hep_res_cond$fdr_nodon[,1]), by.x = 1, by.y = 0)
+  plot_df$cond = n
+  plot_df_l[[n]] = plot_df
+}
+plot_df = Reduce(rbind, plot_df_l)
+plot_df$cond = factor(plot_df$cond, levels = unique(plot_df$cond))
+ggplot(plot_df, aes(x = Var1, y = value, group = Var2))+
+  facet_grid(cond~cls)+
+  geom_line(alpha = 0.1, colour = "grey20")+
+  geom_hline(yintercept = 0, colour = "white")+
+  stat_summary(fun=mean, colour="red", geom="line", group=1)+
+  theme_bw()
+
+
+genes_cl = unique(plot_df[,c(1,4)])
+eg_all = clusterProfiler::bitr(as.character(genes_cl$Var2), fromType="SYMBOL", 
+                                 toType="ENTREZID", OrgDb="org.Hs.eg.db")
+got_list = list()
+for(i in unique(genes_cl$cls)){
+  eg = clusterProfiler::bitr(as.character(genes_cl$Var2)[genes_cl$cls==i], fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+  got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                  OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                  qvalueCutoff  = 0.05, 
+                                  pAdjustMethod = "BH", readable = T)
+  got_list[[as.character(i)]] = got@result
+}
+
+saveRDS(plot_df, file = "results/zonation_cond/hep_clustering_75_fits.RDS")
+saveRDS(got_list, file = "results/zonation_cond/hep_75_fits_clustering_go.RDS")
+saveRDS(hep75_res_cond, file = "results/zonation_cond/hep_75_cond_tests.RDS")
+saveRDS(hep75_fits_qval, file = "results/zonation_cond/hep_75_fits_qval.RDS")
+```
+
+
+
+```{r, fig.height=6, fig.width=10}
+hep_g_diff_cond = apply(hep_res_cond$fdr_nodon, 1, function(x) any(x<=0.05))
+
+hep_sig_fits = lapply(hep_fits_list, function(x) x[,hep_g_diff_cond])
+
+hep_sc_fits = lapply(hep_sig_fits, function(x) t(apply(x, 2, 
+                     function(x) if(all(x==x[1])){rep(0, length(x))} else{scale(x)})))
+
+hep_g_diff_cond = apply(hep75_res_cond$fdr_nodon, 1, function(x) any(x<=0.05))
+
+hep_sig_fits = lapply(hep75_fits_qval, function(x) x$fits[,hep_g_diff_cond])
+
+hep_sc_fits75 = lapply(hep_sig_fits, 
+                       function(x) t(apply(x, 2, function(x) if(all(x==x[1])){rep(0, length(x))} else{scale(x)})))
+
+cl_list = list()
+gr_list = list()
+for(n in names(hep_sc_fits)){
+  cl_list[[paste0(n, "_all")]] = hclust(dist(hep_sc_fits[[n]]), method = "ward.D2")
+  cl_list[[paste0(n, "_75")]] = hclust(dist(hep_sc_fits75[[n]]), method = "ward.D2")
+  
+  gr_list[[paste0(n, "_all")]] = cutree(cl_list[[paste0(n, "_all")]], 4)
+  gr_list[[paste0(n, "_75")]] = cutree(cl_list[[paste0(n, "_75")]], 4)
+}
+
+comb_cond = combn(names(hep_sc_fits), 2)
+for(i in 1:ncol(comb_cond)){
+  n1 = comb_cond[1,i]
+  n2 = comb_cond[2,i]
+  cl_list[[paste0(n1,"-",n2,"_all")]] = hclust(dist(hep_sc_fits[[n1]]-hep_sc_fits[[n2]]), method = "ward.D2")
+  cl_list[[paste0(n1,"-",n2,"_75")]] = hclust(dist(hep_sc_fits75[[n1]]-hep_sc_fits75[[n2]]), 
+                                              method = "ward.D2")
+  
+  gr_list[[paste0(n1,"-",n2,"_all")]] = cutree(cl_list[[paste0(n1,"-",n2,"_all")]], 4)
+  gr_list[[paste0(n1,"-",n2,"_75")]] = cutree(cl_list[[paste0(n1,"-",n2,"_75")]], 4)
+}
+
+hep_fits_all_list = c(hep_sc_fits, unname(hep_sc_fits75))
+names(hep_fits_all_list) = c(names(cl_list)[grepl("all", names(cl_list))][1:3],
+                             names(cl_list)[grepl("75", names(cl_list))][1:3])
+for(i in 1:ncol(comb_cond)){
+  n1 = comb_cond[1,i]
+  n2 = comb_cond[2,i]
+  hep_fits_all_list[[paste0(n1,"-",n2,"_all")]] = hep_sc_fits[[n1]]-hep_sc_fits[[n2]]
+  hep_fits_all_list[[paste0(n1,"-",n2,"_75")]] = hep_sc_fits75[[n1]]-hep_sc_fits75[[n2]]
+}
+
+plot_df_l = list()
+for(n in names(gr_list)){
+  plot_df = reshape2::melt(t(hep_fits_all_list[[n]]))
+  plot_df = merge(plot_df, data.frame(gr_list[[n]]), by.x = 2, by.y = 0)
+  plot_df$cond = n
+  colnames(plot_df)[4] = "cls"
+  plot_df_l[[n]] = plot_df
+  plt = ggplot(plot_df_l[[n]], aes(x = Var1, y = value, group = Var2))+
+    facet_wrap(~cls)+
+    geom_line(alpha = 0.1, colour = "grey20")+
+    geom_hline(yintercept = 0, colour = "white")+
+    labs(title = n)+
+    stat_summary(fun=mean, colour="red", geom="line", group=1)+
+    theme_bw()
+  print(plt)
+}
+
+anncl = list("healthy_all" = c("cl1" = "periportal", "cl2" = "pericentral", "cl3" = "portal bump", "cl4" = "central bump"), 
+             "healthy_75" = c("cl1" = "periportal", "cl2" = "pericentral", "cl3" = "non-midzone", "cl4" = "midzone"), 
+             "embolised_all" = c("cl1" = "periportal", "cl2" = "portal bump", "cl3" = "central bump", "cl4" = "non-central"), 
+             "embolised_75" = c("cl1" = "periportal", "cl2" = "pericentral", "cl3" = "pericentral", "cl4" = "non-midzone"), 
+             "regenerating_all" = c("cl1" = "non-central", "cl2" = "midzone", "cl3" = "central bump", "cl4" = "portal bump"), 
+             "regenerating_75" = c("cl1" = "periportal", "cl2" = "periportal", "cl3" = "pericentral", "cl4" = "non-midzone"),
+             "healthy-embolised_all" = c("cl1" = "Eportal_wiggle_Hcentral", "cl2" = "Hcentral", "cl3" = "Eportal_Hcentral", "cl4" = "Hportal"), 
+             "healthy-embolised_75" = c("cl1" = "constant", "cl2" = "Hmidzone", "cl3" = "Hportal", "cl4" = "Eportal"), 
+             "healthy-regenerating_all" = c("cl1" = "constant", "cl2" = "Hcentral", "cl3" = "Rmidzone", "cl4" = "Rportal_Hcentral"), 
+             "healthy-regenerating_75" = c("cl1" = "constant", "cl2" = "Rportal", "cl3" = "Hportal", "cl4" = "Hmidzone"),
+             "embolised-regenerating_all" = c("cl1" = "constant", "cl2" = "Eportal_Rcentral", "cl3" = "Eportal_wiggle_Rcentral", "cl4" = "Emidzone"), 
+             "embolised-regenerating_75" = c("cl1" = "constant", "cl2" = "Eportal", "cl3" = "Eportal", "cl4" = "Ecentral"))
+anncl = data.frame(anncl, check.names = F)
+
+gr_n_list = list()
+for(n in names(gr_list)){
+  gr_n_list[[n]] = anncl[,n][gr_list[[n]]]
+  names(gr_n_list[[n]]) = names(gr_list[[n]])
+}
+
+saveRDS(list("all" = data.frame(gr_n_list[c(1,3,5)]), "75" = data.frame(gr_n_list[c(2,4,6)]), 
+             "vs_all" = data.frame(gr_n_list[c(7,9,11)]), "vs_75" = data.frame(gr_n_list[c(8,10,12)])),
+        file = "results/zonation_cond/hep_indiv_cluster_comp.RDS")
+```
+
+
+
+
+```{r, fig.width=12, fig.height=4}
+g = "HAMP"
+par(mfrow = c(1,3))
+t1 = all_hep_cells$zonation_pt[all_hep_cells$Condition=="healthy"]
+exp1 = all_hep_cells@assays$SCT@data[g,all_hep_cells$Condition=="healthy"]
+plot(t1, exp1, pch = 20)
+
+t2 = all_hep_cells$zonation_pt[all_hep_cells$Condition=="embolised"]
+exp2 = all_hep_cells@assays$SCT@data[g,all_hep_cells$Condition=="embolised"]
+plot(t2, exp2, pch = 20)
+
+t3 = all_hep_cells$zonation_pt[all_hep_cells$Condition=="regenerating"]
+exp3 = all_hep_cells@assays$SCT@data[g,all_hep_cells$Condition=="regenerating"]
+plot(t3, exp3, pch = 20)
+
+par(mfrow = c(1,1))
+minmax = c(min(c(hep_fits_list$healthy[,g],hep_fits_list$regenerating[,g],hep_fits_list$embolised[,g]))-0.1,
+           max(c(hep_fits_list$healthy[,g],hep_fits_list$regenerating[,g],hep_fits_list$embolised[,g]))+0.1)
+plot(hep_fits_list$healthy[,g], ylim = minmax)
+points(hep_fits_list$regenerating[,g], col = "blue")
+points(hep_fits_list$embolised[,g], col = "red")
+```
+
+
+```{r}
+hep_g_diff_cond = apply(hep_res_cond$fdr_nodon, 1, function(x) any(x<=0.05))
+
+hep_sig_fits = lapply(hep_fits_list, function(x) x[,hep_g_diff_cond])
+
+hep_sc_fits = lapply(hep_sig_fits, function(x) t(apply(x, 2, 
+                     function(x) if(all(x==x[1])){rep(0, length(x))} else{scale(x)})))
+
+hep_dtw_dists = lapply(hep_sc_fits, dtw::dtwDist, window.type = "itakura") # this takes many hours!!!
+saveRDS(hep_dtw_dists, file = "results/zonation_cond/hep_dtw_dists_DE.RDS")
+
+hcl = hclust(dist(hep_sc_fits$regenerating), method = "ward.D2")
+hcl = hclust(dist(Reduce(cbind, hep_sc_fits)), method = "ward.D2")
+
+
+cls = cutree(hcl, 4)
+
+plot_df_l = list()
+for(n in names(hep_sc_fits)){
+  plot_df = reshape2::melt(t(hep_sc_fits[[n]]))
+  plot_df = merge(plot_df, data.frame(cls), by.x = 2, by.y = 0)
+  plot_df = merge(plot_df, data.frame(hep_res_cond$fdr_nodon[,1]), by.x = 1, by.y = 0)
+  plot_df$cond = n
+  plot_df_l[[n]] = plot_df
+}
+plot_df = Reduce(rbind, plot_df_l)
+plot_df$cond = factor(plot_df$cond, levels = unique(plot_df$cond))
+ggplot(plot_df, aes(x = Var1, y = value, group = Var2))+
+  facet_grid(cond~cls)+
+  geom_line(alpha = 0.1, colour = "grey20")+
+  geom_hline(yintercept = 0, colour = "white")+
+  stat_summary(fun=mean, colour="red", geom="line", group=1)+
+  theme_bw()
+
+
+View(unique(plot_df[,c(1,4,5)]))
+
+eg_all = clusterProfiler::bitr(as.character(rownames(hep_res_cond$fdr_nodon)), 
+                               fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+# convert gene IDs
+eg = clusterProfiler::bitr(unique(plot_df$Var2[plot_df$cls==3]), fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+
+# enrichment
+got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                OrgDb = org.Hs.eg.db, ont = "BP",
+                                pvalueCutoff  = 0.01, qvalueCutoff  = 0.05, 
+                                pAdjustMethod = "BH", readable = T)
+
+all_terms = as.data.frame(got@result)
+all_terms = all_terms[all_terms$qvalue<=0.05,]
+```
+
+
+```{r}
+# get HVG from all conditions
+hvg = unique(c(hep_cells[["healthy"]]@assays$SCT@var.features,
+               hep_cells[["embolised"]]@assays$SCT@var.features,
+               hep_cells[["regenerating"]]@assays$SCT@var.features))
+
+exp_g = list("healthy" = Matrix::rowSums(hep_cells[["healthy"]]@assays$SCT@data>0)>=30,
+             "embolised" = Matrix::rowSums(hep_cells[["embolised"]]@assays$SCT@data>0)>=30,
+             "regenerating" = Matrix::rowSums(hep_cells[["regenerating"]]@assays$SCT@data>0)>=30)
+
+hvg = hvg[hvg %in% rownames(hep_cells[["healthy"]]@assays$SCT@data)[exp_g$healthy] &
+            hvg %in% rownames(hep_cells[["embolised"]]@assays$SCT@data)[exp_g$embolised] &
+            hvg %in% rownames(hep_cells[["regenerating"]]@assays$SCT@data)[exp_g$regenerating]]
+
+# remove HVG that are markers for other cell types
+hvg = hvg[!(hvg %in% unique(unlist(top_genes$cell_type[!grepl("Hepat", names(top_genes$cell_type))])))]
+
+
+library(parallel)
+processInput <- function(g) {
+  d = data.frame(z=all_hep_cells@assays$SCT@data[g,], t=all_hep_cells$zonation_pt, 
+                 cond=all_hep_cells$Condition, don = all_hep_cells$Donor)
+  d$cond = as.character(d$cond)
+  
+  pval_list = list("all" = list("nodon" = c(), "wdon" = c()), "h_v_e" = list("nodon" = c(), "wdon" = c()),
+                 "h_v_r" = list("nodon" = c(), "wdon" = c()), "e_v_r" = list("nodon" = c(), "wdon" = c()),
+                 "hr_v_e" = list("nodon" = c(), "wdon" = c()), "h_v_er" = list("nodon" = c(), "wdon" = c()),
+                 "he_v_r" = list("nodon" = c(), "wdon" = c()))
+  
+  for(comp in c("all", "h_v_e", "h_v_r", "e_v_r", "hr_v_e", "h_v_er", "he_v_r")){
+    sub_d = d
+    if(comp=="h_v_e"){
+      sub_d = sub_d[sub_d$cond!="regenerating",]
+    } else if(comp=="h_v_r"){
+      sub_d = sub_d[sub_d$cond!="embolised",]
+    } else if(comp=="e_v_r"){
+      sub_d = sub_d[sub_d$cond!="healthy",]
+      
+    } else if(comp=="hr_v_e"){
+      sub_d$cond[sub_d$cond!="embolised"] = "not_embolised"
+    } else if(comp=="h_v_er"){
+      sub_d$cond[sub_d$cond!="healthy"] = "not_healthy"
+    } else if(comp=="he_v_r"){
+      sub_d$cond[sub_d$cond!="regenerating"] = "not_regenerating"
+    }
+    
+    null1 = suppressMessages(gam(z ~ ns(t, df = 3), data=sub_d))
+    null2 = suppressMessages(gam(z ~ ns(t, df = 3) + don, data=sub_d))
+    alt1 = suppressMessages(gam(z ~ ns(t, df = 3) * cond, data=sub_d))
+    alt2 = suppressMessages(gam(z ~ ns(t, df = 3) * cond + don, data=sub_d))
+    
+    null1_anova = summary(null1)$parametric.anova
+    null2_anova = summary(null2)$parametric.anova
+    alt1_anova = summary(alt1)$parametric.anova
+    alt2_anova = summary(alt2)$parametric.anova
+    
+    f1 = alt1_anova$"Mean Sq"[4] / null1_anova$"Mean Sq"[2]
+  	p1 = pf(f1, alt1$df.residual, null1$df.residual, lower.tail=T)
+  	f2 = alt2_anova$"Mean Sq"[5] / null2_anova$"Mean Sq"[3]
+  	p2 = pf(f2, alt2$df.residual, null2$df.residual, lower.tail=T)
+    
+    pval_list[[comp]][["nodon"]] = c(pval_list[[comp]][["nodon"]], p1)
+    pval_list[[comp]][["wdon"]] = c(pval_list[[comp]][["wdon"]], p2)
+  }
+  return(pval_list)
+}
+ 
+numCores = 8 #larger values resulted in problems
+
+start_time <- Sys.time()
+pval_list = mclapply(hvg, processInput, mc.cores = numCores)
+names(pval_list) = hvg
+end_time <- Sys.time()
+end_time - start_time
+
+pval_df = data.frame(Reduce(rbind, pval_list))
+pval_df = apply(pval_df, 2, function(x) unlist(x))
+pval_nodon = pval_df[grepl("nodon", rownames(pval_df)),]
+pval_wdon = pval_df[grepl("wdon", rownames(pval_df)),]
+rownames(pval_nodon) = hvg
+rownames(pval_wdon) = hvg
+
+hep_res_cond = list("pval_nodon" = pval_nodon,
+                    "pval_wdon" = pval_wdon,
+                    "fdr_nodon" = apply(pval_nodon, 2, function(x) p.adjust(x, method = "fdr")),
+                    "fdr_wdon" = apply(pval_wdon, 2, function(x) p.adjust(x, method = "fdr")))
+
+saveRDS(hep_res_cond, file = "results/zonation_cond/hep_res_cond.RDS")
+```
+
+
+
+
+
+
+```{r}
+# get HVG from all conditions
+hvg = unique(c(end_cells[["healthy"]]@assays$SCT@var.features,
+               end_cells[["embolised"]]@assays$SCT@var.features,
+               end_cells[["regenerating"]]@assays$SCT@var.features))
+
+exp_g = list("healthy" = Matrix::rowSums(end_cells[["healthy"]]@assays$SCT@data>0)>=30,
+             "embolised" = Matrix::rowSums(end_cells[["embolised"]]@assays$SCT@data>0)>=30,
+             "regenerating" = Matrix::rowSums(end_cells[["regenerating"]]@assays$SCT@data>0)>=30)
+
+hvg = hvg[hvg %in% rownames(end_cells[["healthy"]]@assays$SCT@data)[exp_g$healthy] &
+            hvg %in% rownames(end_cells[["embolised"]]@assays$SCT@data)[exp_g$embolised] &
+            hvg %in% rownames(end_cells[["regenerating"]]@assays$SCT@data)[exp_g$regenerating]]
+
+# remove HVG that are markers for other cell types
+hvg = hvg[!(hvg %in% unique(unlist(top_genes$cell_type[!grepl("LSEC ", names(top_genes$cell_type))])))]
+
+
+fittingFunc = function(g){
+  t = sub_dat$zonation_pt
+  gene_fit_p = c()
+  gene_fit_vals = data.frame(row.names = 1:100)
+  z = sub_dat@assays$SCT@data[g,]
+    
+  d = data.frame(z=z, t=t)
+  tmp = suppressMessages(gam(z ~ ns(t, df = 3), data=d))
+  
+  # bins for model fitting
+  bb = seq(min(t), max(t), length.out = 100)
+  gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                               newdata = data.frame(t = bb)))
+  p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+  gene_fit_p = c(gene_fit_p, p)
+  names(gene_fit_p)[length(gene_fit_p)] = g
+  
+  return(list("fits" = gene_fit_vals, "pval" = gene_fit_p))
+}
+
+numCores = 12 #larger values resulted in problems
+start_time <- Sys.time()
+cond_fit75_list = list()
+for(cond in names(end_cells)){
+  print(cond)
+  
+  sub_dat = end_cells[[cond]]
+  # Fit GAM for each gene using pseudotime as independent variable.
+  cond_fit75_list[[cond]] = mclapply(hvg, fittingFunc, mc.cores = numCores)
+}
+end75_fits_qval = list()
+for(cond in names(cond_fit75_list)){
+  fits_df = Reduce(cbind, lapply(cond_fit75_list[[cond]], function(x) x$fits))
+  
+  pval_list = unlist(lapply(cond_fit75_list[[cond]], function(x) x$pval))
+  names(pval_list) = hvg
+  
+  pval_df = data.frame(pval_list)
+  
+  end75_fits_qval[[cond]] = list("fits" = fits_df, "pval" = pval_df,
+                                 "fdr" = apply(pval_df, 2, function(x) p.adjust(x, method = "fdr")))
+}
+end_time <- Sys.time()
+end_time - start_time
+
+
+processInput <- function(g) {
+  d = data.frame(z=sub_dat@assays$SCT@data[g,], t=sub_dat$zonation_pt, 
+                 cond=sub_dat$Condition, don = sub_dat$Donor)
+  d$cond = as.character(d$cond)
+  
+  pval_list = list("all" = list("nodon" = c(), "wdon" = c()), "h_v_e" = list("nodon" = c(), "wdon" = c()),
+                 "h_v_r" = list("nodon" = c(), "wdon" = c()), "e_v_r" = list("nodon" = c(), "wdon" = c()),
+                 "hr_v_e" = list("nodon" = c(), "wdon" = c()), "h_v_er" = list("nodon" = c(), "wdon" = c()),
+                 "he_v_r" = list("nodon" = c(), "wdon" = c()))
+  
+  for(comp in c("all", "h_v_e", "h_v_r", "e_v_r", "hr_v_e", "h_v_er", "he_v_r")){
+    sub_d = d
+    if(comp=="h_v_e"){
+      sub_d = sub_d[sub_d$cond!="regenerating",]
+    } else if(comp=="h_v_r"){
+      sub_d = sub_d[sub_d$cond!="embolised",]
+    } else if(comp=="e_v_r"){
+      sub_d = sub_d[sub_d$cond!="healthy",]
+      
+    } else if(comp=="hr_v_e"){
+      sub_d$cond[sub_d$cond!="embolised"] = "not_embolised"
+    } else if(comp=="h_v_er"){
+      sub_d$cond[sub_d$cond!="healthy"] = "not_healthy"
+    } else if(comp=="he_v_r"){
+      sub_d$cond[sub_d$cond!="regenerating"] = "not_regenerating"
+    }
+    
+    null1 = suppressMessages(gam(z ~ ns(t, df = 3), data=sub_d))
+    null2 = suppressMessages(gam(z ~ ns(t, df = 3) + don, data=sub_d))
+    alt1 = suppressMessages(gam(z ~ ns(t, df = 3) * cond, data=sub_d))
+    alt2 = suppressMessages(gam(z ~ ns(t, df = 3) * cond + don, data=sub_d))
+    
+    null1_anova = summary(null1)$parametric.anova
+    null2_anova = summary(null2)$parametric.anova
+    alt1_anova = summary(alt1)$parametric.anova
+    alt2_anova = summary(alt2)$parametric.anova
+    
+    f1 = alt1_anova$"Mean Sq"[4] / null1_anova$"Mean Sq"[2]
+  	p1 = pf(f1, alt1$df.residual, null1$df.residual, lower.tail=T)
+  	f2 = alt2_anova$"Mean Sq"[5] / null2_anova$"Mean Sq"[3]
+  	p2 = pf(f2, alt2$df.residual, null2$df.residual, lower.tail=T)
+    
+    pval_list[[comp]][["nodon"]] = c(pval_list[[comp]][["nodon"]], p1)
+    pval_list[[comp]][["wdon"]] = c(pval_list[[comp]][["wdon"]], p2)
+  }
+  return(pval_list)
+}
+ 
+numCores = 10 #larger values resulted in problems
+
+sub_dat = all_end_cells
+start_time <- Sys.time()
+pval_list = mclapply(hvg, processInput, mc.cores = numCores)
+names(pval_list) = hvg
+end_time <- Sys.time()
+end_time - start_time
+
+pval_df = data.frame(Reduce(rbind, pval_list))
+pval_df = apply(pval_df, 2, function(x) unlist(x))
+pval_nodon = pval_df[grepl("nodon", rownames(pval_df)),]
+pval_wdon = pval_df[grepl("wdon", rownames(pval_df)),]
+rownames(pval_nodon) = hvg
+rownames(pval_wdon) = hvg
+
+end75_res_cond = list("pval_nodon" = pval_nodon,
+                      "pval_wdon" = pval_wdon,
+                      "fdr_nodon" = apply(pval_nodon, 2, function(x) p.adjust(x, method = "fdr")),
+                      "fdr_wdon" = apply(pval_wdon, 2, function(x) p.adjust(x, method = "fdr")))
+
+
+
+end_g_diff_cond = apply(end75_res_cond$fdr_nodon, 1, function(x) any(x<=0.05))
+
+end_sig_fits = lapply(end75_fits_qval, function(x) x$fits[,end_g_diff_cond])
+gvar = apply(data.frame(lapply(end_sig_fits, function(x) apply(x, 2, function(y) diff(range(y))>=0.05))), 1,
+             function(x) all(x))
+
+end_sc_fits = lapply(end_sig_fits, function(x) t(apply(x[,gvar], 2, 
+                     function(x) if(all(x==x[1])){rep(0, length(x))} else{scale(x)})))
+lapply(end_sc_fits, dim)
+
+hcl = hclust(dist(Reduce(cbind, end_sc_fits)), method = "ward.D2")
+
+
+cls = cutree(hcl, 4)
+
+plot_df_l = list()
+for(n in names(end_sc_fits)){
+  plot_df = reshape2::melt(t(end_sc_fits[[n]]))
+  plot_df = merge(plot_df, data.frame(cls), by.x = 2, by.y = 0)
+  plot_df = merge(plot_df, data.frame(end_res_cond$fdr_nodon[,1]), by.x = 1, by.y = 0)
+  plot_df$cond = n
+  plot_df_l[[n]] = plot_df
+}
+plot_df = Reduce(rbind, plot_df_l)
+plot_df$cond = factor(plot_df$cond, levels = unique(plot_df$cond))
+ggplot(plot_df, aes(x = Var1, y = value, group = Var2))+
+  facet_grid(cond~cls)+
+  geom_line(alpha = 0.1, colour = "grey20")+
+  stat_summary(fun=mean, colour="red", geom="line", group=1)+
+  geom_hline(yintercept = 0, colour = "white")+
+  theme_bw()
+
+saveRDS(plot_df, file = "results/zonation_cond/end_clustering_all_fits.RDS")
+saveRDS(end75_res_cond, file = "results/zonation_cond/end_all_cond_tests.RDS")
+saveRDS(end75_fits_qval, file = "results/zonation_cond/end_all_fits_qval.RDS")
+
+
+genes_cl = unique(plot_df[,c(1,4)])
+eg_all = clusterProfiler::bitr(as.character(genes_cl$Var2), fromType="SYMBOL", 
+                                 toType="ENTREZID", OrgDb="org.Hs.eg.db")
+got_list = list()
+for(i in unique(genes_cl$cls)){
+  eg = clusterProfiler::bitr(as.character(genes_cl$Var2)[genes_cl$cls==i], fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+  got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                  OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                  qvalueCutoff  = 0.05, 
+                                  pAdjustMethod = "BH", readable = T)
+  got_list[[as.character(i)]] = got@result
+}
+```
+
+
+
+Find varying genes - using all cells along the ranked pseudotime
+
+```{r}
+# get HVG from all conditions
+hvg = unique(c(end_cells[["healthy"]]@assays$SCT@var.features,
+               end_cells[["embolised"]]@assays$SCT@var.features,
+               end_cells[["regenerating"]]@assays$SCT@var.features))
+exp_g = list("healthy" = Matrix::rowSums(end_cells[["healthy"]]@assays$SCT@data>0)>=30,
+             "embolised" = Matrix::rowSums(end_cells[["embolised"]]@assays$SCT@data>0)>=30,
+             "regenerating" = Matrix::rowSums(end_cells[["regenerating"]]@assays$SCT@data>0)>=30)
+
+hvg = hvg[hvg %in% rownames(end_cells[["healthy"]]@assays$SCT@data)[exp_g$healthy] &
+            hvg %in% rownames(end_cells[["embolised"]]@assays$SCT@data)[exp_g$embolised] &
+            hvg %in% rownames(end_cells[["regenerating"]]@assays$SCT@data)[exp_g$regenerating]]
+
+# remove HVG that are markers for other cell types
+hvg = hvg[!(hvg %in% unique(unlist(top_genes$cell_type[!grepl("LSEC ", names(top_genes$cell_type))])))]
+
+
+processInput <- function(g) {
+  d = data.frame(z=all_end_cells@assays$SCT@data[g,], t=all_end_cells$zonation_pt, 
+                 cond=all_end_cells$Condition, don = all_end_cells$Donor)
+  d$cond = as.character(d$cond)
+  
+  pval_list = list("all" = list("nodon" = c(), "wdon" = c()), "h_v_e" = list("nodon" = c(), "wdon" = c()),
+                 "h_v_r" = list("nodon" = c(), "wdon" = c()), "e_v_r" = list("nodon" = c(), "wdon" = c()),
+                 "hr_v_e" = list("nodon" = c(), "wdon" = c()), "h_v_er" = list("nodon" = c(), "wdon" = c()),
+                 "he_v_r" = list("nodon" = c(), "wdon" = c()))
+  
+  for(comp in c("all", "h_v_e", "h_v_r", "e_v_r", "hr_v_e", "h_v_er", "he_v_r")){
+    sub_d = d
+    if(comp=="h_v_e"){
+      sub_d = sub_d[sub_d$cond!="regenerating",]
+    } else if(comp=="h_v_r"){
+      sub_d = sub_d[sub_d$cond!="embolised",]
+    } else if(comp=="e_v_r"){
+      sub_d = sub_d[sub_d$cond!="healthy",]
+      
+    } else if(comp=="hr_v_e"){
+      sub_d$cond[sub_d$cond!="embolised"] = "not_embolised"
+    } else if(comp=="h_v_er"){
+      sub_d$cond[sub_d$cond!="healthy"] = "not_healthy"
+    } else if(comp=="he_v_r"){
+      sub_d$cond[sub_d$cond!="regenerating"] = "not_regenerating"
+    }
+    
+    null1 = suppressMessages(gam(z ~ ns(t, df = 3), data=sub_d))
+    null2 = suppressMessages(gam(z ~ ns(t, df = 3) + don, data=sub_d))
+    alt1 = suppressMessages(gam(z ~ ns(t, df = 3) * cond, data=sub_d))
+    alt2 = suppressMessages(gam(z ~ ns(t, df = 3) * cond + don, data=sub_d))
+    
+    null1_anova = summary(null1)$parametric.anova
+    null2_anova = summary(null2)$parametric.anova
+    alt1_anova = summary(alt1)$parametric.anova
+    alt2_anova = summary(alt2)$parametric.anova
+    
+    f1 = alt1_anova$"Mean Sq"[4] / null1_anova$"Mean Sq"[2]
+  	p1 = pf(f1, alt1$df.residual, null1$df.residual, lower.tail=T)
+  	f2 = alt2_anova$"Mean Sq"[5] / null2_anova$"Mean Sq"[3]
+  	p2 = pf(f2, alt2$df.residual, null2$df.residual, lower.tail=T)
+    
+    pval_list[[comp]][["nodon"]] = c(pval_list[[comp]][["nodon"]], p1)
+    pval_list[[comp]][["wdon"]] = c(pval_list[[comp]][["wdon"]], p2)
+  }
+  return(pval_list)
+}
+ 
+numCores = 30
+
+start_time <- Sys.time()
+pval_list = mclapply(hvg, processInput, mc.cores = numCores)
+end_time <- Sys.time()
+end_time - start_time
+
+pval_df = data.frame(Reduce(rbind, pval_list))
+pval_df = apply(pval_df, 2, function(x) unlist(x))
+pval_nodon = pval_df[grepl("nodon", rownames(pval_df)),]
+pval_wdon = pval_df[grepl("wdon", rownames(pval_df)),]
+rownames(pval_nodon) = hvg
+rownames(pval_wdon) = hvg
+
+end_res_cond = list("pval_nodon" = pval_nodon,
+                    "pval_wdon" = pval_wdon,
+                    "fdr_nodon" = apply(pval_nodon, 2, function(x) p.adjust(x, method = "fdr")),
+                    "fdr_wdon" = apply(pval_wdon, 2, function(x) p.adjust(x, method = "fdr")))
+
+xxx = apply(end_res_cond$fdr_nodon, 1, function(x) any(x<=0.05))
+sum(xxx)
+```
+
+
+
+```{r, fig.width=12, fig.height=4}
+g = "SAA2"
+par(mfrow = c(1,3))
+t1 = all_end_cells$zonation_pt[all_end_cells$Condition=="healthy"]
+exp1 = all_end_cells@assays$SCT@data[g,all_end_cells$Condition=="healthy"]
+plot(t1, exp1, pch = 20)
+
+t2 = all_end_cells$zonation_pt[all_end_cells$Condition=="embolised"]
+exp2 = all_end_cells@assays$SCT@data[g,all_end_cells$Condition=="embolised"]
+plot(t2, exp2, pch = 20)
+
+t3 = all_end_cells$zonation_pt[all_end_cells$Condition=="regenerating"]
+exp3 = all_end_cells@assays$SCT@data[g,all_end_cells$Condition=="regenerating"]
+plot(t3, exp3, pch = 20)
+
+par(mfrow = c(1,1))
+minmax = c(min(c(end_fits_list$healthy[,g],end_fits_list$regenerating[,g],end_fits_list$embolised[,g]))-0.1,
+           max(c(end_fits_list$healthy[,g],end_fits_list$regenerating[,g],end_fits_list$embolised[,g]))+0.1)
+plot(end_fits_list$healthy[,g], ylim = minmax)
+points(end_fits_list$regenerating[,g], col = "blue")
+points(end_fits_list$embolised[,g], col = "red")
+```
+
+```{r}
+end_g_diff_cond = apply(end_res_cond$fdr_nodon, 1, function(x) any(x<=0.05))
+
+end_sig_fits = lapply(end_fits_list, function(x) x[,end_g_diff_cond])
+
+end_sc_fits = lapply(end_sig_fits, function(x) t(apply(x, 2, 
+                     function(x) if(all(x==x[1])){rep(0, length(x))} else{scale(x)})))
+
+end_dtw_dists = lapply(end_sc_fits, dtw::dtwDist, window.type = "itakura")
+saveRDS(end_dtw_dists, file = "results/zonation_cond/end_dtw_dists_DE.RDS")
+
+hcl = hclust(as.dist(end_dtw_dists$healthy), method = "ward.D")
+
+hcl = hclust(dist(end_sc_fits$regenerating), method = "ward.D2")
+hcl = hclust(dist(Reduce(cbind, end_sc_fits)), method = "ward.D2")
+
+
+cls = cutree(hcl, 4)
+
+plot_df_l = list()
+for(n in names(hep_sc_fits)){
+  plot_df = reshape2::melt(t(end_sc_fits[[n]]))
+  plot_df = merge(plot_df, data.frame(cls), by.x = 2, by.y = 0)
+  plot_df = merge(plot_df, data.frame(hep_res_cond$fdr_nodon[,1]), by.x = 1, by.y = 0)
+  plot_df$cond = n
+  plot_df_l[[n]] = plot_df
+}
+plot_df = Reduce(rbind, plot_df_l)
+plot_df$cond = factor(plot_df$cond, levels = unique(plot_df$cond))
+ggplot(plot_df, aes(x = Var1, y = value, group = Var2))+
+  facet_grid(cond~cls)+
+  geom_line(alpha = 0.1, colour = "grey20")+
+  stat_summary(fun=mean, colour="red", geom="line", group=1)+
+  geom_hline(yintercept = 0, colour = "white")+
+  theme_bw()
+```
+
+
+
+
+
+
+Find varying genes - using all cells along the ranked pseudotime
+
+```{r}
+# get HVG from all conditions
+hvg = unique(c(end_cells[["healthy"]]@assays$SCT@var.features,
+               end_cells[["embolised"]]@assays$SCT@var.features,
+               end_cells[["regenerating"]]@assays$SCT@var.features))
+hvg = hvg[hvg %in% rownames(end_cells[["healthy"]]@assays$SCT@data) &
+            hvg %in% rownames(end_cells[["embolised"]]@assays$SCT@data) &
+            hvg %in% rownames(end_cells[["regenerating"]]@assays$SCT@data)]
+
+# remove HVG that are markers for other cell types
+hvg = hvg[!(hvg %in% unique(unlist(top_genes$cell_type[!grepl("LSEC ", names(top_genes$cell_type))])))]
+
+f1_v = c()
+f2_v = c()
+p1_v = c()
+p2_v = c()
+for(i in 1:length(hvg)){
+  g = hvg[i]
+
+  d = data.frame(z=all_end_cells@assays$SCT@data[g,], t=all_end_cells$zonation_pt, 
+                 cond=all_end_cells$Condition, don = all_end_cells$Donor)
+  null1 = suppressMessages(gam(z ~ ns(t, df = 4), data=d))
+  null2 = suppressMessages(gam(z ~ ns(t, df = 4) + don, data=d))
+  alt1 = suppressMessages(gam(z ~ ns(t, df = 4) * cond, data=d))
+  alt2 = suppressMessages(gam(z ~ ns(t, df = 4) * cond + don, data=d))
+  
+  null1_anova = summary(null1)$parametric.anova
+  null2_anova = summary(null2)$parametric.anova
+  alt1_anova = summary(alt1)$parametric.anova
+  alt2_anova = summary(alt2)$parametric.anova
+  
+  f1 = alt1_anova$"Mean Sq"[4] / null1_anova$"Mean Sq"[2]
+	p1 = pf(f1, alt1$df.residual, null1$df.residual, lower.tail=T)
+	f2 = alt2_anova$"Mean Sq"[5] / null2_anova$"Mean Sq"[3]
+	p2 = pf(f2, alt2$df.residual, null2$df.residual, lower.tail=T)
+  
+  f1_v = c(f1_v, f1)
+  f2_v = c(f2_v, f2)
+  p1_v = c(p1_v, p1)
+  p2_v = c(p2_v, p2)
+}
+
+fdr1 = p.adjust(p1_v, method = "fdr")
+fdr2 = p.adjust(p2_v, method = "fdr")
+
+df_sigs = data.frame(hvg, p1_v, fdr1, p2_v, fdr2)
+```
+
+Find varying genes - using each donor as a replicate and calculating the average expression for each of 100 bins
+
+```{r}
+# get HVG from all conditions
+hvg = unique(c(end_cells[["healthy"]]@assays$SCT@var.features,
+               end_cells[["embolised"]]@assays$SCT@var.features,
+               end_cells[["regenerating"]]@assays$SCT@var.features))
+hvg = hvg[hvg %in% rownames(end_cells[["healthy"]]@assays$SCT@data) &
+            hvg %in% rownames(end_cells[["embolised"]]@assays$SCT@data) &
+            hvg %in% rownames(end_cells[["regenerating"]]@assays$SCT@data)]
+
+# remove HVG that are markers for other cell types
+hvg = hvg[!(hvg %in% unique(unlist(top_genes$cell_type[!grepl("LSEC ", names(top_genes$cell_type))])))]
+
+meta_df = data.frame("pt" = all_end_cells$zonation_pt,
+                     "donors" = all_end_cells$Donor,
+                     "cond" = all_end_cells$Condition)
+meta_df$bins = cut(meta_df$pt, 100)
+
+set.seed(1)
+
+# Fit GAM for each gene
+t = 1:100
+f1_v_b = c()
+f2_v_b = c()
+p1_v_b = c()
+p2_v_b = c()
+for(i in 1:length(hvg)){
+  g = hvg[i]
+  z = all_end_cells@assays$SCT@data[g,]
+  
+  d = aggregate(z~bins+donors+cond, data = cbind(meta_df, z), FUN="mean")
+  cc = data.frame(table(meta_df$bins, 
+                        as.factor(paste0(as.character(meta_df$cond), "_", as.character(meta_df$donors)))))
+  cc = cc[cc$Freq==0,]
+  cc$cond = unlist(lapply(strsplit(as.character(cc$Var2), "_"), function(x) x[1]))
+  cc$donors = unlist(lapply(strsplit(as.character(cc$Var2), "_"), function(x) x[2]))
+  cc = cc[,c(1,5,4,3)]
+  colnames(cc) = colnames(d)
+  d = rbind(d, cc)
+  d = d[order(d$bins, d$cond, d$donors, decreasing = F),]
+  d$t = rep(t, each = length(unique(paste0(d$donors, d$cond))))
+  
+  null1 = suppressMessages(gam(z ~ ns(t, df = 3), data=d))
+  null2 = suppressMessages(gam(z ~ ns(t, df = 3) + donors, data=d))
+  alt1 = suppressMessages(gam(z ~ ns(t, df = 3) * cond, data=d))
+  alt2 = suppressMessages(gam(z ~ ns(t, df = 3) * cond + donors, data=d))
+  
+  null1_anova = summary(null1)$parametric.anova
+  null2_anova = summary(null2)$parametric.anova
+  alt1_anova = summary(alt1)$parametric.anova
+  alt2_anova = summary(alt2)$parametric.anova
+  
+  f1 = alt1_anova$"Mean Sq"[4] / null1_anova$"Mean Sq"[2]
+	p1 = pf(f1, alt1$df.residual, null1$df.residual, lower.tail=T)
+	f2 = alt2_anova$"Mean Sq"[5] / null2_anova$"Mean Sq"[3]
+	p2 = pf(f2, alt2$df.residual, null2$df.residual, lower.tail=T)
+  
+  f1_v_b = c(f1_v_b, f1)
+  f2_v_b = c(f2_v_b, f2)
+  p1_v_b = c(p1_v_b, p1)
+  p2_v_b = c(p2_v_b, p2)
+  
+}
+
+fdr1_b = p.adjust(p1_v_b, method = "fdr")
+fdr2_b = p.adjust(p2_v_b, method = "fdr")
+
+df_sigs_b = data.frame(hvg, p1_v_b, fdr1_b, p2_v_b, fdr2_b)
+```
+
+
+
+## Correlations
 Load fits
 
 ```{r}

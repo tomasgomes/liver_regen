@@ -171,6 +171,8 @@ for(n in names(cell_type_mk)){
   }
 }
 names(top_genes) = c("cell_type","major_ct")
+
+saveRDS(top_genes, file = "results/cond_effect/top_genes_mk.RDS")
 ```
 
 Save allcells_css again with the new annotations
