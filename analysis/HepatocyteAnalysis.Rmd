@@ -1,0 +1,1201 @@
+---
+title: "Zonation analysis V3"
+output: html_notebook
+---
+
+
+
+# General Setup
+Setup chunk
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 8)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_knit$get("root.dir")
+```
+
+Setup reticulate
+
+```{r}
+library(reticulate)
+knitr::knit_engines$set(python = reticulate::eng_python)
+py_available(initialize = FALSE)
+use_python(Sys.which("python"))
+py_config()
+```
+
+Load libraries
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(ggridges)
+library(dplyr)
+library(destiny)
+library(fdrtool)
+library(gam)
+library(gamclass)
+library(dtw)
+library(data.table)
+library(clusterProfiler)
+library(parallel)
+```
+
+Functions
+
+```{r}
+dsSeurat = function(srat, variable, assay = "SCT", numis = "nCount_SCT", seed = 1){
+  # input Seurat object and variable to do the downsample based on
+  # return Seurat object
+  
+  set.seed(seed)
+  
+  # downsample taking the minimum median of UMI counts as a reference
+  fact = srat@meta.data[,numis]/min(tapply(srat@meta.data[,numis], srat@meta.data[,variable], median))
+  fact = ifelse(fact<=1, 0, log2(fact))
+  thinned_counts = seqgendiff::thin_lib(as.matrix(srat@assays[[assay]]@counts), 
+                                        thinlog2 = fact, relative = T)
+  rownames(thinned_counts$mat) = rownames(srat@assays[[assay]]@data)
+  colnames(thinned_counts$mat) = colnames(srat@assays[[assay]]@data)
+  srat@assays$SCT@counts = Matrix::Matrix(thinned_counts$mat, sparse = T)
+  srat@assays$SCT@data = log1p(srat@assays[[assay]]@counts)
+  
+  return(srat)
+}
+
+CVgam = function (formula, data, nfold = 10, debug.level = 0, method = "glm.fit", 
+    printit = TRUE, cvparts = NULL, seed = 29){
+  # modified from the `gamclass` package to use gam::gam
+    if (is.null(cvparts)) {
+        set.seed(seed)
+        cvparts <- sample(1:nfold, nrow(data), replace = TRUE)
+    }
+    folds <- unique(cvparts)
+    khat <- hat <- numeric(nrow(data))
+    scale.gam <- summary(gam::gam(formula, data = data, method = method,
+                                  family = mgcv::betar(link = "logit", eps = 0.00001)))$scale
+    for (i in folds) {
+        trainrows <- cvparts != i
+        testrows <- cvparts == i
+        elev.gam <- gam::gam(formula, data = data[trainrows, ], 
+                             method = method, 
+                             family = mgcv::betar(link = "logit", eps = 0.00001))
+        hat[testrows] <- predict(elev.gam, newdata = data[testrows,], select = T, type = "response")
+        res <- residuals(elev.gam)
+    }
+    y <- eval(formula[[2]], envir = as.data.frame(data))
+    res <- y - hat
+    cvscale <- sum(res^2)/length(res)
+    prntvec <- c(GAMscale = scale.gam, `CV-mse-GAM ` = cvscale)
+    if (printit) 
+        print(round(prntvec, 4))
+    invisible(list(fitted = hat, resid = res, cvscale = cvscale, 
+        scale.gam = scale.gam))
+}
+
+breakStr = function(s, n = 20) {return(gsub(paste0('(.{1,',as.character(n),'})(\\s|$)'), '\\1\n', s))}
+```
+
+
+
+# Load data
+Load data (from all cells)
+
+```{r}
+allcells_css = readRDS(file = "data/processed/allcells_css.RDS")
+```
+
+
+
+# Hepatocytes
+Subset and process each condition
+
+```{r}
+hep_cells = list()
+for(cond in unique(allcells_css@meta.data$Condition)){
+  cat(cond)
+  hep_cells[[cond]] = allcells_css[,allcells_css@meta.data$allcells_major=="Hepatocytes" &
+                                     allcells_css@meta.data$Condition==cond]
+  print(dim(hep_cells[[cond]]))
+  hep_cells[[cond]] = suppressWarnings(SCTransform(hep_cells[[cond]], do.correct.umi = T, 
+                                                   verbose = F, 
+                                                   vars.to.regress=c("unique_name","nCount_RNA"),
+                                                   variable.features.rv.th = 1, seed.use = 1,
+                                                   return.only.var.genes = F, 
+                                                   variable.features.n = NULL))
+  hep_cells[[cond]] = RunPCA(hep_cells[[cond]], verbose = F)
+  hep_cells[[cond]] = RunUMAP(hep_cells[[cond]], dims = 1:20, verbose = F)
+}
+```
+
+
+## Healthy analysis
+For healthy cells (which will serve as reference), do additional filtering and reprocessing
+
+```{r}
+DimPlot(hep_cells$healthy, reduction = "umap", group.by = "unique_name")
+outcells = (hep_cells$healthy@reductions$umap@cell.embeddings[,1]>(1) &
+              hep_cells$healthy@reductions$umap@cell.embeddings[,2]>5)
+hep_cells$healthy = hep_cells$healthy[,!outcells]
+
+hep_cells$healthy = suppressWarnings(SCTransform(hep_cells$healthy, do.correct.umi = T, 
+                                                 verbose = F,
+                                                 vars.to.regress = c("unique_name","nCount_RNA"),
+                                                 variable.features.rv.th = 1, seed.use = 1,
+                                                 return.only.var.genes = F, 
+                                                 variable.features.n = NULL))
+hep_cells$healthy = RunPCA(hep_cells$healthy, verbose = F)
+hep_cells$healthy = RunUMAP(hep_cells$healthy, dims = 1:15, verbose = F)
+DimPlot(hep_cells$healthy, reduction = "umap", group.by = "unique_name")
+
+hep_cells$healthy = FindNeighbors(hep_cells$healthy, reduction = "pca", dims = 1:15,
+                                  force.recalc = T, graph.name = "hep")
+hep_cells$healthy = FindClusters(hep_cells$healthy, graph.name = "hep", algorithm = 4, 
+                                 resolution = seq(0.1,0.8,0.1), verbose = F)
+DimPlot(hep_cells$healthy, reduction = "umap", group.by = "hep_res.0.3")
+hep_cells$healthy = SetIdent(hep_cells$healthy, value = "hep_res.0.6")
+mk_hep_h = FindAllMarkers(hep_cells$healthy, assay = "SCT")
+
+saveRDS(hep_cells$healthy, file = "results/zonation_healthy/hep_healthy_srat.RDS")
+```
+
+Save hepatocytes
+
+```{r}
+saveRDS(hep_cells, file="results/zonation_cond/hep_cells.RDS")
+```
+
+Plot expression of zonation markers
+
+```{r}
+gfresh = c("CYP1A2", "CYP2E1", "GLUL", "CYP3A4", "G0S2", "APOC1", "UGT2B17", "BCHE", # central 
+           "SAA1", "HAMP", "SAA2", "CPS1", "C3", "C1R", "MT-ND4", "MT-CO2") # portal
+
+png("results/zonation_healthy/healthy_hepatocyte_zonation_markers_violin.png", 
+    height = 1400, width = 1400)
+VlnPlot(hep_cells$healthy, features = gfresh, group.by = "names_clusters", 
+        pt.size = 0, sort = "increasing")
+dev.off()
+png("results/zonation_healthy/healthy_hepatocyte_zonation_markers_umap.png", 
+    height = 1400, width = 1400)
+FeaturePlot(hep_cells$healthy, features = gfresh, pt.size = 0.6)
+dev.off()
+```
+
+Obtain Diffusion maps projection
+
+```{r}
+set.seed(1)
+dm = DiffusionMap(hep_cells$healthy@reductions$pca@cell.embeddings[,1:4], 
+                  rotate = T, n_eigs = 5)
+dpt = DPT(dm)
+plot(dpt)
+```
+
+Check expression of some genes
+
+```{r}
+dpt_flat <- branch_divide(dpt, integer(0L))
+root = min(dpt_flat@branch[, 1], na.rm = TRUE)
+dpt_vals = destiny:::dpt_for_branch(dpt_flat, root)
+df_dc = cbind(hep_cells$healthy@meta.data, 
+              data.frame("DC1" = dpt@dm$DC1, "DC2" = dpt@dm$DC2, "DPT" = dpt_vals),
+              Matrix::t(hep_cells$healthy@assays$SCT@data[gfresh,]))
+colnames(df_dc) = gsub("-", ".", colnames(df_dc), fixed = T)
+
+plt_list = list()
+for(n in c(gsub("-", ".", gfresh, fixed = T), "names_clusters", "unique_name")){
+  plt_list[[n]] = ggplot(df_dc, aes_string(x = "DC1", y = "DC2", colour = n))+
+    geom_point()+
+    theme_classic()
+}
+
+png("results/zonation_healthy/healthy_hepatocyte_zonation_markers_dc.png", 
+    height = 900, width = 2800)
+cowplot::plot_grid(plotlist = plt_list, nrow = 3, ncol = 6, align = "hv")
+dev.off()
+```
+
+We'll be using DC1 as the pseudotime. This was the best approximation possible to the zonation gradient based on diffusion maps
+
+```{r}
+pdf("results/zonation_healthy/hep_distributions_dc1.pdf", useDingbats = F, 
+    height = 4, width = 9)
+plt1 = ggplot(df_dc, aes(x = DC1, y = names_clusters, 
+                  group = names_clusters, fill = names_clusters))+
+  geom_density_ridges2(alpha = 0.4)+
+  theme_bw()+
+  theme(legend.position = "none")
+
+plt2 = ggplot(df_dc, aes(x = DC1, y = unique_name, 
+                  group = unique_name, fill = unique_name))+
+  geom_density_ridges2(alpha = 0.4)+
+  theme_bw()+
+  theme(legend.position = "none")
+
+cowplot::plot_grid(plt1, plt2, ncol = 2, align = "h")
+dev.off()
+```
+
+Find genes varying along the pseudotime
+
+```{r}
+# will only use variable genes
+hvg = hep_cells$healthy@assays$SCT@var.features
+
+# Fit GAM for each gene using pseudotime as independent variable.
+t = df_dc$DC1
+t = scales::rescale(rank(df_dc$DC1), c(0.00001, 0.99999))
+gene_fit_p = c()
+gene_fit_vals = data.frame(row.names = 1:100)
+for(i in 1:length(hvg)){
+  g = hvg[i]
+  z = hep_cells$healthy@assays$SCT@data[g,]
+  
+  d = data.frame(z=z, t=t)
+  tmp = suppressMessages(gam(z ~ ns(t, df = 3), data=d))
+  
+  # bins for model fitting
+  bb = seq(min(t), max(t), length.out = 100)
+  gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                               newdata = data.frame(t = bb)))
+  p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+  gene_fit_p = c(gene_fit_p, p)
+  names(gene_fit_p)[length(gene_fit_p)] = g
+}
+
+gene_fit_p = fdrtool::fdrtool(gene_fit_p, statistic="pvalue", plot=F, 
+                              verbose=F, cutoff.method="pct0", pct0=0.9)$qval
+```
+
+
+## Analysis of other conditions
+Now use the top genes to learn the pseudozonation coordinates and project the embolised and regenerating data
+
+```{r}
+sig_genes = gene_fit_p[gene_fit_p<=0.05]
+top_sig_genes = names(sig_genes[order(sig_genes, decreasing = F)][1:1000])
+top_sig_genes = top_sig_genes[top_sig_genes %in% rownames(hep_cells$embolised@assays$SCT@data) &
+                                top_sig_genes %in%  rownames(hep_cells$regenerating@assays$SCT@data)]
+
+data_gam_h = cbind(data.frame("DC1" = df_dc$DC1),
+                   Matrix::t(hep_cells$health@assays$SCT@data[top_sig_genes,]))
+#data_gam_h$DC1 = scales::rescale(-data_gam_h$DC1, c(0.00001, 0.99999))
+data_gam_h$DC1 = scales::rescale(rank(data_gam_h$DC1), c(0.00001, 0.99999))
+#bins_dc1 = cut(data_gam_h$DC1, 200)
+#cells_use = unlist(tapply(1:length(bins_dc1), bins_dc1, function(x) sample(x, 12)))
+
+gam_healthy = gam::gam(DC1 ~ ., data = data_gam_h, family = mgcv::betar(link = "logit", eps = 0.00001))
+#gam_healthy = gam::gam(DC1 ~ ., data = data_gam_h)
+
+hea_pred = predict(gam_healthy,
+                   Matrix::t(hep_cells$healthy@assays$SCT@data[top_sig_genes,]), type = "response")
+reg_pred = predict(gam_healthy,
+                   Matrix::t(hep_cells$regenerating@assays$SCT@data[top_sig_genes,]), type = "response")
+emb_pred = predict(gam_healthy,
+                   Matrix::t(hep_cells$embolised@assays$SCT@data[top_sig_genes,]), type = "response")
+
+plot(density(reg_pred), col = "salmon", ylim = c(0,3.25))
+lines(density(emb_pred), col = "darkred")
+lines(density(data_gam_h$DC1), col = "orange")
+lines(density(hea_pred), col = "grey50")
+legend(-0.073,32, legend = c("healthy (DC1)", "healthy (pred)", 
+                         "embolised (pred)", "regenerating (pred)"),
+       fill = c("green", "grey50", "red", "blue"))
+
+plot_df = data.frame(vals = c(data_gam_h$DC1, emb_pred, reg_pred), 
+                     Condition = c(rep("healthy", length(data_gam_h$DC1)), 
+                                   rep("embolised", length(emb_pred)), 
+                                   rep("regenerating", length(reg_pred))),
+                     Donor = c(hep_cells$healthy$Donor, 
+                               hep_cells$embolised$Donor, hep_cells$regenerating$Donor))
+plot_df$bins100 = cut(plot_df$vals, 10)
+plot_df$Condition = factor(plot_df$Condition, levels = c("healthy", "embolised", "regenerating"))
+ggplot(plot_df, aes(x = bins100, fill = Condition))+
+     geom_bar(position = "fill")+
+     labs(x = "zonation (binned)", y = "proportion")+
+     scale_y_continuous(expand = c(0,0))+
+     scale_fill_manual(values = colcond)+
+     guides(fill = guide_legend(title.position = "top"))+
+     theme(axis.text.x = element_blank(),
+           legend.title.align = 0,
+           legend.position = "bottom")
+ggplot(plot_df, aes(x = bins100, fill = Condition))+
+     facet_wrap(~Condition)+
+     geom_bar()+
+     labs(x = "zonation (binned)", y = "Number of cells")+
+     scale_y_continuous(expand = c(0,0))+
+     scale_fill_manual(values = colcond)+
+     coord_flip()+
+     guides(fill = guide_legend(title.position = "top"))+
+     theme(axis.text.y = element_blank(),
+           legend.title.align = 0,
+           legend.position = "bottom")
+ggplot(plot_df, aes(x = vals, colour = Donor))+
+     facet_wrap(~Condition)+
+     geom_density()+
+     labs(x = "zonation (binned)", y = "proportion")+
+     theme_bw()+
+     theme(legend.title.align = 0,
+           legend.position = "bottom")
+
+# data_gam_h$bins20 = cut(data_gam_h$DC1, 20)
+# mean_bins = apply(data_gam_h[,2:501], 2, function(x) tapply(x, data_gam_h$bins20, mean))
+# cor_reg_bins = cor(as.matrix(hep_cells$regenerating@assays$SCT@data[colnames(mean_bins),]), 
+#                    t(mean_bins), method = "sp")
+# max_cor_regen = apply(cor_reg_bins, 1, which.max)
+# testdf = data.frame(bins = max_cor_regen, dons = hep_cells$regenerating$Donor)
+# ggplot(testdf, aes(x = bins, fill = dons))+geom_bar()+facet_wrap(~dons, scales = "free_y")
+
+reg_df = data.frame("pt" = reg_pred, "don" = hep_cells$regenerating$Donor)
+reg_df = cbind(reg_df, Matrix::t(hep_cells$regenerating@assays$SCT@data[gfresh,]))
+ggplot(reg_df, aes(x = pt, y = SAA1, colour = don))+
+  geom_point()+
+  theme_classic()+
+  facet_wrap(~don)+
+  geom_hline(yintercept = 3)+
+  geom_vline(xintercept = c(0,1))
+
+ggplot(reg_df, aes(x = SAA2, y = GLUL, colour = don))+
+  geom_point()+
+  theme_classic()+
+  facet_wrap(~don)
+
+traj_list = list("healthy" = data_gam_h$DC1, "embolised" = emb_pred, "regenerating" = reg_pred)
+```
+
+Calculate correlations
+
+```{r}
+cor_h = t(cor(traj_list$healthy, as.matrix(Matrix::t(hep_cells$healthy@assays$SCT@data)),
+              method = "sp"))
+cor_emb = t(cor(traj_list$embolised, as.matrix(Matrix::t(hep_cells$embolised@assays$SCT@data)),
+                method = "sp"))
+cor_reg = t(cor(traj_list$regenerating, as.matrix(Matrix::t(hep_cells$regenerating@assays$SCT@data)),
+                method = "sp"))
+
+l = list(cor_h, cor_emb, cor_reg)
+all_corr = Reduce(function(x, y) merge(x,y, by = "rn", all = T), 
+                  lapply(l, function(x) data.frame(x, rn = row.names(x))))
+colnames(all_corr) = c("genes", "healthy", "embolised", "regenerating")
+
+write.csv(all_corr, file = paste0("results/zonation_cond/hep_correlations_zonation_rank.csv"),
+          col.names = T, row.names = F, quote = F)
+```
+
+Find varying genes - using all cells along the ranked pseudotime
+
+```{r}
+qvals_list = list()
+fits_list = list()
+
+# get HVG from all conditions
+hvg = unique(c(hep_cells[["healthy"]]@assays$SCT@var.features,
+               hep_cells[["embolised"]]@assays$SCT@var.features,
+               hep_cells[["regenerating"]]@assays$SCT@var.features))
+hvg = hvg[hvg %in% rownames(hep_cells[["healthy"]]@assays$SCT@data) &
+            hvg %in% rownames(hep_cells[["embolised"]]@assays$SCT@data) &
+            hvg %in% rownames(hep_cells[["regenerating"]]@assays$SCT@data)]
+
+for(cond in names(hep_cells)){
+  print(cond)
+  # Fit GAM for each gene using pseudotime as independent variable.
+  t = traj_list[[cond]]
+  gene_fit_p = c()
+  gene_fit_vals = data.frame(row.names = 1:100)
+  for(i in 1:length(hvg)){
+    g = hvg[i]
+    z = hep_cells[[cond]]@assays$SCT@data[g,]
+    
+    d = data.frame(z=z, t=t)
+    tmp = suppressMessages(gam(z ~ ns(t, df = 3), data=d))
+    
+    # bins for model fitting
+    bb = seq(min(t), max(t), length.out = 100)
+    gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                                 newdata = data.frame(t = bb)))
+    p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+    gene_fit_p = c(gene_fit_p, p)
+    names(gene_fit_p)[length(gene_fit_p)] = g
+  }
+  
+  if(sum(is.na(gene_fit_p))>0){
+    gene_fit_p[is.na(gene_fit_p)] = 1
+  }
+  gene_fit_p = fdrtool::fdrtool(gene_fit_p, statistic="pvalue", plot=F, 
+                                verbose=F, cutoff.method="pct0", pct0=0.9)$qval
+  
+  qvals_list[[cond]] = gene_fit_p
+  fits_list[[cond]] = gene_fit_vals
+}
+```
+
+Save trajectories and genes
+
+```{r}
+save(fits_list, qvals_list, traj_list, 
+     file = "results/zonation_cond/hep_traj_qval_fits_rank.RData")
+```
+
+Find varying genes - normalised by bins along the ranked pseudotime
+
+```{r}
+qvals_b_list = list()
+fits_b_list = list()
+
+# get HVG from all conditions
+hvg = unique(c(hep_cells[["healthy"]]@assays$SCT@var.features,
+               hep_cells[["embolised"]]@assays$SCT@var.features,
+               hep_cells[["regenerating"]]@assays$SCT@var.features))
+hvg = hvg[hvg %in% rownames(hep_cells[["healthy"]]@assays$SCT@data) &
+            hvg %in% rownames(hep_cells[["embolised"]]@assays$SCT@data) &
+            hvg %in% rownames(hep_cells[["regenerating"]]@assays$SCT@data)]
+
+for(cond in names(hep_cells)){
+  print(cond)
+  set.seed(1)
+  # filtering the cells by bins
+  bins = cut(traj_list[[cond]], 100)
+  dons = hep_cells[[cond]]$Donor
+  ndons = rowSums(table(bins, dons)>1)
+  ncells = rowSums(table(bins, dons))
+  sampleif = function(cells, bins, dons){
+    res = c()
+    for(d in unique(dons)){
+      for(b in unique(bins)){
+        x = cells[bins==b & dons==d]
+        if(length(x)>=30){
+          res = c(res, sample(x, 30, replace = F))
+        } else if(length(x)>=1 & ndons[b]>=2 & ncells[b]>=10){
+          res = c(res, x)
+        } else{
+          res = c(res, NULL)
+        }
+      }
+    }
+    return(res)
+  }
+  whichcells = sampleif(1:length(bins), bins, dons)
+  
+  # Fit GAM for each gene using pseudotime as independent variable.
+  t = traj_list[[cond]][whichcells]
+  gene_fit_p = c()
+  gene_fit_vals = data.frame(row.names = 1:100)
+  for(i in 1:length(hvg)){
+    g = hvg[i]
+    z = hep_cells[[cond]]@assays$SCT@data[g,whichcells]
+    
+    d = data.frame(z=z, t=t)
+    tmp = suppressMessages(gam(z ~ ns(t, df = 3), data=d))
+    
+    # bins for model fitting
+    bb = seq(min(t), max(t), length.out = 100)
+    gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                                 newdata = data.frame(t = bb)))
+    p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+    gene_fit_p = c(gene_fit_p, p)
+    names(gene_fit_p)[length(gene_fit_p)] = g
+  }
+  
+  if(sum(is.na(gene_fit_p))>0){
+    gene_fit_p[is.na(gene_fit_p)] = 1
+  }
+  gene_fit_p = fdrtool::fdrtool(gene_fit_p, statistic="pvalue", plot=F, 
+                                verbose=F, cutoff.method="pct0", pct0=0.9)$qval
+  
+  qvals_b_list[[cond]] = gene_fit_p
+  fits_b_list[[cond]] = gene_fit_vals
+}
+```
+
+Save trajectories and genes
+
+```{r}
+save(fits_b_list, qvals_b_list, traj_list, 
+     file = "results/zonation_cond/hep_binned_traj_qval_fits_rank.RData")
+```
+
+Find varying genes - using each donor as a replicate and calculating the average expression for each of 100 bins
+
+```{r}
+qvals_db_list = list()
+fits_db_list = list()
+
+# get HVG from all conditions
+hvg = unique(c(hep_cells[["healthy"]]@assays$SCT@var.features,
+               hep_cells[["embolised"]]@assays$SCT@var.features,
+               hep_cells[["regenerating"]]@assays$SCT@var.features))
+hvg = hvg[hvg %in% rownames(hep_cells[["healthy"]]@assays$SCT@data) &
+            hvg %in% rownames(hep_cells[["embolised"]]@assays$SCT@data) &
+            hvg %in% rownames(hep_cells[["regenerating"]]@assays$SCT@data)]
+
+meta_df = data.frame("pt" = c(traj_list$healthy, traj_list$embolised, traj_list$regenerating),
+                     "donors" = c(hep_cells$healthy$Donor, hep_cells$embolised$Donor,
+                                  hep_cells$regenerating$Donor),
+                     "cond" = c(hep_cells$healthy$Condition, hep_cells$embolised$Condition,
+                                  hep_cells$regenerating$Condition))
+meta_df$bins = cut(meta_df$pt, 100)
+
+for(cond in unique(meta_df$cond)){
+  print(cond)
+  set.seed(1)
+  
+  # Fit GAM for each gene
+  t = 1:100
+  sub_meta_df = meta_df[meta_df$cond==cond,]
+  gene_fit_p = c()
+  gene_fit_vals = data.frame(row.names = 1:100)
+  for(i in 1:length(hvg)){
+    g = hvg[i]
+    z = hep_cells[[cond]]@assays$SCT@data[g,]
+    
+    d = aggregate(z~bins+donors, data = cbind(sub_meta_df, z), FUN="mean")
+    cc = data.frame(table(sub_meta_df$bins, as.factor(as.character(sub_meta_df$donors))))
+    cc = cc[cc$Freq==0,]
+    colnames(cc) = colnames(d)
+    d = rbind(d, cc)
+    d = d[order(d$bins, decreasing = F),]
+    d$t = rep(t, each = length(unique(d$donors)))
+    tmp = suppressMessages(gam(z ~ ns(t, df = 3), data=d))
+    
+    # bins for model fitting
+    bb = seq(min(t), max(t), length.out = 100)
+    gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                                 newdata = data.frame(t = bb)))
+    p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+    gene_fit_p = c(gene_fit_p, p)
+    names(gene_fit_p)[length(gene_fit_p)] = g
+  }
+  
+  if(sum(is.na(gene_fit_p))>0){
+    gene_fit_p[is.na(gene_fit_p)] = 1
+  }
+  gene_fit_p = fdrtool::fdrtool(gene_fit_p, statistic="pvalue", plot=F, 
+                                verbose=F, cutoff.method="pct0", pct0=0.9)$qval
+  
+  qvals_db_list[[cond]] = gene_fit_p
+  fits_db_list[[cond]] = gene_fit_vals
+}
+```
+
+Save trajectories and genes
+
+```{r}
+save(fits_db_list, qvals_db_list, traj_list, 
+     file = "results/zonation_cond/hep_binnedDonor_traj_qval_fits_rank.RData")
+```
+
+Plot cell distributions in pseudotime
+
+```{r}
+plot_df = data.frame("pseudotime" = c(traj_list$healthy, traj_list$embolised,
+                                      traj_list$regenerating),
+           "donor" = c(hep_cells$healthy@meta.data[,"Donor"],
+                       hep_cells$embolised@meta.data[names(traj_list$embolised),"Donor"],
+                       hep_cells$regenerating@meta.data[names(traj_list$regenerating),"Donor"]),
+           "cond" = c(rep("healthy", length(traj_list$healthy)), 
+                      rep("embolised", length(traj_list$embolised)),
+                      rep("regenerating", length(traj_list$regenerating))))
+
+pdf("results/zonation_cond/hep_cell_distributions_zonation.pdf", useDingbats = F, 
+    width = 6, height = 5)
+ggplot(plot_df, aes(x = donor, y = pseudotime, fill = cond))+
+  geom_boxplot(notch = T)+
+  theme_bw()
+
+ggplot(plot_df, aes(x = pseudotime, group = donor, colour = donor))+
+  facet_wrap(~cond)+
+  geom_density()+
+  theme_bw()
+
+ggplot(plot_df, aes(x = pseudotime, colour = cond))+
+  geom_density()+
+  theme_bw()
+dev.off()
+```
+
+Do cross validation on the healthy trajectory
+
+```{r}
+sig_genes = gene_fit_p[gene_fit_p<=0.05]
+top_sig_genes = names(sig_genes[order(sig_genes, decreasing = F)][1:1000]) 
+
+data_gam_h = cbind(data.frame("DC1" = traj_list$healthy),
+                   Matrix::t(hep_cells$health@assays$SCT@data[top_sig_genes,]))
+colnames(data_gam_h) = gsub("-", "_", colnames(data_gam_h), fixed = T)
+colnames(data_gam_h) = gsub(".", "_", colnames(data_gam_h), fixed = T)
+
+cv_gam = CVgam(formula = DC1 ~ ., data = data_gam_h, nfold = 10, seed = 1, method = "glm.fit")
+
+pdf("results/zonation_healthy/hep_original_fitted_pseudotime.pdf", useDingbats = F, 
+    width = 6, height = 5)
+plot(data_gam_h$DC1, cv_gam$fitted, xlab = "Healthy pseudotime (DC1)",ylab = "Predicted Healthy",
+     main = paste0("Healthy original vs fitted pseudotime\nMSE: ", round(cv_gam$cvscale, 6)),
+     pch = 19, cex = 0.5)
+abline(0,1, col = "blue", lwd = 3)
+dev.off()
+```
+
+Prepare zonation results
+
+```{r}
+# define the intervals based on healthy
+df_h = data.table("zonation_pt" = traj_list$healthy)
+df_h$zonation_int = cut(df_h$zonation_pt, 3)
+
+df_e = data.table("zonation_pt" = traj_list$embolised)
+df_e = df_h[df_e, on="zonation_pt", roll=Inf, rollends = T]
+
+df_r = data.table("zonation_pt" = traj_list$regenerating)
+df_r = df_h[df_r, on="zonation_pt", roll=Inf, rollends = T]
+
+list_df = list("healthy" = df_h, "embolised" = df_e, "regenerating" = df_r)
+
+for(n in names(traj_list)){
+  ptdf = list_df[[n]]
+  rownames(ptdf) = colnames(hep_cells[[n]])
+  hep_cells[[n]] = AddMetaData(hep_cells[[n]], metadata = ptdf)
+  write.csv(hep_cells[[n]]@meta.data[,c("unique_name", "Condition", 
+                                        "zonation_pt", "zonation_int")],
+            file = paste0("results/zonation_cond/hep_zonation_", n, "_rank.csv"),
+            col.names = T, row.names = T, quote = F)
+}
+
+hep_cells$healthy = RunUMAP(hep_cells$healthy, reduction = "pca", dims = 1:4)
+DimPlot(hep_cells$healthy, reduction = "umap", group.by = "Donor")
+FeaturePlot(hep_cells$healthy, reduction = "umap", 
+            features = c("SAA1", "CYP2E1", "HAMP", "nCount_SCT"))
+
+hep_cells$embolised = RunUMAP(hep_cells$embolised, reduction = "pca", dims = 1:4)
+DimPlot(hep_cells$embolised, reduction = "umap", group.by = "Donor")
+FeaturePlot(hep_cells$embolised, reduction = "umap",
+            features = c("SAA1", "CYP2E1", "HAMP", "nCount_SCT"))
+
+hep_cells$regenerating = RunUMAP(hep_cells$regenerating, reduction = "pca", dims = 1:4)
+DimPlot(hep_cells$regenerating, reduction = "umap", group.by = "Donor")
+FeaturePlot(hep_cells$regenerating, reduction = "umap", 
+            features = c("SAA1", "CYP2E1", "HAMP", "nCount_SCT"))
+
+FeaturePlot(hep_cells$healthy, reduction = "pca", 
+            features = c("SAA1", "CYP2E1", "HAMP", "nCount_SCT"))
+FeaturePlot(hep_cells$embolised, reduction = "pca", 
+            features = c("SAA1", "CYP2E1", "HAMP", "nCount_SCT"))
+FeaturePlot(hep_cells$regenerating, reduction = "pca", 
+            features = c("SAA1", "CYP2E1", "HAMP", "nCount_SCT"))
+```
+
+Save zonation results
+
+```{r}
+saveRDS(hep_cells, file = "results/zonation_cond/hep_cells_zonation_rank.RDS")
+```
+
+Save matrices for plotting
+
+```{r}
+## (Halpern et al, 2017 Nature) 17 genes validated with sc RNA-seq and smFISH (ext fig 5)
+zon_genes=toupper(c("Cyp1a2","Rnase4","Igfbp1","Igfbp2","Gsta3", "Cyp27a1", "Glud1",
+                    "Cyp8b1", "Hamp","Pck1","Cps1", "Arg1", "Apoa1", "G6pc", "Igf1", "Pigr", "Acly"))
+## zonation profiles of GLUL (central), APOE (midzonal),
+##CYP1A2 and CYP2E1 (central/midzonal) and ALB and PCK1 (periportal)
+grun_hep=c("GLUL","APOE","CYP1A2","CYP2E1","ALB","PCK1")
+
+allgenes = unique(c(zon_genes, grun_hep))
+
+hscaled = hep_cells$healthy@assays$SCT@scale.data[allgenes,]
+escaled = hep_cells$embolised@assays$SCT@scale.data[allgenes,]
+rscaled = hep_cells$regenerating@assays$SCT@scale.data[allgenes,]
+hexp = hep_cells$healthy@assays$SCT@data[allgenes,]
+eexp = hep_cells$embolised@assays$SCT@data[allgenes,]
+rexp = hep_cells$regenerating@assays$SCT@data[allgenes,]
+hmeta = cbind(hep_cells$healthy@meta.data, hep_cells$healthy@reductions$umap@cell.embeddings,
+              hep_cells$healthy@reductions$pca@cell.embeddings[,c(1,2)])
+emeta = cbind(hep_cells$embolised@meta.data, hep_cells$embolised@reductions$umap@cell.embeddings,
+              hep_cells$embolised@reductions$pca@cell.embeddings[,c(1,2)])
+rmeta = cbind(hep_cells$regenerating@meta.data,hep_cells$regenerating@reductions$umap@cell.embeddings,
+              hep_cells$regenerating@reductions$pca@cell.embeddings[,c(1,2)])
+perc_var_list = list("healthy" = hep_cells$healthy@reductions$pca@stdev^2/hep_cells$healthy@reductions$pca@misc$total.variance*100, 
+                "embolised" = hep_cells$embolised@reductions$pca@stdev^2/hep_cells$embolised@reductions$pca@misc$total.variance*100, 
+                "regenerating" = hep_cells$regenerating@reductions$pca@stdev^2/hep_cells$regenerating@reductions$pca@misc$total.variance*100)
+
+save(hscaled, escaled, rscaled, hexp, eexp, rexp, hmeta, emeta, rmeta, perc_var_list,
+     file = "to_send/hep_scaled_meta.RData")
+```
+
+
+
+# Comparing genes between conditions
+Load data
+
+```{r}
+hep_cells = readRDS(file = "results/zonation_cond/hep_cells_zonation_rank.RDS")
+
+top_genes = readRDS("results/cond_effect/top_genes_mk.RDS")
+```
+
+Reformatting
+
+```{r}
+all_hep_cells = Reduce(merge, hep_cells)
+```
+
+Functions for pseudotime analysis
+
+```{r}
+fittingFunc = function(g){
+  t = sub_dat$zonation_pt
+  gene_fit_p = c()
+  gene_fit_vals = data.frame(row.names = 1:100)
+  z = sub_dat@assays$SCT@data[g,]
+    
+  d = data.frame(z=z, t=t)
+  tmp = suppressMessages(gam(z ~ ns(t, df = 3), data=d))
+  
+  # bins for model fitting
+  bb = seq(min(t), max(t), length.out = 100)
+  gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                               newdata = data.frame(t = bb)))
+  p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+  gene_fit_p = c(gene_fit_p, p)
+  names(gene_fit_p)[length(gene_fit_p)] = g
+  
+  return(list("fits" = gene_fit_vals, "pval" = gene_fit_p))
+}
+
+getTopTerms = function(godf, topt = 100, ncl = 5, nt = 2){
+  topt = if(nrow(godf)<topt) nrow(godf) else topt
+  if(nrow(godf)<ncl) return(godf)
+  df = godf[1:topt,]
+  genes = sapply(df$geneID, function(x) strsplit(x, "/"))
+  resmat = matrix(0, length(genes), length(genes))
+  for(i in 1:length(genes)){
+    for(j in 1:length(genes)){
+      resmat[i,j] = length(intersect(genes[[i]], genes[[j]]))/length(genes[[i]])
+    }
+  }
+  cl = hclust(dist(resmat), method = "ward.D2")
+  cl = cutree(cl, ncl)
+  res_df = data.frame("Description" = df$Description, "qvalue" = df$qvalue, "geneID" = df$geneID, 
+                      cl, stringsAsFactors = F)
+  res_df = res_df[order(res_df$qvalue, decreasing = F),]
+  topterms = unlist(tapply(res_df$Description, res_df$cl, function(x) x[1:nt]))
+  res_df = res_df[res_df$Description %in% topterms,]
+  
+  return(res_df)
+}
+
+minmax_scale = function(x){
+  return((x-min(x))/(max(x)-min(x)))
+}
+
+# downsample taking the minimum median of UMI counts as a reference
+dsSeurat = function(srat, variable, assay = "SCT", numis = "nCount_SCT", seed = 1){
+  # input Seurat object and variable to do the downsample based on
+  # return Seurat object
+  
+  set.seed(seed)
+  
+  # downsample taking the minimum median of UMI counts as a reference
+  fact = srat@meta.data[,numis]/min(tapply(srat@meta.data[,numis], srat@meta.data[,variable], median))
+  fact = ifelse(fact<=1, 0, log2(fact))
+  thinned_counts = seqgendiff::thin_lib(as.matrix(srat@assays[[assay]]@counts), 
+                                        thinlog2 = fact, relative = T)
+  rownames(thinned_counts$mat) = rownames(srat@assays[[assay]]@data)
+  colnames(thinned_counts$mat) = colnames(srat@assays[[assay]]@data)
+  srat@assays$SCT@counts = Matrix::Matrix(thinned_counts$mat, sparse = T)
+  srat@assays$SCT@data = log1p(srat@assays[[assay]]@counts)
+  
+  return(srat)
+}
+```
+
+
+## Hepatocytes
+Prepare genes and data
+
+```{r}
+# get HVG from all conditions
+hvg = unique(c(hep_cells[["healthy"]]@assays$SCT@var.features,
+               hep_cells[["embolised"]]@assays$SCT@var.features,
+               hep_cells[["regenerating"]]@assays$SCT@var.features))
+
+exp_g = list("healthy" = Matrix::rowSums(hep_cells[["healthy"]]@assays$SCT@data>0)>=30,
+             "embolised" = Matrix::rowSums(hep_cells[["embolised"]]@assays$SCT@data>0)>=30,
+             "regenerating" = Matrix::rowSums(hep_cells[["regenerating"]]@assays$SCT@data>0)>=30)
+
+hvg = hvg[hvg %in% rownames(hep_cells[["healthy"]]@assays$SCT@data)[exp_g$healthy] &
+            hvg %in% rownames(hep_cells[["embolised"]]@assays$SCT@data)[exp_g$embolised] &
+            hvg %in% rownames(hep_cells[["regenerating"]]@assays$SCT@data)[exp_g$regenerating]]
+
+# remove HVG that are markers for other cell types
+hvg = hvg[!(hvg %in% unique(unlist(top_genes$cell_type[!grepl("Hepat", names(top_genes$cell_type))])))]
+```
+
+Find varying genes - using all cells along the ranked pseudotime
+
+```{r}
+## get varying genes for each condition
+numCores = 12 #larger values resulted in problems
+start_time <- Sys.time()
+cond_fit_list = list()
+
+all_hep_cells_ds = dsSeurat(all_hep_cells, "Condition")
+hep_cells_ds = SplitObject(all_hep_cells_ds, split.by = "Condition")
+
+for(cond in names(hep_cells)){
+  print(cond)
+  
+  sub_dat = hep_cells_ds[[cond]]
+  # Fit GAM for each gene using pseudotime as independent variable.
+  cond_fit_list[[cond]] = mclapply(hvg, fittingFunc, mc.cores = numCores)
+}
+hep_fits_qval = list()
+for(cond in names(cond_fit_list)){
+  fits_df = Reduce(cbind, lapply(cond_fit_list[[cond]], function(x) x$fits))
+  
+  pval_list = unlist(lapply(cond_fit_list[[cond]], function(x) x$pval))
+  names(pval_list) = hvg
+  
+  pval_df = data.frame(pval_list)
+  
+  hep_fits_qval[[cond]] = list("fits" = fits_df, "pval" = pval_df,
+                               "fdr" = apply(pval_df, 2, function(x) p.adjust(x, method = "fdr")))
+}
+end_time <- Sys.time()
+end_time - start_time
+
+saveRDS(hep_fits_qval, file = "results/zonation_cond/hep_fits_qval.RDS")
+```
+
+Compare conditions
+
+```{r}
+# genes that vary in at least one condition
+var_pval = cbind(hep_fits_qval$healthy$fdr<=0.05,
+                 hep_fits_qval$embolised$fdr<=0.05,
+                 hep_fits_qval$regenerating$fdr<=0.05)
+colnames(var_pval) = c("healthy", "embolised", "regenerating")
+
+# some variability in expression
+hep_sig_fits = lapply(hep_fits_qval, function(x) x$fits)
+hep_sig_fits$healthy[hep_sig_fits$healthy<0] = 0
+hep_sig_fits$embolised[hep_sig_fits$embolised<0] = 0
+hep_sig_fits$regenerating[hep_sig_fits$regenerating<0] = 0
+gvar = as.data.frame(lapply(hep_sig_fits, function(x) apply(x, 2, function(y) diff(range(y))>=0.05)))
+
+hep_sc_fits = lapply(hep_sig_fits, function(x) t(apply(x, 2, 
+                     function(x) if(all(x==x[1])){rep(0, length(x))} else{minmax_scale(x)})))
+
+# get correlations
+cor_he = unlist(lapply(rownames(hep_sc_fits$healthy), 
+                       function(x) cor(hep_sc_fits$healthy[x,],hep_sc_fits$embolised[x,], method = "sp")))
+cor_hr = unlist(lapply(rownames(hep_sc_fits$healthy), 
+                       function(x) cor(hep_sc_fits$healthy[x,],hep_sc_fits$regenerating[x,], 
+                                       method = "sp")))
+cor_er = unlist(lapply(rownames(hep_sc_fits$embolised), 
+                       function(x) cor(hep_sc_fits$embolised[x,],hep_sc_fits$regenerating[x,], 
+                                       method = "sp")))
+names(cor_he) = names(cor_hr) = names(cor_er) = rownames(hep_sc_fits$healthy)
+write.csv(data.frame("HvE" = cor_he, "HvR" = cor_hr, "EvR" = cor_er), 
+          file = "./results/zonation_cond/hep_correlations.csv", col.names = T, row.names = T, quote = F)
+
+notsim = list("embolised" = cor_he, "regenerating" = cor_hr)
+hep_res_list = list()
+for(n in names(notsim)){
+  df1 = cbind(gvar[,"healthy"], var_pval[,"healthy"])
+  df2 = cbind(gvar[,n], var_pval[,n])
+  genes_var_use = apply(df1, 1, function(x) all(x)) | apply(df2, 1, function(x) all(x))
+  
+  genes_use = names(notsim[[n]])[notsim[[n]]<0.3 & genes_var_use]
+  all_dat = cbind(df1, df2, notsim[[n]])
+  
+  hep_both_norm = Reduce(rbind, lapply(genes_use, 
+                                       function(x) minmax_scale(c(hep_sig_fits$healthy[,x],
+                                                                  hep_sig_fits[[n]][,x]))))
+  rownames(hep_both_norm) = genes_use
+  
+  hcl = hclust(as.dist(1-cor(t(hep_both_norm[,1:100]-hep_both_norm[,101:200]), 
+                              method = "sp")), method = "ward.D")
+  cls = cutree(hcl, 5)
+  
+  plot_df = reshape2::melt(t(hep_both_norm[,1:100]-hep_both_norm[,101:200]))
+  plot_df = merge(plot_df, data.frame("cls" = cls), by.x = 2, by.y = 0)
+  plot_df$cond = "difference"
+  
+  condrange = list("healthy" = 1:100)
+  condrange[[n]] = 101:200
+  
+  plot_df_l = list()
+  for(n2 in names(condrange)){
+    plot_df2 = reshape2::melt(t(hep_both_norm[,condrange[[n2]]]))
+    plot_df2 = merge(plot_df2, data.frame("cls" = cls), by.x = 2, by.y = 0)
+    plot_df2$cond = n2
+    plot_df_l[[n2]] = plot_df2
+  }
+  plot_df2 = rbind(Reduce(rbind, plot_df_l), plot_df)
+  plot_df2$cond = factor(plot_df2$cond, levels = c("healthy", n, "difference"))
+  xxx = plot_df2[plot_df2$cond=="difference",]
+  labsdf = data.frame(labs = c("higher in\nhealthy", paste0("higher in\n", n)), coord = c(0.5, -0.5))
+  plt1 = ggplot(xxx, aes(x = Var1, y = value))+
+      facet_grid(~cls, scales = "free")+
+      geom_hline(yintercept = 0, colour = "grey60", size = 0.75, linetype = "dashed")+
+      stat_summary(fun.data=mean_cl_boot, colour="grey40", alpha = 0.35, geom="linerange", group=1)+
+      stat_summary(fun=mean, colour="black", geom="line", group=1)+
+      labs(x = "zonation", y = "difference in\nscaled expression")+
+      scale_y_continuous(limits = c(-1,1))+
+      theme_bw()+
+      theme(axis.text = element_text(colour = "black", size = 7))
+  plt2 = ggplot()+
+    geom_text(data = labsdf, mapping = aes(y = coord, label = labs), x = 0.5, angle = 270)+
+    scale_x_continuous(limits = c(0,1))+
+    scale_y_continuous(limits = c(-1,1))+
+    cowplot::theme_nothing()
+  plt = cowplot::plot_grid(plt1, plt2, ncol = 2, nrow = 1, rel_widths = c(1, 0.1), align = "hv")
+  
+  plt_all = ggplot(plot_df2, aes(x = Var1, y = value, group = Var2))+
+    facet_grid(cond~cls, scales = "free")+
+    geom_line(alpha = 0.1, colour = "grey20")+
+    geom_hline(yintercept = 0, colour = "white", size = 1.2)+
+    stat_summary(fun=mean, colour="red", geom="line", group=1)+
+    labs(x = "zonation", y = "scaled expression")+
+    theme_bw()+
+    theme(axis.text = element_text(colour = "black", size = 7))
+  
+  genes_cl = unique(plot_df2[,c(1,4)])
+  eg_all = clusterProfiler::bitr(rownames(var_pval), fromType="SYMBOL", 
+                                 toType="ENTREZID", OrgDb="org.Hs.eg.db")
+  got_list = list()
+  got_cl_list = list()
+  for(i in unique(genes_cl$cls)){
+    eg = clusterProfiler::bitr(as.character(genes_cl$Var2)[genes_cl$cls==i], fromType="SYMBOL", 
+                             toType="ENTREZID", OrgDb="org.Hs.eg.db")
+    got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                    OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                    qvalueCutoff  = 0.05, 
+                                    pAdjustMethod = "BH", readable = T)
+    got_list[[as.character(i)]] = got@result[got@result$p.adjust<=0.05,]
+    
+    ncl = 4
+    if(nrow(got_list[[as.character(i)]])>ncl){
+      got_cl_list[[as.character(i)]] = getTopTerms(got_list[[as.character(i)]], ncl = ncl, 
+                                                   nt = 2, topt = 1000)
+    } else{
+      got_cl_list[[as.character(i)]] = got_list[[as.character(i)]]
+    }
+  }
+  eg = clusterProfiler::bitr(as.character(genes_cl$Var2), fromType="SYMBOL", 
+                             toType="ENTREZID", OrgDb="org.Hs.eg.db")
+  got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                  OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                  qvalueCutoff  = 0.05, 
+                                  pAdjustMethod = "BH", readable = T)
+  got_cl_list[["all"]] = getTopTerms(got@result[got@result$p.adjust<=0.05,], ncl = 10, nt = 1, topt = 1000)
+  got_list[["all"]] = got@result[got@result$p.adjust<=0.05,]
+  
+  eg_all = clusterProfiler::bitr(names(genes_var_use)[genes_var_use], fromType="SYMBOL", 
+                               toType="ENTREZID", OrgDb="org.Hs.eg.db")
+  eg = clusterProfiler::bitr(as.character(genes_cl$Var2), fromType="SYMBOL", 
+                             toType="ENTREZID", OrgDb="org.Hs.eg.db")
+  got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                  OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                  qvalueCutoff  = 0.05, 
+                                  pAdjustMethod = "BH", readable = T)
+  got_cl_list[["allcor"]] = getTopTerms(got@result[got@result$p.adjust<=0.05,], ncl = 10, nt = 1, topt = 1000)
+  got_list[["allcor"]] = got@result[got@result$p.adjust<=0.05,]
+  
+  hep_res_list[[n]] = list("plot" = plt, "plt_all" = plt_all, "go" = got_list,
+                           "go_cl" = got_cl_list, "df" = plot_df2, "dat" = all_dat)
+}
+saveRDS(hep_sig_fits, file = "results/zonation_cond/hep_sig_fits.RDS")
+```
+
+Global GO Terms and save
+
+```{r}
+eg_all = clusterProfiler::bitr(rownames(hep_res_list$embolised$dat), fromType="SYMBOL", 
+                               toType="ENTREZID", OrgDb="org.Hs.eg.db")
+eg_cor = rownames(hep_res_list$embolised$dat)[((hep_res_list$embolised$dat[,1] &
+                                                 hep_res_list$embolised$dat[,2]) | 
+                                                (hep_res_list$embolised$dat[,3] &
+                                                   hep_res_list$embolised$dat[,4])) &
+                                                hep_res_list$embolised$dat[,5]>=0.3]
+eg = clusterProfiler::bitr(eg_cor, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+hep_he_got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                      OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                      qvalueCutoff  = 0.05, 
+                                      pAdjustMethod = "BH", readable = T)
+hep_he_got_top = getTopTerms(hep_he_got@result[hep_he_got@result$p.adjust<=0.05,], ncl = 10, 
+                             nt = 1, topt = 1000)
+hep_res_list$embolised$go$pos = hep_he_got@result[hep_he_got@result$p.adjust<=0.05,]
+hep_res_list$embolised$go_cl$pos = hep_he_got_top
+gemb = rownames(hep_res_list$embolised$dat)[((hep_res_list$embolised$dat[,1] &
+                                                hep_res_list$embolised$dat[,2]) | 
+                                              (hep_res_list$embolised$dat[,3] &
+                                                 hep_res_list$embolised$dat[,4]))]
+eg_emb = clusterProfiler::bitr(gemb, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+hep_he_got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_emb$ENTREZID, 
+                                      OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                      qvalueCutoff  = 0.05, 
+                                      pAdjustMethod = "BH", readable = T)
+hep_he_got_top = getTopTerms(hep_he_got@result[hep_he_got@result$p.adjust<=0.05,], ncl = 10, 
+                             nt = 1, topt = 1000)
+hep_res_list$embolised$go$poscor = hep_he_got@result[hep_he_got@result$p.adjust<=0.05,]
+hep_res_list$embolised$go_cl$poscor = hep_he_got_top
+
+eg_cor = rownames(hep_res_list$regenerating$dat)[((hep_res_list$regenerating$dat[,1] &
+                                                 hep_res_list$regenerating$dat[,2]) | 
+                                                (hep_res_list$regenerating$dat[,3] &
+                                                   hep_res_list$regenerating$dat[,4])) &
+                                                hep_res_list$regenerating$dat[,5]>=0.3]
+eg = clusterProfiler::bitr(eg_cor, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+hep_hr_got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                      OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                      qvalueCutoff  = 0.05, 
+                                      pAdjustMethod = "BH", readable = T)
+hep_hr_got_top = getTopTerms(hep_hr_got@result[hep_hr_got@result$p.adjust<=0.05,], ncl = 10, 
+                             nt = 1, topt = 1000)
+hep_res_list$regenerating$go$pos = hep_hr_got@result[hep_hr_got@result$p.adjust<=0.05,]
+hep_res_list$regenerating$go_cl$pos = hep_hr_got_top
+greg = rownames(hep_res_list$regenerating$dat)[((hep_res_list$regenerating$dat[,1] &
+                                                hep_res_list$regenerating$dat[,2]) | 
+                                              (hep_res_list$regenerating$dat[,3] &
+                                                 hep_res_list$regenerating$dat[,4]))]
+eg_reg = clusterProfiler::bitr(greg, fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+hep_hr_got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_reg$ENTREZID, 
+                                      OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                      qvalueCutoff  = 0.05, 
+                                      pAdjustMethod = "BH", readable = T)
+hep_hr_got_top = getTopTerms(hep_hr_got@result[hep_hr_got@result$p.adjust<=0.05,], ncl = 10, 
+                             nt = 1, topt = 1000)
+hep_res_list$regenerating$go$poscor = hep_hr_got@result[hep_hr_got@result$p.adjust<=0.05,]
+hep_res_list$regenerating$go_cl$poscor = hep_hr_got_top
+
+saveRDS(hep_res_list, file = "results/zonation_cond/hep_got_clustering_list.RDS")
+```
+
+Save tables
+
+```{r}
+for(cl in names(hep_res_list$embolised$go)){
+  write.csv(hep_res_list$embolised$go[[cl]], 
+            file = paste0("to_send/gozonation/hep/hep_go_allsig_cl", cl, "_vEmb.csv"),
+            col.names = T, row.names = T, quote = F)
+  write.csv(hep_res_list$embolised$go_cl[[cl]], 
+            file = paste0("to_send/gozonation/hep/hep_go_clustSummary_cl", cl, "_vEmb.csv"),
+            col.names = T, row.names = T, quote = F)
+}
+write.csv(unique(hep_res_list$embolised$df[,c(1,4)]), 
+          file = paste0("to_send/gozonation/hep/hep_clusters_vEmb.csv"),
+          col.names = T, row.names = T, quote = F)
+for(cl in names(hep_res_list$regenerating$go)){
+  write.csv(hep_res_list$regenerating$go[[cl]], 
+            file = paste0("to_send/gozonation/hep/hep_go_allsig_cl", cl, "_vReg.csv"),
+            col.names = T, row.names = T, quote = F)
+  write.csv(hep_res_list$regenerating$go_cl[[cl]], 
+            file = paste0("to_send/gozonation/hep/hep_go_clustSummary_cl", cl, "_vReg.csv"),
+            col.names = T, row.names = T, quote = F)
+}
+write.csv(unique(hep_res_list$regenerating$df[,c(1,4)]), 
+          file = paste0("to_send/gozonation/hep/hep_clusters_vReg.csv"),
+          col.names = T, row.names = T, quote = F)
+
+pdf("to_send/gozonation/hep/hep_allGenes_vEmb.pdf", height = 4, width = 7)
+print(hep_res_list$embolised$plt_all)
+dev.off()
+pdf("to_send/gozonation/hep/hep_meanCI_vEmb.pdf", height = 2, width = 5)
+print(hep_res_list$embolised$plot)
+dev.off()
+
+pdf("to_send/gozonation/hep/hep_allGenes_vReg.pdf", height = 4, width = 7)
+print(hep_res_list$regenerating$plt_all)
+dev.off()
+pdf("to_send/gozonation/hep/hep_meanCI_vReg.pdf", height = 2, width = 5)
+print(hep_res_list$regenerating$plot)
+dev.off()
+```
+
+Plot example genes
+
+```{r, fig.width=10}
+g_list = c("HAMP", "C3")
+plt_gene_list = list()
+for(g in g_list){
+  plt_df = data.frame("exp" = c(hep_sig_fits$healthy[,g], hep_sig_fits$embolised[,g]),
+                    "cond" = rep(c("healthy", "embolised"), each = 100),
+                    "t" = rep(1:100, 2))
+  plt_df$cond = factor(plt_df$cond, levels = c("healthy", "embolised"))
+  pltemb = ggplot(plt_df, aes(x = t, y = exp, group = cond, col = cond))+
+    geom_line(size = 1.5)+
+    labs(x = "zonation", y = "Expression", title = g)+
+    scale_colour_manual(values = colcond)+
+    theme_bw()+
+    theme(aspect.ratio = 1/1.5)
+  
+  plt_df = data.frame("exp" = c(hep_sig_fits$healthy[,g], hep_sig_fits$regenerating[,g]),
+                    "cond" = rep(c("healthy", "regenerating"), each = 100),
+                    "t" = rep(1:100, 2))
+  plt_df$cond = factor(plt_df$cond, levels = c("healthy", "regenerating"))
+  pltreg = ggplot(plt_df, aes(x = t, y = exp, group = cond, col = cond))+
+    geom_line(size = 1.5)+
+    labs(x = "zonation", y = "Expression", title = g)+
+    scale_colour_manual(values = colcond)+
+    theme_bw()+
+    theme(aspect.ratio = 1/1.5)
+  print(cowplot::plot_grid(pltemb, pltreg, ncol = 2))
+}
+```
+
+Plot GO Terms (general)
+
+```{r}
+plot_df = hep_res_list$embolised$go_cl$all
+plot_df$Description = breakStr(plot_df$Description, 30)
+plot_df$Description = factor(plot_df$Description, levels = rev(plot_df$Description))
+ggplot(plot_df, aes(x = -log10(qvalue), y = Description))+
+  geom_col()+
+  scale_x_continuous(expand = c(0,0), lim = c(0,10))+
+  labs(title = "GO Terms - Embolised", subtitle = "cor < 0.3")+
+  theme_bw()+
+  theme(axis.text = element_text(colour = "black", size = 8),
+        axis.text.y = element_text(vjust = 0.6),
+        panel.grid.major.y = element_blank())
+
+plot_df = hep_res_list$embolised$go_cl$pos
+plot_df$Description = breakStr(plot_df$Description, 30)
+plot_df$Description = factor(plot_df$Description, levels = rev(plot_df$Description))
+ggplot(plot_df, aes(x = -log10(qvalue), y = Description))+
+  geom_col()+
+  scale_x_continuous(expand = c(0,0), lim = c(0,25))+
+  labs(title = "GO Terms - Embolised", subtitle = "cor >= 0.3")+
+  theme_bw()+
+  theme(axis.text = element_text(colour = "black", size = 8),
+        axis.text.y = element_text(vjust = 0.6),
+        panel.grid.major.y = element_blank())
+
+
+plot_df = hep_res_list$regenerating$go_cl$all
+plot_df$Description = breakStr(plot_df$Description, 30)
+plot_df$Description = factor(plot_df$Description, levels = rev(plot_df$Description))
+ggplot(plot_df, aes(x = -log10(qvalue), y = Description))+
+  geom_col()+
+  scale_x_continuous(expand = c(0,0), lim = c(0,12))+
+  labs(title = "GO Terms - Regenerating", subtitle = "cor < 0.3")+
+  theme_bw()+
+  theme(axis.text = element_text(colour = "black", size = 8),
+        axis.text.y = element_text(vjust = 0.6),
+        panel.grid.major.y = element_blank())
+
+plot_df = hep_res_list$regenerating$go_cl$pos
+plot_df$Description = breakStr(plot_df$Description, 30)
+plot_df$Description = factor(plot_df$Description, levels = rev(plot_df$Description))
+ggplot(plot_df, aes(x = -log10(qvalue), y = Description))+
+  geom_col()+
+  scale_x_continuous(expand = c(0,0), lim = c(0,25))+
+  labs(title = "GO Terms - Regenerating", subtitle = "cor >= 0.3")+
+  theme_bw()+
+  theme(axis.text = element_text(colour = "black", size = 8),
+        axis.text.y = element_text(vjust = 0.6),
+        panel.grid.major.y = element_blank())
+```
+
+

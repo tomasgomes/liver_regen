@@ -1,0 +1,694 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+# General Setup
+Setup chunk
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 8)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_knit$get("root.dir")
+```
+
+Setup reticulate
+
+```{r}
+library(reticulate)
+knitr::knit_engines$set(python = reticulate::eng_python)
+py_available(initialize = FALSE)
+use_python(Sys.which("python"))
+py_config()
+```
+
+Load libraries
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(destiny)
+library(plyr)
+library(dplyr)
+library(RColorBrewer)
+```
+
+Functions
+
+```{r}
+getDPT = function(x){
+  return(destiny:::dpt_for_branch(destiny::branch_divide(x, integer(0L)), 
+                                  min(destiny::branch_divide(x, integer(0L))@branch[, 1], 
+                                      na.rm = TRUE)))
+}
+CVgam = function (formula, data, nfold = 10, debug.level = 0, method = "glm.fit", 
+    printit = TRUE, cvparts = NULL, seed = 29){
+  # modified from the `gamclass` package to use gam::gam
+    if (is.null(cvparts)) {
+        set.seed(seed)
+        cvparts <- sample(1:nfold, nrow(data), replace = TRUE)
+    }
+    folds <- unique(cvparts)
+    khat <- hat <- numeric(nrow(data))
+    scale.gam <- summary(gam::gam(formula, data = data, method = method,
+                                  family = mgcv::betar(link = "logit", eps = 0.00001)))$scale
+    for (i in folds) {
+        trainrows <- cvparts != i
+        testrows <- cvparts == i
+        elev.gam <- gam::gam(formula, data = data[trainrows, ], 
+                             method = method, 
+                             family = mgcv::betar(link = "logit", eps = 0.00001))
+        hat[testrows] <- predict(elev.gam, newdata = data[testrows,], select = T, type = "response")
+        res <- residuals(elev.gam)
+    }
+    y <- eval(formula[[2]], envir = as.data.frame(data))
+    res <- y - hat
+    cvscale <- sum(res^2)/length(res)
+    prntvec <- c(GAMscale = scale.gam, `CV-mse-GAM ` = cvscale)
+    if (printit) 
+        print(round(prntvec, 4))
+    invisible(list(fitted = hat, resid = res, cvscale = cvscale, 
+        scale.gam = scale.gam))
+}
+fittingFunc = function(g){
+  t = sub_dat$zonation_pt
+  gene_fit_p = c()
+  gene_fit_vals = data.frame(row.names = 1:100)
+  z = sub_dat@assays$SCT@data[g,]
+    
+  d = data.frame(z=z, t=t)
+  tmp = suppressMessages(gam(z ~ ns(t, df = 3), data=d))
+  
+  # bins for model fitting
+  bb = seq(min(t), max(t), length.out = 100)
+  gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                               newdata = data.frame(t = bb)))
+  p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+  gene_fit_p = c(gene_fit_p, p)
+  names(gene_fit_p)[length(gene_fit_p)] = g
+  
+  return(list("fits" = gene_fit_vals, "pval" = gene_fit_p))
+}
+minmax_scale = function(x){
+  return((x-min(x))/(max(x)-min(x)))
+}
+getTopTerms = function(godf, topt = 100, ncl = 5, nt = 2){
+  topt = if(nrow(godf)<topt) nrow(godf) else topt
+  if(nrow(godf)<ncl) return(godf)
+  df = godf[1:topt,]
+  genes = sapply(df$geneID, function(x) strsplit(x, "/"))
+  resmat = matrix(0, length(genes), length(genes))
+  for(i in 1:length(genes)){
+    for(j in 1:length(genes)){
+      resmat[i,j] = length(intersect(genes[[i]], genes[[j]]))/length(genes[[i]])
+    }
+  }
+  cl = hclust(dist(resmat), method = "ward.D2")
+  cl = cutree(cl, ncl)
+  res_df = data.frame("Description" = df$Description, "qvalue" = df$qvalue, "geneID" = df$geneID, 
+                      cl, stringsAsFactors = F)
+  res_df = res_df[order(res_df$qvalue, decreasing = F),]
+  topterms = unlist(tapply(res_df$Description, res_df$cl, function(x) x[1:nt]))
+  res_df = res_df[res_df$Description %in% topterms,]
+  
+  return(res_df)
+}
+```
+
+Load data (from all cells)
+
+```{r}
+allcells_css = readRDS(file = "data/processed/allcells_css.RDS")
+```
+
+
+
+# Endothelial cell clustering
+Subset LSEC
+
+```{r}
+all_end_cells = allcells_css[,grepl("LSEC", allcells_css@meta.data$allcells_clusters)]
+all_end_cells = suppressWarnings(SCTransform(all_end_cells, do.correct.umi = T, verbose = F, 
+                                             vars.to.regress=c("unique_name","nCount_RNA"),
+                                             variable.features.rv.th = 1, seed.use = 1,
+                                             return.only.var.genes = F, 
+                                             variable.features.n = NULL))
+all_end_cells = RunPCA(all_end_cells, verbose = F)
+all_end_cells = RunUMAP(all_end_cells, dims = 1:25, verbose = F)
+DimPlot(all_end_cells, reduction = "umap", group.by = "Condition")
+DimPlot(all_end_cells, reduction = "umap", group.by = "allcells_simp")
+DimPlot(all_end_cells, reduction = "umap", group.by = "Donor")
+DimPlot(all_end_cells, reduction = "umap", group.by = "Phase")
+FeaturePlot(all_end_cells, reduction = "umap", features = c("MKI67", "ALB", "S100A8", "COLEC11",
+                                                            "CLEC1B", "CLEC14A", "AQP1", "MGP", 
+                                                            "LYVE1", "PROX1", "CD14", "PECAM1",
+                                                            "VWF", "INMT", "PLVAP", "RBP7"))
+```
+
+Cluster and get markers
+
+```{r}
+all_end_cells = FindNeighbors(all_end_cells, reduction = "pca", dims = 1:25,
+                              prune.SNN = 1/5, force.recalc = T, graph.name = "pca25")
+all_end_cells = FindClusters(all_end_cells, algorithm = 2, verbose = F, graph.name = "pca25",
+                             resolution = seq(0.1, 2, 0.1))
+DimPlot(all_end_cells, reduction = "umap", group.by = "pca25_res.1", label = T)
+DimPlot(all_end_cells, reduction = "umap", group.by = "Donor", label = F)
+DimPlot(all_end_cells, reduction = "umap", group.by = "Condition", label = F)
+
+all_end_cells = SetIdent(all_end_cells, value = "pca25_res.1")
+mkend = FindAllMarkers(all_end_cells, logfc.threshold = 0.2, pseudocount.use = 0.1)
+write.csv(mkend[mkend$p_val_adj<=0.05,], 
+          file = "results/endothelial/markers_endo_subpop_all.csv", row.names = T, quote = F)
+
+saveRDS(mkend, file = "./results/endothelial/clust_markers_endo.RDS")
+```
+
+Annotate the clusters
+
+```{r}
+annot = c("0" = "Periportal LSEC",
+"1" = "LSEC (stress)",
+"2" = "EC non-LSEC",
+"3" = "Pericentral LSEC",
+"4" = "Periportal LSEC",
+"5" = "Pericentral LSEC",
+"6" = "LSEC (remodelling)",
+"7" = "LSEC (high MT 1)",
+"8" = "LSEC (interferon)",
+"9" = "B cell/Hepatocyte/EC doublets",
+"10" = "LSEC (high MT 2)",
+"11" = "Unknown_D3_emb",
+"12" = "Unknown_D3_regen",
+"13" = "LSEC (fenestr.)",
+"14" = "Hepatocytes",
+"15" = "Lymphatic EC",
+"16" = "Cycling cells",
+"17" = "Stellate cells")
+
+clnames = data.frame("endo_annot" = all_end_cells@meta.data$pca25_res.1)
+rownames(clnames) = colnames(all_end_cells)
+clnames$endo_spec = plyr::revalue(clnames$endo_annot, annot)
+clnames$endo_simp = as.character(clnames$endo_spec)
+clnames$endo_simp[clnames$endo_annot %in% c(9, 11, 12, 14, 17)] = "Other/unknown"
+
+all_end_cells = AddMetaData(all_end_cells, metadata = clnames)
+DimPlot(all_end_cells, reduction = "umap", group.by = "endo_simp", label = F)
+
+saveRDS(all_end_cells, file = "./results/endothelial/all_end_cells.RDS")
+```
+
+Redo all w/o contaminating cells (only ECs of any type)
+
+```{r}
+only_end_cells = all_end_cells[,!grepl("Other/unknown", all_end_cells@meta.data$endo_simp)]
+only_end_cells = suppressWarnings(SCTransform(only_end_cells, do.correct.umi = T, verbose = F, 
+                                             vars.to.regress=c("unique_name","nCount_RNA"),
+                                             variable.features.rv.th = 1, seed.use = 1,
+                                             return.only.var.genes = F, 
+                                             variable.features.n = NULL))
+only_end_cells = RunPCA(only_end_cells, verbose = F)
+only_end_cells = RunUMAP(only_end_cells, dims = 1:25, verbose = F)
+
+only_end_cells = FindNeighbors(only_end_cells, reduction = "pca", dims = 1:25,
+                              prune.SNN = 1/5, force.recalc = T, graph.name = "pca25")
+only_end_cells = FindClusters(only_end_cells, algorithm = 2, verbose = F, graph.name = "pca25",
+                             resolution = seq(0.1, 2, 0.1))
+DimPlot(only_end_cells, reduction = "umap", group.by = "pca25_res.0.9", label = T)
+DimPlot(only_end_cells, reduction = "umap", group.by = "endo_simp", label = T)
+DimPlot(only_end_cells, reduction = "umap", group.by = "Donor", label = F)
+DimPlot(only_end_cells, reduction = "umap", group.by = "Condition", label = F)
+```
+
+Markers for filtered clusters
+
+```{r}
+only_end_cells = SetIdent(only_end_cells, value = "pca25_res.0.9")
+mkend = FindAllMarkers(only_end_cells, logfc.threshold = 0.2, pseudocount.use = 0.1)
+write.csv(mkend[mkend$p_val_adj<=0.05,], 
+          file = "results/endothelial/markers_endo_subpop_only.csv", row.names = T, quote = F)
+saveRDS(mkend, file = "./results/endothelial/clust_markers_endo_only.RDS")
+```
+
+Annotate the clusters for ECs only
+
+```{r}
+annot = c("0" = "Midzonal LSEC",
+"1" = "Pericentral LSEC",
+"2" = "LSEC (stress)",
+"3" = "Periportal LSEC",
+"4" = "EC non-LSEC",
+"5" = "LSEC (interferon)",
+"6" = "LSEC (remodelling)",
+"7" = "LSEC (high MT 1)",
+"8" = "LSEC (high MT 2)",
+"9" = "LSEC (fenestr.)",
+"10" = "Lymphatic EC",
+"11" = "Cycling cells",
+"12" = "Periportal LSEC")
+
+clnames = data.frame("endoOnly_annot" = only_end_cells@meta.data$pca25_res.0.9)
+rownames(clnames) = colnames(only_end_cells)
+clnames$endo_spec = plyr::revalue(clnames$endoOnly_annot, annot)
+clnames$endo_simp = as.character(clnames$endo_spec)
+
+only_end_cells = AddMetaData(only_end_cells, metadata = clnames)
+DimPlot(only_end_cells, reduction = "umap", group.by = "endo_simp", label = F)
+
+saveRDS(only_end_cells, file = "./results/endothelial/only_end_cells.RDS")
+```
+
+Get condition markers for each cluster
+
+```{r}
+only_end_cells = SetIdent(only_end_cells, value = "Condition")
+mk_endo_list = list()
+for(ct in unique(only_end_cells$endo_simp)){
+  mk_endo_list[[ct]] = FindAllMarkers(only_end_cells[,only_end_cells$endo_simp==ct], assay = "SCT",
+                                      pseudocount.use = 0.1, logfc.threshold = 0.2)
+  mk_endo_list[[ct]] = mk_endo_list[[ct]][mk_endo_list[[ct]]$p_val_adj<=0.05,]
+}
+saveRDS(mk_endo_list, file = "./results/endothelial/cond_markers_endo.RDS")
+```
+
+Plot abundance of clusters per condition
+
+```{r, fig.width=4}
+df_cnt = table(only_end_cells$endo_simp, only_end_cells$Condition)
+df_cnt_perCond = reshape2::melt(apply(df_cnt, 2, function(x) round(x/sum(x)*100, 1)))
+df_cnt_perCl = reshape2::melt(apply(df_cnt, 1, function(x) round(x/sum(x)*100, 1)))
+
+mat_cnt_all = reshape2::dcast(data = df_cnt_perCond, formula = Var1 ~ Var2, value.var = "value")
+rownames(mat_cnt_all) = mat_cnt_all$Var1
+mat_cnt_all = mat_cnt_all[,-1]
+ctord = hclust(dist(mat_cnt_all[,c(2,1,3)]))$order
+
+heatp = pheatmap::pheatmap(mat_cnt_all[ctord,c(2,1,3)], cluster_cols = F, cluster_rows = F, 
+                           treeheight_row = F, display_numbers = T, 
+                           number_color = c("black","white")[as.integer(mat_cnt_all[ctord,c(2,1,3)]>25)+1],
+                           color = colorRampPalette(brewer.pal(n = 9, name = "Blues"))(100),
+                           fontsize_row = 8, fontsize_col = 8, angle_col = 0)
+
+mat_cnt_all = reshape2::dcast(data = df_cnt_perCl, formula = Var1 ~ Var2, value.var = "value")
+rownames(mat_cnt_all) = mat_cnt_all$Var1
+mat_cnt_all = t(mat_cnt_all[,-1])
+ctord = hclust(dist(mat_cnt_all[,c(2,1,3)]))$order
+
+heatp = pheatmap::pheatmap(mat_cnt_all[ctord,c(2,1,3)], cluster_cols = F, cluster_rows = F, 
+                           treeheight_row = F, display_numbers = T, 
+                           number_color = c("black", "white")[as.integer(mat_cnt_all[ctord,c(2,1,3)]>50)+1],
+                           color = colorRampPalette(brewer.pal(n = 9, name = "Blues"))(100),
+                           fontsize_row = 8, fontsize_col = 8, angle_col = 0)
+
+only_end_cells = SetIdent(only_end_cells, value = "endo_simp")
+mkend_simp = FindAllMarkers(only_end_cells, logfc.threshold = 0.2, pseudocount.use = 0.1)
+write.csv(mkend_simp[mkend_simp$p_val_adj<=0.05,], 
+          file = "results/endothelial/markers_endo_subpop_simp.csv", row.names = T, quote = F)
+```
+
+
+
+# Endothelial zonation
+Make different subsets to test
+
+```{r}
+lsec_list = list(lsec_end_cells = only_end_cells[,only_end_cells$pca25_res.0.9 %in% c(0, 1, 3, 12)])
+```
+
+Normalise, PCA, UMAP
+
+```{r}
+h_lsec_list = list()
+for(n in names(lsec_list)){
+  h_lsec_list[[n]] = lsec_list[[n]][,lsec_list[[n]]$Condition=="healthy"]
+  h_lsec_list[[n]] = suppressWarnings(SCTransform(h_lsec_list[[n]], do.correct.umi = T, verbose = F, 
+                                                  vars.to.regress=c("unique_name","nCount_RNA"),
+                                                  variable.features.rv.th = 1, seed.use = 1,
+                                                  return.only.var.genes = F, 
+                                                  variable.features.n = NULL))
+  h_lsec_list[[n]] = RunPCA(h_lsec_list[[n]], verbose = F)
+  h_lsec_list[[n]] = RunUMAP(h_lsec_list[[n]], dims = 1:20, verbose = F)
+}
+```
+
+Get DPT
+
+```{r}
+dpt_l = list()
+for(n in names(h_lsec_list)){
+  set.seed(1)
+  dm = DiffusionMap(h_lsec_list[[n]]@reductions$pca@cell.embeddings[,1:10], 
+                    rotate = T, n_eigs = 5)
+  dpt = DPT(dm)
+  plot(dpt, main = n)
+  dpt_l[[n]] = dpt
+}
+```
+
+Plot DPT as violin
+
+```{r}
+for(n in names(h_lsec_list)){
+  plot_df = data.frame(row.names = rownames(dpt_l[[n]]@branch), 
+                       "cl" = h_lsec_list[[n]]$endo_simp,
+                       "dpt" = getDPT(dpt_l[[n]]))
+  
+  plt = ggplot(plot_df, aes(y = cl, x = dpt, fill = cl))+
+    geom_boxplot()+
+    labs(title = n)+
+    theme_bw()+
+    theme(axis.text.x = element_text(size = 7.5))
+  print(plt)
+}
+```
+
+We're using subset 2 - only bona fide LSEC
+
+```{r}
+# filter some outlier cells and reprocess
+cond = dpt_l$lsec_end_cells@dm$DC1<(0.1)
+sub_2 = h_lsec_list$lsec_end_cells[,cond]
+sub_2 = suppressWarnings(SCTransform(sub_2, do.correct.umi = T, verbose = F, 
+                                     vars.to.regress=c("unique_name","nCount_RNA"),
+                                     variable.features.rv.th = 1, seed.use = 1,
+                                     return.only.var.genes = F, variable.features.n = NULL))
+sub_2 = RunPCA(sub_2, verbose = F)
+sub_2 = RunUMAP(sub_2, dims = 1:20, verbose = F)
+DimPlot(sub_2, reduction = "umap", group.by = "endo_simp")
+
+set.seed(1)
+dm = DiffusionMap(sub_2@reductions$pca@cell.embeddings[,1:10], 
+                  rotate = T, n_eigs = 2)
+dpt = DPT(dm)
+plot(dpt)
+```
+
+Plot pseudotime as boxplot
+
+```{r}
+plot_df = data.frame(row.names = rownames(dpt@branch), 
+                     "cl" = sub_2$endo_simp,
+                     "dpt" = getDPT(dpt))
+
+plt = ggplot(plot_df, aes(y = cl, x = rank(dpt), fill = cl))+
+  geom_boxplot()+
+  theme_bw()+
+  theme(axis.text.x = element_text(size = 7.5))
+print(plt)
+```
+
+Find genes varying along the pseudotime
+
+```{r}
+df_dc = cbind(sub_2@meta.data, 
+              data.frame("DC1" = dpt@dm$DC1, "DC2" = dpt@dm$DC2, 
+                         "DPT" = scales::rescale(rank(getDPT(dpt)), c(0.00001, 0.99999))))
+
+# will only use variable genes
+hvg = sub_2@assays$SCT@var.features
+
+# Fit GAM for each gene using pseudotime as independent variable.
+t = df_dc$DPT
+gene_fit_p = c()
+gene_fit_vals = data.frame(row.names = 1:100)
+for(i in 1:length(hvg)){
+  g = hvg[i]
+  z = sub_2@assays$SCT@data[g,]
+  
+  d = data.frame(z=z, t=t)
+  tmp = suppressMessages(gam(z ~ ns(t, df = 3), data=d))
+  
+  # bins for model fitting
+  bb = seq(min(t), max(t), length.out = 100)
+  gene_fit_vals[,g] = suppressMessages(predict(tmp,
+                                               newdata = data.frame(t = bb)))
+  p = summary(tmp)$parametric.anova$`Pr(>F)`[1]
+  gene_fit_p = c(gene_fit_p, p)
+  names(gene_fit_p)[length(gene_fit_p)] = g
+}
+
+gene_fit_p = fdrtool::fdrtool(gene_fit_p, statistic="pvalue", plot=F, 
+                              verbose=F, cutoff.method="pct0", pct0=0.9)$qval
+```
+
+Now use the top genes to learn the pseudozonation coordinates and project the embolised and regenerating data
+
+```{r}
+sig_genes = gene_fit_p[gene_fit_p<=0.05]
+top_sig_genes = names(sig_genes[order(sig_genes, decreasing = F)][1:1000])
+top_sig_genes = top_sig_genes[top_sig_genes %in% rownames(only_end_cells@assays$SCT@data)]
+
+data_gam_h = cbind(data.frame("DPT" = df_dc$DPT),
+                   Matrix::t(sub_2@assays$SCT@data[top_sig_genes,]))
+
+gam_healthy = gam::gam(DPT ~ ., data = data_gam_h, 
+                       family = mgcv::betar(link = "logit", eps = 0.00001))
+
+all_pred = predict(gam_healthy,
+                   Matrix::t(only_end_cells@assays$SCT@data[top_sig_genes,]), type= "response")
+
+goodcl = only_end_cells$pca25_res.0.9 %in% sub_2$pca25_res.0.9
+all_pred_sub = all_pred[goodcl & only_end_cells$Condition!="healthy" | names(all_pred) %in% colnames(sub_2)]
+
+traj_list = list("healthy" = data_gam_h$DPT, 
+                 "embolised" = all_pred[goodcl & only_end_cells$Condition!="embolised"], 
+                 "regenerating" = all_pred[goodcl & only_end_cells$Condition!="regenerating"])
+
+only_end_cells = AddMetaData(only_end_cells, 
+                             data.frame("zonation_pt" = all_pred, 
+                                        "goodcl" = colnames(only_end_cells) %in% names(all_pred_sub)))
+only_end_cells@meta.data[rownames(data_gam_h),"zonation_pt"] = data_gam_h$DPT
+
+plot_df = only_end_cells@meta.data[names(all_pred_sub),]
+plot_df$bins100 = cut(plot_df$zonation_pt, 10)
+plot_df$Condition = factor(plot_df$Condition, levels = c("healthy", "embolised", "regenerating"))
+ggplot(plot_df, aes(x = bins100, fill = endo_simp))+
+     facet_wrap(~Condition)+
+     geom_bar()+
+     labs(x = "zonation (binned)", y = "Number of cells")+
+     scale_y_continuous(expand = c(0,0))+
+     coord_flip()+
+     guides(fill = guide_legend(title.position = "top"))+
+  theme_classic()+
+     theme(axis.text.y = element_blank(),
+           strip.background = element_rect(fill = colcond),
+           legend.title.align = 0,
+           legend.position = "bottom")
+VlnPlot(only_end_cells[,names(all_pred_sub)], features = "nCount_RNA", 
+        group.by = "endo_simp", split.by = "Condition")
+ggplot(plot_df, aes(x = zonation_pt, y = endo_simp, fill = endo_simp))+
+     facet_wrap(~Condition)+
+     geom_violin()+
+     labs(x = "zonation", y = "clusters")+
+     scale_x_continuous(expand = c(0,0))+
+     guides(fill = guide_legend(title.position = "top"))+
+     theme_bw()+
+     theme(axis.text.y = element_blank(),
+           legend.title.align = 0,
+           legend.position = "bottom")
+```
+
+
+
+```{r}
+plot_df = only_end_cells@meta.data
+plot_df$pt = all_pred[colnames(only_end_cells)]
+plot_df$bins100 = cut(plot_df$pt, 10)
+plot_df$Condition = factor(plot_df$Condition, levels = c("healthy", "embolised", "regenerating"))
+
+ggplot(plot_df, aes(x = pt, y = endo_simp, fill = endo_simp))+
+     facet_wrap(~Condition)+
+     geom_violin()+
+     labs(x = "zonation", y = "clusters")+
+     scale_x_continuous(expand = c(0,0))+
+     guides(fill = guide_legend(title.position = "top", reverse = T))+
+     theme_bw()+
+     theme(axis.text.y = element_blank(),
+           legend.title.align = 0,
+           legend.position = "right")
+```
+
+Do cross validation on the healthy trajectory
+
+```{r}
+sig_genes = gene_fit_p[gene_fit_p<=0.05]
+top_sig_genes = names(sig_genes[order(sig_genes, decreasing = F)][1:1000]) 
+
+data_gam_h = cbind(data.frame("DPT" = traj_list$healthy),
+                   Matrix::t(sub_2@assays$SCT@data[top_sig_genes,]))
+colnames(data_gam_h) = gsub("-", "_", colnames(data_gam_h), fixed = T)
+colnames(data_gam_h) = gsub(".", "_", colnames(data_gam_h), fixed = T)
+
+cv_gam = CVgam(data = data_gam_h, formula = DPT ~ ., nfold = 10, seed = 1, method = "glm.fit")
+
+pdf("results/endothelial/end_original_fitted_pseudotime.pdf", useDingbats = F, 
+    width = 6, height = 5)
+plot(data_gam_h$DPT, cv_gam$fitted, xlab = "Healthy pseudotime",ylab = "Predicted Healthy",
+     main = paste0("Healthy original vs fitted pseudotime\nMSE: ", round(cv_gam$cvscale, 6)),
+     pch = 19, cex = 0.5)
+abline(0,1, col = "blue", lwd = 3)
+dev.off()
+
+plot_df = data.frame("original" = data_gam_h$DPT, "predicted" = cv_gam$fitted)
+plot_df$cl = sub_2@meta.data$endo_simp
+ggplot(plot_df, aes(x = original, y = predicted, colour = cl))+geom_point()
+```
+
+Find varying genes - using all cells along the ranked pseudotime
+
+```{r}
+## get varying genes for each condition
+numCores = 12 #larger values resulted in problems
+start_time <- Sys.time()
+cond_fit_list = list()
+
+only_end_cells_bf = only_end_cells[,only_end_cells$pca25_res.0.9 %in% sub_2$pca25_res.0.9]
+only_end_cells_split = SplitObject(only_end_cells_bf, split.by = "Condition")
+
+for(cond in names(only_end_cells_split)){
+  print(cond)
+  
+  sub_dat = only_end_cells_split[[cond]]
+  # Fit GAM for each gene using pseudotime as independent variable.
+  cond_fit_list[[cond]] = mclapply(hvg, fittingFunc, mc.cores = numCores)
+}
+end_fits_qval = list()
+for(cond in names(cond_fit_list)){
+  fits_df = Reduce(cbind, lapply(cond_fit_list[[cond]], function(x) x$fits))
+  
+  pval_list = unlist(lapply(cond_fit_list[[cond]], function(x) x$pval))
+  names(pval_list) = hvg
+  
+  pval_df = data.frame(pval_list)
+  
+  end_fits_qval[[cond]] = list("fits" = fits_df, "pval" = pval_df,
+                               "fdr" = apply(pval_df, 2, function(x) p.adjust(x, method = "fdr")))
+}
+end_time <- Sys.time()
+end_time - start_time
+
+saveRDS(end_fits_qval, file = "results/endothelial/end_fits_qval.RDS")
+```
+
+Correlate genes between conditions
+
+```{r}
+g = "LYVE1"
+plot(end_fits_qval$healthy$fits[,g])
+points(end_fits_qval$embolised$fits[,g], col = "red")
+points(end_fits_qval$regenerating$fits[,g], col = "blue")
+
+all_var_genes = (end_fits_qval$healthy$fdr<=0.05 & 
+  apply(end_fits_qval$healthy$fits, 2, function(x) diff(range(x))>=0.05)) | 
+  (end_fits_qval$embolised$fdr<=0.05 & 
+  apply(end_fits_qval$embolised$fits, 2, function(x) diff(range(x))>=0.05)) | 
+  (end_fits_qval$regenerating$fdr<=0.05 & 
+  apply(end_fits_qval$regenerating$fits, 2, function(x) diff(range(x))>=0.05))
+
+end_cor_he = sapply(rownames(all_var_genes)[all_var_genes], 
+                    function(g) cor(end_fits_qval$healthy$fits[,g],end_fits_qval$embolised$fits[,g], 
+                                    method = "sp"), simplify = T)
+end_cor_hr = sapply(rownames(all_var_genes)[all_var_genes], 
+                    function(g) cor(end_fits_qval$healthy$fits[,g],end_fits_qval$regenerating$fits[,g], 
+                                    method = "sp"), simplify = T)
+end_cor_er = sapply(rownames(all_var_genes)[all_var_genes], 
+                    function(g) cor(end_fits_qval$embolised$fits[,g],end_fits_qval$regenerating$fits[,g], 
+                                    method = "sp"), simplify = T)
+
+cor_g_df = data.frame("gene" = names(end_cor_he), 
+                      "HvE" = end_cor_he, "HvR" = end_cor_hr, "EvR" = end_cor_er)
+write.csv(cor_g_df, file = "results/endothelial/correlations_zonation_endothelial.csv", 
+          row.names = T, quote = F)
+```
+
+GO Term enrichment
+
+```{r}
+got_cor = list()
+eg_all = clusterProfiler::bitr(colnames(end_fits_qval$healthy$fits), fromType="SYMBOL", 
+                             toType="ENTREZID", OrgDb="org.Hs.eg.db")
+
+eg = clusterProfiler::bitr(names(end_cor_he)[end_cor_he<0.3], fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                qvalueCutoff  = 0.05, 
+                                pAdjustMethod = "BH", readable = T)
+got_cor[["notcor_he"]] = getTopTerms(got@result[got@result$p.adjust<=0.05,], ncl = 4, nt = 2, topt = 1000)
+
+eg = clusterProfiler::bitr(names(end_cor_he)[end_cor_he>=0.3], fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                qvalueCutoff  = 0.05, 
+                                pAdjustMethod = "BH", readable = T)
+got_cor[["cor_he"]] = getTopTerms(got@result[got@result$p.adjust<=0.05,], ncl = 4, nt = 2, topt = 1000)
+
+eg = clusterProfiler::bitr(names(end_cor_hr)[end_cor_hr<0.3], fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                qvalueCutoff  = 0.05, 
+                                pAdjustMethod = "BH", readable = T)
+got_cor[["notcor_hr"]] = getTopTerms(got@result[got@result$p.adjust<=0.05,], ncl = 4, nt = 2, topt = 1000)
+
+eg = clusterProfiler::bitr(names(end_cor_hr)[end_cor_hr>=0.3], fromType="SYMBOL", 
+                           toType="ENTREZID", OrgDb="org.Hs.eg.db")
+got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
+                                OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
+                                qvalueCutoff  = 0.05, 
+                                pAdjustMethod = "BH", readable = T)
+got_cor[["cor_hr"]] = getTopTerms(got@result[got@result$p.adjust<=0.05,], ncl = 4, nt = 2, topt = 1000)
+
+saveRDS(got_cor, file = "results/endothelial/GOTerms_correlations.RDS")
+```
+
+Plot top genes in correlation
+
+```{r}
+topgenes = unique(c(names(end_cor_he[order(end_cor_he, decreasing = T)])[1:30],
+             names(end_cor_hr[order(end_cor_hr, decreasing = T)])[1:30]))
+bottomgenes = unique(c(names(end_cor_he[order(end_cor_he, decreasing = F)])[1:30],
+             names(end_cor_hr[order(end_cor_hr, decreasing = F)])[1:30]))
+usegenes = c(topgenes, bottomgenes)
+
+bins_list = list()
+for(n in names(only_end_cells_split)){
+  plot_df = cbind(data.frame("pt" = rep(1:10, each = 10)),end_fits_qval[[n]]$fits[,usegenes])
+  plot_df$bins10 = cut(plot_df$pt, 10)
+  bins_list[[n]] = sapply(usegenes, function(x) scale(tapply(plot_df[,x], 
+                                                             plot_df$bins10, mean))[10:1])
+}
+bins_mean = Reduce(rbind, bins_list)
+
+hct = hclust(dist(t(bins_list$healthy[,topgenes])), method = "ward.D2")
+ord_bot_h = apply(bins_list$healthy[,bottomgenes], 2, which.max)
+ord_bot_e = apply(bins_list$embolised[,bottomgenes], 2, which.max)
+ord_bot_r = apply(bins_list$regenerating[,bottomgenes], 2, which.max)
+ord_df = data.frame(ord_bot_h, ord_bot_e, ord_bot_r)
+ord_bot = rownames(ord_df)[with(ord_df, order(ord_bot_h, ord_bot_e, ord_bot_r, decreasing = T))]
+ord = c(topgenes[hct$order], ord_bot)
+
+pheatmap::pheatmap(bins_mean[,ord], show_rownames = F, fontsize_col = 6.5, border_color = NA,
+                   gaps_row = c(10,20), gaps_col = c(length(topgenes)),
+                   clustering_method = "ward.D2", cluster_rows = F, cluster_cols = F)
+```
+
+Save Seurat with predictions
+
+```{r}
+saveRDS(only_end_cells, file = "results/endothelial/only_end_cells_zon.RDS")
+```
+
+
+
+
+
+
+
+
+
+
+

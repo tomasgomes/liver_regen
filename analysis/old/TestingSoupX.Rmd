@@ -1,0 +1,110 @@
+---
+title: "Trying SoupX"
+output: html_notebook
+---
+
+
+The goal of this test notebook was to try to run SoupX without all droplets. It doesn't work because we need the empty droplets profile in order to derive the Soup and correct for it
+
+```{r}
+library(Seurat)
+library(SoupX)
+```
+
+
+
+```{r}
+srat_harm = readRDS("data/processed/scripts_out/HarmIntegr_allcells.RDS")
+load("data/processed/cond_srat_indivclust.RData")
+```
+
+
+
+```{r}
+plot_df = srat_harm@reductions$umap@cell.embeddings
+sub_cells = plot_df[plot_df[,1]>(-2) & plot_df[,2]>0.5,]
+```
+
+
+
+```{r}
+FeaturePlot(cond_srat$sc_E6.HEP.Exp1, features = c("FGA", "ANXA2"), reduction = "umap")
+```
+
+
+
+```{r}
+f = function (sc, nonExpressedGeneList, clusters = NULL, maximumContamination = 1, 
+    FDR = 0.05) 
+{
+    if (!is(sc, "SoupChannel")) 
+        stop("sc is not a valid SoupChannel object")
+    if (is.null(clusters)) {
+        if ("clusters" %in% colnames(sc$metaData)) {
+            clusters = setNames(as.character(sc$metaData$clusters), 
+                rownames(sc$metaData))
+        }
+    }
+    if (is.null(clusters) || (length(clusters) == 1 && clusters == 
+        FALSE)) {
+        message("No clusters found or supplied, using every cell as its own cluster.")
+        clusters = setNames(rownames(sc$metaData), rownames(sc$metaData))
+    }
+    if (!all(colnames(sc$toc) %in% names(clusters))) 
+        stop("Invalid cluster specification.  clusters must be a named vector with all column names in the table of counts appearing.")
+    if (!is.list(nonExpressedGeneList)) 
+        stop("nonExpressedGeneList must be a list of sets of genes.  e.g. list(HB = c('HBB','HBA2'))")
+    tgtGns = unique(unlist(nonExpressedGeneList))
+    dat = sc$toc[tgtGns, , drop = FALSE]
+    cnts = do.call(rbind, lapply(nonExpressedGeneList, function(e) Matrix::colSums(dat[e, 
+        , drop = FALSE])))
+    exp = outer(sc$soupProfile[tgtGns, "est"], sc$metaData$nUMIs * 
+        maximumContamination)
+    colnames(exp) = colnames(cnts)
+    rownames(exp) = tgtGns
+    exp = do.call(rbind, lapply(nonExpressedGeneList, function(e) Matrix::colSums(exp[e, 
+        , drop = FALSE])))
+    s = split(names(clusters), clusters)
+    clustExp = ppois(cnts - 1, exp, lower.tail = FALSE)
+    clustExp = t(apply(clustExp, 1, p.adjust, method = "BH"))
+    clustExp = do.call(rbind, lapply(s, function(e) apply(clustExp[, 
+        e, drop = FALSE], 1, min)))
+    clustExp = clustExp >= FDR
+    clustExp = clustExp[match(clusters, rownames(clustExp)), 
+        , drop = FALSE]
+    rownames(clustExp) = names(clusters)
+    if (sum(clustExp) == 0) {
+        warning("No non-expressing cells identified.  Consider setting clusters=FALSE, increasing maximumContamination and/or FDR")
+    }
+    if (sum(clustExp) > 0 && sum(clustExp) < 100) {
+        warning("Fewer than 100 non-expressing cells identified.  The estimation of the contamination fraction may be inaccurate.  Consider setting clusters=FALSE, increasing maximumContamination and/or FDR")
+    }
+    return(clustExp)
+}
+```
+
+
+
+
+```{r}
+hep_genes_bad = c("FGA", "APOA1", "CYP2E1", "SAA1")
+sc = SoupChannel(cond_srat$sc_E6.HEP.Exp1@assays$RNA@counts,
+                 cond_srat$sc_E6.HEP.Exp1@assays$RNA@counts)
+nonExpressedGeneList = list("HEP" = hep_genes_bad)
+sc = setClusters(sc, setNames(cond_srat$sc_E6.HEP.Exp1@meta.data$SCT_snn_res.0.7,
+                              rownames(sc$metaData)))
+useToEst = estimateNonExpressingCells(sc, nonExpressedGeneList = nonExpressedGeneList)
+sc = calculateContaminationFraction(sc, list("HEP" = hep_genes_bad), useToEst = useToEst)
+out = adjustCounts(sc)
+```
+
+
+```{r}
+hep = rownames(cond_srat$sc_E6.HEP.Exp1@reductions$umap@cell.embeddings)[cond_srat$sc_E6.HEP.Exp1@reductions$umap@cell.embeddings[,1]>(-5)]
+useToEst = matrix((colnames(cond_srat$sc_E6.HEP.Exp1) %in% hep), 
+                  1, length(colnames(cond_srat$sc_E6.HEP.Exp1)))
+sc = calculateContaminationFraction(sc, list("HEP" = hep_genes_bad), useToEst = useToEst)
+out = adjustCounts(sc)
+```
+
+

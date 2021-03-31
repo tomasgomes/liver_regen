@@ -60,6 +60,11 @@ dsSeurat = function(srat, variable, assay = "SCT", numis = "nCount_SCT", seed = 
   
   return(srat)
 }
+
+rpfilter = function(x){
+  return(!grepl("^RPL", x$geneID) & !grepl("^RPS", x$geneID) & 
+           !grepl("/RPL", x$geneID, fixed = T) & !grepl("/RPS", x$geneID, fixed = T))
+}
 ```
 
 
@@ -93,7 +98,6 @@ sum(pca$x[,2]>0)
 sum(pca$x[,2]<0 & pca$x[,1]<0)
 sum(pca$x[,2]<0 & pca$x[,1]>0)
 ```
-
 
 
 
@@ -180,6 +184,7 @@ Save allcells_css again with the new annotations
 ```{r}
 saveRDS(allcells_css, file = "data/processed/allcells_css_reannot.RDS")
 ```
+
 
 
 # DE per cell type
@@ -403,35 +408,13 @@ saveRDS(donor_submk_list, file = "results/cond_effect/donor_comparison_list.RDS"
 ```
 
 
-```{r}
-donor_filt = donor_submk_list$all[donor_submk_list$all$p_val_adj<=0.05 &
-                                    donor_submk_list$all$avg_logFC>=0.2,]
-xxx = table(donor_filt$gene, donor_filt$cluster)
-ndon_genes = rowSums(xxx)
-ndonH_genes = rowSums(xxx[,grepl("HD", colnames(xxx))])
-ndonD_genes = rowSums(xxx[,grepl("DD", colnames(xxx))])
-conddiff = ndonH_genes>ndonD_genes | ndonH_genes<ndonD_genes
-
-g_c_l = list()
-dat = allcells_css@assays$SCT@data[,!is.na(allcells_css@meta.data$cell_type)]
-for(n in 1:nrow(allcells_css@assays$SCT@data)){
-  g_c_l[[n]] = tapply(dat[n,], allcells_css$Donor[!is.na(allcells_css@meta.data$cell_type)], 
-                      function(y) sum(y>0))
-}
-```
-
-
-
 
 # Explore results
-
-Filter pathways with ribosomal genes
+Reload data
 
 ```{r}
-rpfilter = function(x){
-  return(!grepl("^RPL", x$geneID) & !grepl("^RPS", x$geneID) & 
-           !grepl("/RPL", x$geneID, fixed = T) & !grepl("/RPS", x$geneID, fixed = T))
-}
+allcells_css = readRDS(file = "data/processed/allcells_css_reannot.RDS")
+filt_comps = readRDS(file = "results/cond_effect/all_filt_cond_comps.RDS")
 ```
 
 Get GO Term enrichment
@@ -459,6 +442,8 @@ for(gr in names(filt_comps)){
       genes = replace(genes, genes>0, 0)
       genes[subtestdf$gene] = subtestdf$avg_logFC
       
+      eg_all = bitr(names(genes), fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
+      
       # GO enrichment
       for(cond in ncond){
         fsel = if(cond==ncond[[1]]){
@@ -468,18 +453,12 @@ for(gr in names(filt_comps)){
           }
         
         if(length(names(genes)[fsel(genes)])>2){
-          eg = clusterProfiler::bitr(names(genes)[fsel(genes)], fromType="SYMBOL", 
-                                     toType="ENTREZID", OrgDb="org.Hs.eg.db")
-          eg_all = clusterProfiler::bitr(names(genes), fromType="SYMBOL", 
-                                         toType="ENTREZID", OrgDb="org.Hs.eg.db")
+          eg = bitr(names(genes)[fsel(genes)], fromType="SYMBOL", toType="ENTREZID", OrgDb="org.Hs.eg.db")
           
           # enrichment
-          reac = ReactomePA::enrichPathway(gene=eg$ENTREZID,pvalueCutoff=0.05, 
-                                           readable=T, universe = eg_all$ENTREZID)
-          got = clusterProfiler::enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, 
-                                          OrgDb = org.Hs.eg.db, ont = "BP", pvalueCutoff  = 0.01,
-                                          qvalueCutoff  = 0.05, 
-                                          pAdjustMethod = "BH", readable = T)
+          reac = enrichPathway(gene=eg$ENTREZID,pvalueCutoff=0.05, readable=T, universe = eg_all$ENTREZID)
+          got = enrichGO(gene = eg$ENTREZID, universe = eg_all$ENTREZID, OrgDb = org.Hs.eg.db, readable = T,
+                         ont = "BP", pvalueCutoff  = 1, qvalueCutoff  = 1, pAdjustMethod = "BH")
           hf = "/links/groups/treutlein/USERS/tomasgomes/gene_refs/human/h.all.v7.2.entrez.gmt"
           egmt = enricher(gene = eg$ENTREZID, universe = eg_all$ENTREZID, TERM2GENE=read.gmt(hf),
                           pvalueCutoff = 1, qvalueCutoff = 1, pAdjustMethod = "BH",
@@ -678,6 +657,8 @@ plt_df = plt_df[order(plt_df$terms, decreasing = T),]
 
 
 
+
+
 Cell types affected by condtions
 
 ```{r}
@@ -823,152 +804,6 @@ for(n in unique(hep_cells_ds@meta.data$Condition)){
 mat[is.na(mat)] = 0
 maxmat = apply(mat, 2, function(x) x/max(x))
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# OLD CODE
-
-```{r}
-# Hep: H v R - no diff; H v E - H is more metab active
-he = filt_comps$major_ct$healthy_v_embolised
-hr = filt_comps$major_ct$healthy_v_regenerating
-er = filt_comps$major_ct$embolised_v_regenerating
-
-he = he[he$celltype=="Hepatocytes",c("gene", "avg_logFC")]
-hr = hr[hr$celltype=="Hepatocytes",c("gene", "avg_logFC")]
-er = er[er$celltype=="Hepatocytes",c("gene", "avg_logFC")]
-
-plot_df = merge(merge(he, hr, by = "gene", all = T), er, by = "gene", all = T)
-plot_df$avg_logFC.x[is.na(plot_df$avg_logFC.x)] = 0
-plot_df$avg_logFC[is.na(plot_df$avg_logFC)] = 0
-plot_df$avg_logFC.y[is.na(plot_df$avg_logFC.y)] = 0
-colnames(plot_df) = c("gene", "he", "hr", "er")
-
-plot(plot_df$he, plot_df$hr)
-```
-
-Subsampling Hepatocytes
-
-```{r}
-set.seed(1)
-hep_cells = allcells_css[,allcells_css@meta.data$major_ct=="Hepatocytes" &
-                           !is.na(allcells_css@meta.data$major_ct)]
-
-fact = hep_cells@meta.data$nCount_SCT/min(tapply(hep_cells@meta.data$nCount_SCT, 
-                                                 hep_cells@meta.data$Condition, median))
-fact = ifelse(fact<=1, 0, log2(fact))
-thinned_counts = seqgendiff::thin_lib(as.matrix(hep_cells@assays$SCT@counts), 
-                                      thinlog2 = fact, relative = T)
-rownames(thinned_counts$mat) = rownames(hep_cells@assays$SCT@data)
-colnames(thinned_counts$mat) = colnames(hep_cells@assays$SCT@data)
-hep_cells@assays$SCT@counts = Matrix::Matrix(thinned_counts$mat, sparse = T)
-hep_cells@assays$SCT@data = log1p(hep_cells@assays$SCT@counts)
-
-comb_cond = combn(unique(hep_cells@meta.data$Condition), 2)
-ds_hep_de = list()
-hep_cells = SetIdent(hep_cells, value = "Condition")
-for(i in 1:ncol(comb_cond)){
-  comp = paste0(comb_cond[1,i], "_v_", comb_cond[2,i])
-  ds_hep_de[[comp]] = FindMarkers(hep_cells, ident.1 = comb_cond[1,i], ident.2 = comb_cond[2,i],
-                          pseudocount.use = 0.1, logfc.threshold = 0, min.cells.feature = 1,
-                          assay = "SCT", max.cells.per.ident = 10000)
-}
-
-boxplot(colSums(hep_cells@assays$SCT@counts)~hep_cells@meta.data$Condition)
-boxplot(hep_cells@meta.data$nCount_SCT~hep_cells@meta.data$Condition)
-```
-
-
-
-```{r}
-# Hep: H v R - no diff; H v E - H is more metab active
-he = ds_hep_de$healthy_v_embolised
-he$gene = rownames(he)
-hr = ds_hep_de$healthy_v_regenerating
-hr$gene = rownames(hr)
-er = ds_hep_de$embolised_v_regenerating
-er$gene = rownames(er)
-
-he = he[,c("gene", "avg_logFC", "p_val_adj")]
-hr = hr[,c("gene", "avg_logFC", "p_val_adj")]
-er = er[,c("gene", "avg_logFC", "p_val_adj")]
-
-plot_df = merge(merge(he, hr, by = "gene", all = T), er, by = "gene", all = T)
-plot_df$avg_logFC.x[is.na(plot_df$avg_logFC.x)] = 0
-plot_df$avg_logFC[is.na(plot_df$avg_logFC)] = 0
-plot_df$avg_logFC.y[is.na(plot_df$avg_logFC.y)] = 0
-plot_df = plot_df[plot_df$p_val_adj.x<=0.05 | 
-                    plot_df$p_val_adj.y<=0.05 | 
-                    plot_df$p_val_adj<=0.05,c(1,2,4,6)]
-colnames(plot_df) = c("gene", "he", "hr", "er")
-
-plot(plot_df$he, -plot_df$er)
-```
-
-Add zonation labels. This revised metadata will also be filtered to avoid contaminaiting cells (and we'll also remove doublets)
-
-```{r}
-meta = data.frame(row.names = rownames(allcells_css@meta.data),
-                  "cell_type" = as.character(allcells_css@meta.data$allcells_simp),
-                  stringsAsFactors = F)
-
-for(cond in names(hep_cells)){
-  hep_zones = hep_cells[[cond]]@meta.data$zonation_int
-  levels(hep_zones) = c("(-0.00099,0.333]" = "Hepatocytes_Z1",
-                        "(0.333,0.667]" = "Hepatocytes_Z2",
-                        "(0.667,1]" = "Hepatocytes_Z3")
-  hep_zones = as.character(hep_zones)
-  names(hep_zones) = colnames(hep_cells[[cond]])
-  meta[names(hep_zones),"cell_type"] = hep_zones
-  
-  end_zones = end_cells[[cond]]@meta.data$zonation_int
-  levels(end_zones) = c("(-0.00099,0.333]" = "LSEC_Z1",
-                        "(0.333,0.667]" = "LSEC_Z2",
-                        "(0.667,1]" = "LSEC_Z3")
-  end_zones = as.character(end_zones)
-  names(end_zones) = colnames(end_cells[[cond]])
-  meta[names(end_zones),"cell_type"] = end_zones
-}
-
-# remove contaminating cells (removed in pseudotime analysis)
-meta = subset(meta, !(cell_type %in% unique(meta$cell_type)[grepl("Hepatocytes (", unique(meta$cell_type), fixed = T) | 
-                                                              grepl("LSEC ", unique(meta$cell_type), fixed = T)]))
-
-# remove contaminating cells and interaction/doublets
-meta = subset(meta, !(cell_type %in% c("Macrophage-T cell interaction",
-                                       "Macrophage-Endothelial interaction",
-                                       "Lymphoid-Endothelial interaction",
-                                       "LSEC periportal", "LSEC pericentral",
-                                       "Kupffer-Endothelial interaction",
-                                       "Hepatocytes (portal/midzone)",
-                                       "Hepatocytes (portal)","Hepatocytes (midzone)",
-                                       "Hepatocytes (central/detox)", "Hepatocytes (central)",
-                                       "Hepatocyte-T cell interaction",
-                                       "Hepatocyte-Myeloid interaction",
-                                       "Hepatocyte-Endothelial interaction",
-                                       "Dividing cells")))
-
-meta[grepl("LSEC_", meta$cell_type),"cell_type"] = as.character(allcells_css@meta.data[rownames(meta)[grepl("LSEC_", meta$cell_type)],"allcells_simp"])
-meta[grepl("Hepatocytes_", meta$cell_type), "cell_type"] = "Hepatocytes"
-```
-
-
-
 
 
 

@@ -679,12 +679,16 @@ ct_g_cond_ann = data.frame("interactions" = rep(as.character(ct_g_cond_ann$inter
                            "description" = rep(as.character(ct_g_cond_ann$description),2))
 ct_g_cond_ann$condition = factor(ct_g_cond_ann$condition, levels = c("healthy", "embolised", "regenerating"))
 
-ggplot(ct_g_cond_ann, aes(x = condition, fill = condition))+
+plt_bar_func = ggplot(ct_g_cond_ann, aes(x = condition, fill = condition))+
   facet_grid(description~celltypes, scales = "free_y")+
   geom_bar()+
   theme_bw()+
   theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
         legend.position = "none")
+
+pdf("../to_send/plt_bar_func.pdf", height = 20, width = 21)
+print(plt_bar_func)
+dev.off()
 
 saveRDS(ct_g_cond_ann, file = "results/cell_comm/ct_g_cond_ann.RDS")
 ```
@@ -752,6 +756,241 @@ ct_int_exp = merge(ct_int_exp, unique(ct_g_cond_ann[,c(1,4)]), by = 1, all = T)
 saveRDS(ct_int_exp, file = "results/cell_comm/interact_celltype_exp_group.RDS")
 ```
 
+Variability of interactions
+
+```{r}
+inter_annot = read.csv("data/interaction_annotation.csv", header = T)
+inter_annot$funct[grepl("imm", inter_annot$funct)] = "immune"
+inter_annot$funct[grepl("inflam", inter_annot$funct)] = "immune"
+gr = inter_annot$funct
+names(gr) = inter_annot$inter
+gr_list = tapply(inter_annot$inter, inter_annot$funct, function(x) x)
+
+he_allint = merge(reform_list$healthy[,1:6], reform_list$embolised[,1:6], by = 1:3, all = T)
+he_allint$lr1.x[is.na(he_allint$lr1.x)] = he_allint$lr1.y[is.na(he_allint$lr1.x)]
+he_allint$lr2.x[is.na(he_allint$lr2.x)] = he_allint$lr2.y[is.na(he_allint$lr2.x)]
+he_allint = he_allint[,c(1:6,9)]
+her_allint = merge(he_allint, reform_list$regenerating[,1:6], by = 1:3, all = T)
+her_allint$lr1.x[is.na(her_allint$lr1.x)] = her_allint$lr1[is.na(her_allint$lr1.x)]
+her_allint$lr2.x[is.na(her_allint$lr2.x)] = her_allint$lr2[is.na(her_allint$lr2.x)]
+her_allint = her_allint[,c(1:7,10)]
+her_allint[is.na(her_allint)] = 0
+colnames(her_allint)[4:8] = c("lr1", "lr2", "healthy_exp", "embolised_exp", "regenerating_exp")
+
+# summarise LSEC and Heptocytes
+her_allint$ct1[grepl("LSEC_", her_allint$ct1)] = "LSEC"
+her_allint$ct2[grepl("LSEC_", her_allint$ct2)] = "LSEC"
+her_allint$ct1[grepl("Hep", her_allint$ct1)] = "Hepatocytes"
+her_allint$ct2[grepl("Hep", her_allint$ct2)] = "Hepatocytes"
+her_allint = her_allint %>% 
+  group_by(id_cp_interaction, ct1, ct2, lr1, lr2) %>% 
+  summarise(mean(healthy_exp), mean(embolised_exp), mean(regenerating_exp),
+            .groups = "keep")
+colnames(her_allint)[6:8] = c("healthy_exp", "embolised_exp", "regenerating_exp")
+
+# count occurrences per condition. this works bc we're already working with sig means
+her_allint = merge(her_allint, data.frame(table(her_allint$id_cp_interaction[her_allint$healthy_exp>0])), 
+                                          by = 1, all.x = T)
+her_allint = merge(her_allint, data.frame(table(her_allint$id_cp_interaction[her_allint$embolised_exp>0])), 
+                                          by = 1, all.x = T)
+her_allint = merge(her_allint, 
+                   data.frame(table(her_allint$id_cp_interaction[her_allint$regenerating_exp>0])), 
+                   by = 1, all.x = T)
+colnames(her_allint)[9:11] = c("healthy_n", "embolised_n", "regenerating_n")
+her_allint[is.na(her_allint)] = 0
+her_allint$ct_pair = factor(paste0(her_allint$ct1, "_", her_allint$ct2))
+
+comb_cond = combn(colnames(her_allint)[6:8],2)
+colnames(comb_cond) = c("he", "hr", "er")
+for(i in colnames(comb_cond)){
+  plot_df = her_allint[her_allint[,comb_cond[1,i]]>0 | her_allint[,comb_cond[2,i]]>0,1:12]
+  
+  exp_df1 = reshape2::dcast(plot_df, formula = id_cp_interaction ~ ct_pair, 
+                            value.var = comb_cond[1,i], fill = 0)
+  rownames(exp_df1) = exp_df1[,1]
+  exp_df1 = exp_df1[,-1]>0
+  exp_df2 = reshape2::dcast(plot_df, formula = id_cp_interaction ~ ct_pair, 
+                            value.var = comb_cond[2,i], fill = 0)
+  rownames(exp_df2) = exp_df2[,1]
+  exp_df2 = exp_df2[,-1]>0
+  
+  plot_df = merge(plot_df, sapply(rownames(exp_df1), 
+                                  function(x) infotheo::mutinformation(exp_df1[x,], exp_df2[x,])),
+                  by.x = 1, by.y = 0, all.x = T)
+  plot_df = merge(plot_df, sapply(rownames(exp_df1), 
+                                  function(x) e1071::hamming.distance(exp_df1[x,], exp_df2[x,])),
+                  by.x = 1, by.y = 0, all.x = T)
+  plot_df = merge(plot_df, sapply(rownames(exp_df1), 
+                                  function(x) e1071::hamming.distance(exp_df1[x,],
+                                                                      exp_df2[x,])/sum(exp_df1[x,] |
+                                                                                         exp_df2[x,])),
+                  by.x = 1, by.y = 0, all.x = T)
+  plot_df = merge(plot_df, sapply(rownames(exp_df1), 
+                                  function(x) sum(exp_df1[x,] | exp_df2[x,])),
+                  by.x = 1, by.y = 0, all.x = T)
+  
+  colnames(plot_df)[13:16] = paste0(c("mutInfo_", "hamm_", "hammNorm_", "tot_"), i)
+  
+  her_allint = merge(her_allint, unique(plot_df[,c(1,13:16)]), all.x = T, by = 1)
+}
+her_allint$mutInfo_er[is.na(her_allint$mutInfo_er)] = 1
+her_allint$mutInfo_hr[is.na(her_allint$mutInfo_hr)] = 1
+her_allint$mutInfo_he[is.na(her_allint$mutInfo_he)] = 1
+her_allint$tot_he[is.na(her_allint$tot_he)] = 0
+her_allint$tot_hr[is.na(her_allint$tot_hr)] = 0
+her_allint$tot_er[is.na(her_allint$tot_er)] = 0
+her_allint$hamm_er[is.na(her_allint$hamm_er)] = 0
+her_allint$hamm_hr[is.na(her_allint$hamm_hr)] = 0
+her_allint$hamm_he[is.na(her_allint$hamm_he)] = 0
+her_allint$hammNorm_er[is.na(her_allint$hammNorm_er)] = 0
+her_allint$hammNorm_he[is.na(her_allint$hammNorm_he)] = 0
+her_allint$hammNorm_hr[is.na(her_allint$hammNorm_hr)] = 0
+
+her_allint$diff_n_he = her_allint$embolised_n-her_allint$healthy_n
+her_allint$diff_n_hr = her_allint$regenerating_n-her_allint$healthy_n
+her_allint$diff_n_er = her_allint$regenerating_n-her_allint$embolised_n
+
+# plot tot vs mutual
+plot_df = unique(her_allint[,c("id_cp_interaction", paste0(c("mutInfo_", "tot_", "diff_n_"), i))])
+ggplot(plot_df, aes(x = tot_er, y = mutInfo_er*(diff_n_er/abs(diff_n_er))))+
+  geom_bin2d()+
+  scale_x_log10()+
+  theme_bw()+
+  theme(aspect.ratio = 1)
+
+saveRDS(her_allint, file = "./results/cell_comm/interactions_mutInfo_condComp.RDS")
+```
+
+GSEA of interactions using mutual information
+
+```{r}
+gsea_list = list()
+for(i in colnames(comb_cond)){
+  vals = unique(her_allint[,c("id_cp_interaction", paste0("mutInfo_", i))])
+  vals2 = vals[,paste0("mutInfo_", i)] 
+  names(vals2) = vals$id_cp_interaction
+  
+  set.seed(1)
+  gsea_list[[i]] = liger::bulk.gsea(1-vals2, set.list = gr_list, n.rand = 1000000)
+  gsea_list[[i]]$group = rownames(gsea_list[[i]])
+  gsea_list[[i]]$comp = i
+}
+
+liger::gsea(1-vals2, geneset = gr_list$immune, plot = T)
+
+# plot GSEA enrichment
+plot_df = Reduce(rbind, gsea_list)
+plot_df$q.val = -log10(plot_df$q.val+0.0000005)*(plot_df$sscore/abs(plot_df$sscore))
+plot_df$comp = factor(plot_df$comp, levels = rev(c("he","hr","er")))
+m = tapply(plot_df$q.val, plot_df$group,mean)
+plot_df$group = factor(plot_df$group, levels = names(m)[order(m, decreasing = F)])
+ggplot(plot_df, aes(x = q.val, y = group, fill = comp))+
+  geom_col(position = "dodge")+
+  geom_vline(xintercept = c(log10(0.05), -log10(0.05)), linetype = "dashed")+
+  geom_vline(xintercept = c(0))+
+  labs(x = "q-value x score signal", y = "interaction type", fill = "comparison")+
+  theme_bw()+
+  theme(axis.text = element_text(colour = "black", size = 7),
+        axis.title = element_text(colour = "black", size = 7.5),
+        legend.position = c(0,1),
+        legend.justification = c(-0.05,1.05),
+        legend.title = element_text(size = 7.5),
+        legend.text = element_text(size = 7),
+        legend.margin = margin(0,0,0,0),
+        legend.key.size = unit(0.35, "cm"))
+
+saveRDS(gsea_list, file = "./results/cell_comm/gsea_interactions_mutInfo_condComp.RDS")
+```
+
+Save mutual information for LR and cell types
+
+```{r}
+# select genes from lowest mutual (table - get most common)
+# +
+# mean mutual per cell type (lowest = more change)
+## plot interactions based on those genes (some are involved in more than one)
+## heatmap - rows ct; columns genes; gaps between interact; 1 heatmap/cond, same ct ordering
+sub_df1 = unique(her_allint[her_allint$tot_he>0,c("id_cp_interaction","ct1","mutInfo_he")])
+sub_df2 = unique(her_allint[her_allint$tot_he>0,c("id_cp_interaction","ct2","mutInfo_he")])
+ct_mut_he = tapply(c(sub_df1$mutInfo_he, sub_df2$mutInfo_he), 
+                   c(sub_df1$ct1, sub_df2$ct2), mean)
+sub_df1 = unique(her_allint[her_allint$tot_hr>0,c("id_cp_interaction","ct1","mutInfo_hr")])
+sub_df2 = unique(her_allint[her_allint$tot_hr>0,c("id_cp_interaction","ct2","mutInfo_hr")])
+ct_mut_hr = tapply(c(sub_df1$mutInfo_hr, sub_df2$mutInfo_hr), 
+                   c(sub_df1$ct1, sub_df2$ct2), mean)
+sub_df1 = unique(her_allint[her_allint$tot_er>0,c("id_cp_interaction","ct1","mutInfo_er")])
+sub_df2 = unique(her_allint[her_allint$tot_er>0,c("id_cp_interaction","ct2","mutInfo_er")])
+ct_mut_er = tapply(c(sub_df1$mutInfo_er, sub_df2$mutInfo_er), 
+                   c(sub_df1$ct1, sub_df2$ct2), mean)
+ct_mut_df = cbind(ct_mut_he,ct_mut_hr,ct_mut_er)
+rownames(ct_mut_df) = names(ct_mut_he)
+colnames(ct_mut_df) = c("he", "hr", "er")
+saveRDS(ct_mut_df, file = "./results/cell_comm/ct_select_mutInfo_condComp.RDS")
+
+sub_df1 = unique(her_allint[her_allint$tot_he>0,c("id_cp_interaction","lr1","mutInfo_he")])
+sub_df2 = unique(her_allint[her_allint$tot_he>0,c("id_cp_interaction","lr2","mutInfo_he")])
+lr_mut_he = tapply(c(sub_df1$mutInfo_he, sub_df2$mutInfo_he), 
+                   c(sub_df1$lr1, sub_df2$lr2), mean)
+sub_df1 = unique(her_allint[her_allint$tot_hr>0,c("id_cp_interaction","lr1","mutInfo_hr")])
+sub_df2 = unique(her_allint[her_allint$tot_hr>0,c("id_cp_interaction","lr2","mutInfo_hr")])
+lr_mut_hr = tapply(c(sub_df1$mutInfo_hr, sub_df2$mutInfo_hr), 
+                   c(sub_df1$lr1, sub_df2$lr2), mean)
+sub_df1 = unique(her_allint[her_allint$tot_er>0,c("id_cp_interaction","lr1","mutInfo_er")])
+sub_df2 = unique(her_allint[her_allint$tot_er>0,c("id_cp_interaction","lr2","mutInfo_er")])
+lr_mut_er = tapply(c(sub_df1$mutInfo_er, sub_df2$mutInfo_er), 
+                   c(sub_df1$lr1, sub_df2$lr2), mean)
+
+lr_cnt_he = table(c(her_allint[her_allint$tot_he>0 & her_allint$mutInfo_he<=0.05,"lr1"],
+                    her_allint[her_allint$tot_he>0 & her_allint$mutInfo_he<=0.05,"lr2"]))
+lr_he = merge(lr_cnt_he, lr_mut_he, by.x = 1, by.y = 0)
+lr_cnt_hr = table(c(her_allint[her_allint$tot_hr>0 & her_allint$mutInfo_hr<=0.05,"lr1"],
+                    her_allint[her_allint$tot_hr>0 & her_allint$mutInfo_hr<=0.05,"lr2"]))
+lr_hr = merge(lr_cnt_hr, lr_mut_hr, by.x = 1, by.y = 0)
+lr_cnt_er = table(c(her_allint[her_allint$tot_er>0 & her_allint$mutInfo_er<=0.05,"lr1"],
+                    her_allint[her_allint$tot_er>0 & her_allint$mutInfo_er<=0.05,"lr2"]))
+lr_er = merge(lr_cnt_er, lr_mut_er, by.x = 1, by.y = 0)
+
+# ECM - which proteins/collagens?; mention TGFB
+# dev - which ligands/receptors
+lr_all = rbind(lr_he, lr_hr, lr_er)
+lr_all$cond = c(rep("he", nrow(lr_he)), rep("hr", nrow(lr_hr)),rep("er", nrow(lr_er)))
+colnames(lr_all) = c("lr", "n_mut.05", "mean_mutInfo", "cond")
+saveRDS(lr_all, file = "./results/cell_comm/LR_select_mutInfo_condComp.RDS")
+```
+
+Plot interactions
+
+```{r}
+# interactions
+intdf = unique(Reduce(rbind, reform_list[1:3])[,c(1,4,5)])
+intdf$intpair = paste0(intdf$lr1, " - ", intdf$lr2)
+
+ct_int_exp_file = unique(ct_int_exp[,c(1,4:5,7:10)])
+ct_int_exp_file$ctpair = paste0(ct_int_exp_file$ct, " - ", ct_int_exp_file$ct_target)
+
+plot_df_int = reshape2::melt(ct_int_exp_file[,c(1,8,4:7)])
+plot_df_int$variable = unlist(lapply(strsplit(as.character(plot_df_int$variable), "_"), 
+                                     function(x) x[[1]][1]))
+plot_df_int$variable = factor(plot_df_int$variable, levels = rev(c("healthy", "embolised", "regenerating")))
+
+sub_plot_df_int = plot_df_int[grepl("Stellate", plot_df_int$ctpair) |
+                                grepl("Kupffer", plot_df_int$ctpair) |
+                                grepl("LSEC", plot_df_int$ctpair),]
+
+sub_plot_df_int = merge(sub_plot_df_int, intdf[,c(1,4)], by = 1, all.x = T)
+
+gg = "ECM"
+ggplot(sub_plot_df_int[sub_plot_df_int$description==gg,], 
+       aes(x = ctpair, y = variable, colour = value, size = value))+
+  facet_grid(intpair~.)+
+  guides(size = guide_legend(title = "exp", reverse = T), 
+         colour = guide_legend(title = "exp", reverse = T))+
+  geom_point()+
+  labs(title = gg)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        strip.text.y = element_text(angle = 0, size = 8))
+```
+
 Important tables
 
 ```{r}
@@ -761,6 +1000,527 @@ for(n in names(inter_df)){
 }
 write.csv(ct_int_exp, col.names = T, row.names = F, quote = F, 
           file = "results/cell_comm/tables/interact_celltype_exp_group.csv")
+```
+
+
+
+```{r}
+redone_meta = list()
+for(cc in unique(allcells_css$Condition)){
+  redone_meta[[cc]] = read.table(paste0("results/cell_comm/CellPhoneDB_runs/", cc, "_meta_names_simp.txt"), 
+                                 sep = "\t", header = T, row.names = 1)
+}
+redone_meta_all = Reduce(rbind, redone_meta)
+redone_meta_all$cell_type[grepl("LSEC_", redone_meta_all$cell_type)] = "LSEC"
+redone_meta_all$cell_type[grepl("Hepatocytes_", redone_meta_all$cell_type)] = "Hepatocytes"
+
+allcells_redone = AddMetaData(allcells_css, redone_meta_all)
+allcells_redone = allcells_redone[,!is.na(allcells_redone$cell_type)]
+```
+
+
+```{r}
+makeMedian = function(point_df, edge_df, cl = c("ct2", "maj_g1", "maj_g2")){
+  mean_major = data.frame("X1" = tapply(point_df$X1, point_df[,cl[1]], median),
+                          "X2" = tapply(point_df$X2, point_df[,cl[1]], median))
+  mean_major[,cl[1]] = rownames(mean_major)
+  
+  edge_df[,cl[2]] = factor(edge_df[,cl[2]], levels = unique(c(edge_df[,cl[2]], edge_df[,cl[3]])))
+  edge_df[,cl[3]] = factor(edge_df[,cl[3]], levels = unique(c(as.character(edge_df[,cl[2]]),
+                                                              edge_df[,cl[3]])))
+  
+  maj_mat = table(edge_df[,cl[2]], edge_df[,cl[3]])
+  diag(maj_mat) = 0
+  edge_major = data.frame(maj_mat + t(maj_mat))
+  edge_major = merge(edge_major, mean_major, by.x = 1, by.y = 3)
+  edge_major = merge(edge_major, mean_major, by.x = 2, by.y = 3)
+  
+  clcomb = combn(unique(c(as.character(edge_major$Var1), as.character(edge_major$Var2))), 2)
+  keep = c()
+  for(j in 1:ncol(clcomb)){
+    keep = c(keep, which(edge_major$Var2==clcomb[1,j] & edge_major$Var1==clcomb[2,j]))
+  }
+  edge_major = edge_major[keep,]
+  
+  return(list(mean_major = mean_major, edge_major = edge_major))
+}
+
+makeMedianCond = function(point_df, edge_df, cl = c("ct", "ct_g1", "ct_g2"), edge_by = "condition"){
+  mean_major = data.frame("X1" = tapply(point_df$X1, point_df[,cl[1]], median),
+                          "X2" = tapply(point_df$X2, point_df[,cl[1]], median))
+  mean_major[,cl[1]] = rownames(mean_major)
+  
+  edge_df[,cl[2]] = factor(edge_df[,cl[2]], levels = unique(c(edge_df[,cl[2]], edge_df[,cl[3]])))
+  edge_df[,cl[3]] = factor(edge_df[,cl[3]], levels = unique(c(as.character(edge_df[,cl[2]]),
+                                                              edge_df[,cl[3]])))
+  
+  edge_l = list()
+  for(i in unique(edge_df[,edge_by])){
+    sub_edge_df = edge_df[edge_df[,edge_by]==i,]
+    maj_mat = table(sub_edge_df[,cl[2]], sub_edge_df[,cl[3]])
+    diag(maj_mat) = 0
+    edge_major = data.frame(maj_mat + t(maj_mat))
+    edge_major = merge(edge_major, mean_major, by.x = 1, by.y = 3)
+    edge_major = merge(edge_major, mean_major, by.x = 2, by.y = 3)
+    
+    # remove repeated
+    clcomb = combn(unique(c(as.character(edge_major$Var1), as.character(edge_major$Var2))), 2)
+    keep = c()
+    for(j in 1:ncol(clcomb)){
+      keep = c(keep, which(edge_major$Var2==clcomb[1,j] & edge_major$Var1==clcomb[2,j]))
+    }
+    
+    edge_l[[i]] = edge_major[keep,]
+  }
+  edge_major = Reduce(rbind, edge_l)
+  edge_major[,edge_by] = unlist(lapply(names(edge_l), function(x) rep(x, nrow(edge_l[[x]]))))
+  edge_major = edge_major[edge_major$Var2!=edge_major$Var1,]
+  
+  return(list(mean_major = mean_major, edge_major = edge_major))
+}
+```
+
+TRY PLOTTING ALL + INTERACTIONS PER CONDITION, OR INTERACTIONS UNIQUE TO CONDITION
+
+```{r, fig.width=16, fig.height=4.6}
+inter_df = readRDS(file = "results/cell_comm/cond_diff_interact_DE.RDS")
+
+# intractions unique to each condition
+unique_inters = c(setdiff(inter_df$healthy$id_cp_interaction, 
+                          c(inter_df$embolised$id_cp_interaction, inter_df$regenerating$id_cp_interaction)),
+                  setdiff(inter_df$embolised$id_cp_interaction, 
+                          c(inter_df$healthy$id_cp_interaction, inter_df$regenerating$id_cp_interaction)),
+                  setdiff(inter_df$regenerating$id_cp_interaction, 
+                          c(inter_df$embolised$id_cp_interaction, inter_df$healthy$id_cp_interaction)))
+
+# interactions unique to healthy or to emb/regen
+comph_inters = c(setdiff(inter_df$healthy$id_cp_interaction, 
+                          c(inter_df$embolised$id_cp_interaction, inter_df$regenerating$id_cp_interaction)),
+                 setdiff(inter_df$embolised$id_cp_interaction, inter_df$healthy$id_cp_interaction),
+                 setdiff(inter_df$regenerating$id_cp_interaction, inter_df$healthy$id_cp_interaction))
+
+# prepare gene pairs per condition
+gene_pairs_cond = rbind(unique(inter_df$healthy[,c("id_cp_interaction", "gn1", "gn2")]),
+                        unique(inter_df$embolised[,c("id_cp_interaction", "gn1", "gn2")]),
+                        unique(inter_df$regenerating[,c("id_cp_interaction", "gn1", "gn2")]))
+gene_pairs_cond$condition = c(rep("healthy", nrow(unique(inter_df$healthy[,c("id_cp_interaction", 
+                                                                             "gn1", "gn2")]))),
+                              rep("embolised", nrow(unique(inter_df$embolised[,c("id_cp_interaction", 
+                                                                                 "gn1", "gn2")]))),
+                              rep("regenerating", nrow(unique(inter_df$regenerating[,c("id_cp_interaction",
+                                                                                       "gn1", "gn2")]))))
+
+# list all LR genes
+all_lr_genes = unique(c(as.character(inter_df$healthy$gn1), as.character(inter_df$healthy$gn2),
+                        as.character(inter_df$embolised$gn1), as.character(inter_df$embolised$gn2),
+                        as.character(inter_df$regenerating$gn1), as.character(inter_df$regenerating$gn2)))
+all_lr_genes = all_lr_genes[all_lr_genes %in% rownames(allcells_redone@assays$SCT@data)]
+
+# calculate mean per cell type and condition for each LR gene
+mean_exp_cond_lr = apply(allcells_redone@assays$SCT@data[all_lr_genes,], 1, 
+                         function(x) tapply(x, paste0(allcells_redone$cell_type, 
+                                                      "_", allcells_redone$Condition), mean))
+
+# determine the cell type and condition with the highest expression
+max_cond_ct = rownames(mean_exp_cond_lr)[apply(mean_exp_cond_lr, 2, which.max)]
+names(max_cond_ct) = colnames(mean_exp_cond_lr)
+max_cond_ct_ct = unlist(lapply(strsplit(max_cond_ct, "_"), function(x) x[1]))
+max_cond_ct_cond = unlist(lapply(strsplit(max_cond_ct, "_"), function(x) x[2]))
+
+# correlation of mean expression
+cor_cond_lr = cor(mean_exp_cond_lr, method = "sp")
+
+# filter correlation with itself, keep only genes with cor>=0.3
+diag(cor_cond_lr) = 0
+adj_cond_mat = cor_cond_lr>=0.3
+
+# build graph, project with MDS
+network_cond = graph_from_adjacency_matrix(adj_cond_mat, weighted=T, mode="undirected", diag=F)
+l_cond = igraph::layout_with_mds(network_cond)
+l_cond = data.frame(l_cond)
+l_cond$gene = colnames(adj_cond_mat)
+rownames(l_cond) = colnames(adj_cond_mat)
+
+# define all edges, based on CellPhoneDB pairings
+tmp_df = merge(gene_pairs_cond, l_cond, by.x = "gn1", by.y = "gene")
+edge_cond_df = merge(tmp_df, l_cond, by.x = "gn2", by.y = "gene")
+edge_cond_df = merge(edge_cond_df, data.frame(max_cond_ct_ct), by.x = 1, by.y = 0, all.x = T)
+edge_cond_df = merge(edge_cond_df, data.frame(max_cond_ct_ct), by.x = 2, by.y = 0, all.x = T)
+colnames(edge_cond_df)[9:10] = c("ct_g1", "ct_g2")
+# add highest expressing major cell types
+edge_cond_df$maj_g1 = ifelse(grepl("LSEC", edge_cond_df$ct_g1), "Endothelial",
+                      ifelse(grepl("Hepatocytes", edge_cond_df$ct_g1), "Hepatocytes",
+                             ifelse(grepl("Stellate cells", edge_cond_df$ct_g1), "Mesenchymal",
+                                    ifelse(grepl("Cholangiocytes", edge_cond_df$ct_g1), "Cholangiocytes", 
+                                           "Immune"))))
+edge_cond_df$maj_g2 = ifelse(grepl("LSEC", edge_cond_df$ct_g2), "Endothelial",
+                      ifelse(grepl("Hepatocytes", edge_cond_df$ct_g2), "Hepatocytes",
+                             ifelse(grepl("Stellate cells", edge_cond_df$ct_g2), "Mesenchymal",
+                                    ifelse(grepl("Cholangiocytes", edge_cond_df$ct_g2), "Cholangiocytes", 
+                                           "Immune"))))
+edge_cond_df = merge(edge_cond_df, data.frame(max_cond_ct_cond), by.x = 1, by.y = 0, all.x = T)
+edge_cond_df = merge(edge_cond_df, data.frame(max_cond_ct_cond), by.x = 2, by.y = 0, all.x = T)
+
+# define the vertices of the network
+point_cond_df = l_cond
+point_cond_df$ct = max_cond_ct_ct[point_cond_df$gene]
+point_cond_df$ct2 = ifelse(grepl("LSEC", point_cond_df$ct), "Endothelial",
+                      ifelse(grepl("Hepatocytes", point_cond_df$ct), "Hepatocytes",
+                             ifelse(grepl("Stellate cells", point_cond_df$ct), "Mesenchymal",
+                                    ifelse(grepl("Cholangiocytes", point_cond_df$ct), "Cholangiocytes", 
+                                           "Immune"))))
+point_cond_df$cond = max_cond_ct_cond[point_cond_df$gene]
+
+# define the median points for each cell type (using max expression)
+pe_l = makeMedian(point_cond_df, edge_cond_df, cl = c("ct", "ct_g1", "ct_g2"))
+
+# plot total gene correlation projection and median network
+pltboth = ggplot()+
+  geom_point(data = point_cond_df, mapping = aes(x = X1, y = X2, colour = ct2), 
+             alpha = 0.25, show.legend = F)+
+  scale_shape_manual(values = c(0,4,19))+
+  geom_segment(data = pe_l[[2]], 
+               mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq), 
+               alpha = 0.15, show.legend = F)+
+  geom_point(data = pe_l[[1]], 
+             mapping = aes(x = X1, y = X2, fill = ct), 
+             alpha = 1, pch = 21, size = 4)+
+  scale_size_continuous(range = c(0, 4), limits = range(pe_l[[2]]$Freq))+
+  theme_classic()+ theme(aspect.ratio = 1)
+print(pltboth)
+
+pltboth = ggplot()+
+  geom_segment(data = edge_cond_df, 
+               mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y), 
+               alpha = 0.03, show.legend = F)+
+  geom_point(data = point_cond_df, mapping = aes(x = X1, y = X2, colour = ct2), 
+             alpha = 0.6, show.legend = F)+
+  scale_shape_manual(values = c(0,4,19))+
+  geom_point(data = pe_l[[1]], 
+             mapping = aes(x = X1, y = X2, fill = ct), 
+             alpha = 1, pch = 21, size = 4)+
+  scale_size_continuous(range = c(0, 4), limits = range(pe_l[[2]]$Freq))+
+  theme_classic()+ theme(aspect.ratio = 1)
+print(pltboth)
+
+# get median per cell type, per condition - FULL NETWORK
+pe_cond_l = makeMedianCond(point_cond_df, edge_cond_df, cl = c("ct", "ct_g1", "ct_g2"))
+
+plt_cond_l = list()
+for(cc in unique(pe_cond_l[[2]]$condition)){
+  plt_cond_l[[cc]] = ggplot()+
+    geom_segment(data = pe_cond_l[[2]][pe_cond_l[[2]]$condition==cc,], 
+                 mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, 
+                               size = Freq, alpha = Freq))+
+    geom_point(data = pe_cond_l[[1]], 
+               mapping = aes(x = X1, y = X2, fill = ct), 
+               alpha = 1, pch = 21, size = 4)+
+    scale_size_continuous(range = c(0, 4), limits = range(pe_cond_l[[2]]$Freq))+
+    scale_alpha_continuous(limits = range(pe_cond_l[[2]]$Freq))+
+    labs(title = cc)+
+    guides(size = guide_legend(direction = "horizontal", nrow = 2),
+           alpha = guide_legend(direction = "horizontal", nrow = 2))+
+    theme_classic()
+}
+plt_cond_l[["leg"]] = cowplot::get_legend(plt_cond_l[["healthy"]])
+
+# plot FULL NETWORK median per condition
+cowplot::plot_grid(plt_cond_l[[1]]+theme(legend.position = "none"), 
+                   plt_cond_l[[2]]+theme(legend.position = "none"),
+                   plt_cond_l[[3]]+theme(legend.position = "none"), plt_cond_l$leg, 
+                   ncol = 4, rel_widths = c(1,1,1,0.5))
+
+# get median per cell type, per condition - UNIQUE PER CONDTION NETWORK
+pe_cond_l_u = makeMedianCond(point_cond_df, edge_cond_df[edge_cond_df$id_cp_interaction %in% unique_inters,],
+                             cl = c("ct", "ct_g1", "ct_g2"))
+
+plt_cond_l_u = list()
+for(cc in unique(pe_cond_l[[2]]$condition)){
+  plt_cond_l_u[[cc]] = ggplot()+
+    geom_segment(data = pe_cond_l_u[[2]][pe_cond_l_u[[2]]$condition==cc,], 
+                 mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq, alpha = Freq))+
+    geom_point(data = pe_cond_l_u[[1]], 
+               mapping = aes(x = X1, y = X2, fill = ct), 
+               alpha = 1, pch = 21, size = 4)+
+    scale_size_continuous(range = c(0, 4), limits = range(pe_cond_l_u[[2]]$Freq))+
+    scale_alpha_continuous(limits = range(pe_cond_l_u[[2]]$Freq))+
+    labs(title = cc)+
+    guides(size = guide_legend(direction = "horizontal", nrow = 2),
+           alpha = guide_legend(direction = "horizontal", nrow = 2))+
+    theme_classic()
+}
+plt_cond_l_u[["leg"]] = cowplot::get_legend(plt_cond_l_u[["healthy"]])
+
+# plot UNIQUE PER CONDTION NETWORK median per condition
+cowplot::plot_grid(plt_cond_l_u[[1]]+theme(legend.position = "none"), 
+                   plt_cond_l_u[[2]]+theme(legend.position = "none"),
+                   plt_cond_l_u[[3]]+theme(legend.position = "none"), plt_cond_l_u$leg, 
+                   ncol = 4, rel_widths = c(1,1,1,0.5))
+
+# get median per cell type, per condition - HEALTHY NETWORK
+pe_cond_l_h = makeMedianCond(point_cond_df, edge_cond_df[edge_cond_df$id_cp_interaction %in% inter_df$healthy$id_cp_interaction,], cl = c("ct", "ct_g1", "ct_g2"))
+
+plt_cond_l_h = list()
+for(cc in unique(pe_cond_l[[2]]$condition)){
+  plt_cond_l_h[[cc]] = ggplot()+
+    geom_segment(data = pe_cond_l_h[[2]][pe_cond_l_h[[2]]$condition==cc,], 
+                 mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq, alpha = Freq))+
+    geom_point(data = pe_cond_l_h[[1]], 
+               mapping = aes(x = X1, y = X2, fill = ct), 
+               alpha = 1, pch = 21, size = 4)+
+    scale_size_continuous(range = c(0, 4), limits = range(pe_cond_l_h[[2]]$Freq))+
+    scale_alpha_continuous(limits = range(pe_cond_l_h[[2]]$Freq))+
+    labs(title = cc)+
+    guides(size = guide_legend(direction = "horizontal", nrow = 2),
+           alpha = guide_legend(direction = "horizontal", nrow = 2))+
+    theme_classic()
+}
+plt_cond_l_h[["leg"]] = cowplot::get_legend(plt_cond_l_h[["healthy"]])
+
+# plot HEALTHY NETWORK median per condition
+cowplot::plot_grid(plt_cond_l_h[[1]]+theme(legend.position = "none"), 
+                   plt_cond_l_h[[2]]+theme(legend.position = "none"),
+                   plt_cond_l_h[[3]]+theme(legend.position = "none"), plt_cond_l_h$leg, 
+                   ncol = 4, rel_widths = c(1,1,1,0.5))
+
+# get median per cell type, per condition - HEALTHY COMPARISON NETWORK
+pe_cond_l_ch = makeMedianCond(point_cond_df, 
+                             edge_cond_df[edge_cond_df$id_cp_interaction %in% comph_inters,], 
+                             cl = c("ct", "ct_g1", "ct_g2"))
+
+plt_cond_l_ch = list()
+for(cc in unique(pe_cond_l[[2]]$condition)){
+  plt_cond_l_ch[[cc]] = ggplot()+
+    geom_segment(data = pe_cond_l_ch[[2]][pe_cond_l_ch[[2]]$condition==cc,], 
+                 mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq, alpha = Freq))+
+    geom_point(data = pe_cond_l_ch[[1]], 
+               mapping = aes(x = X1, y = X2, fill = ct), 
+               alpha = 1, pch = 21, size = 4)+
+    scale_size_continuous(range = c(0, 4), limits = range(pe_cond_l_ch[[2]]$Freq))+
+    scale_alpha_continuous(limits = range(pe_cond_l_ch[[2]]$Freq))+
+    labs(title = cc)+
+    guides(size = guide_legend(direction = "horizontal", nrow = 2),
+           alpha = guide_legend(direction = "horizontal", nrow = 2))+
+    theme_classic()
+}
+plt_cond_l_ch[["leg"]] = cowplot::get_legend(plt_cond_l_ch[["healthy"]])
+
+# plot HEALTHY COMPARISON NETWORK median per condition
+cowplot::plot_grid(plt_cond_l_ch[[1]]+theme(legend.position = "none"), 
+                   plt_cond_l_ch[[2]]+theme(legend.position = "none"),
+                   plt_cond_l_ch[[3]]+theme(legend.position = "none"), plt_cond_l_ch$leg, 
+                   ncol = 4, rel_widths = c(1,1,1,0.5))
+```
+
+Save network objects
+
+```{r}
+save(edge_cond_df, point_cond_df, file = "results/cell_comm/networks_cond.RData")
+save(pe_l, pe_cond_l, pe_cond_l_u, pe_cond_l_h, pe_cond_l_ch, 
+     file = "results/cell_comm/median_networks_cond.RData")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+inter_df = readRDS(file = "results/cell_comm/cond_diff_interact_DE.RDS")
+
+gene_pairs = unique(rbind(inter_df$healthy[,c("id_cp_interaction", "gn1", "gn2")],
+                          inter_df$embolised[,c("id_cp_interaction", "gn1", "gn2")],
+                          inter_df$regenerating[,c("id_cp_interaction", "gn1", "gn2")]))
+
+all_lr_genes = unique(c(as.character(inter_df$healthy$gn1), as.character(inter_df$healthy$gn2),
+                        as.character(inter_df$embolised$gn1), as.character(inter_df$embolised$gn2),
+                        as.character(inter_df$regenerating$gn1), as.character(inter_df$regenerating$gn2)))
+all_lr_genes = all_lr_genes[all_lr_genes %in% rownames(allcells_redone@assays$SCT@data)]
+
+mean_exp_lr = apply(allcells_redone@assays$SCT@data[all_lr_genes,], 1, 
+                    function(x) tapply(x, allcells_redone$cell_type, mean))
+
+max_ct = rownames(mean_exp_lr)[apply(mean_exp_lr, 2, which.max)]
+names(max_ct) = colnames(mean_exp_lr)
+
+cor_lr = cor(mean_exp_lr, method = "sp")
+diag(cor_lr) = 0
+
+#use_g = names(max_ct)[max_ct %in% c("Stellate cells", "Hepatocytes", "Endothelial cells (non-LSEC)", "Cholangiocytes")]
+
+library(igraph)
+adj_mat = cor_lr>0.3
+sub_adj_mat = adj_mat[rowSums(adj_mat)>=3, colSums(adj_mat)>=3]
+network = graph_from_adjacency_matrix(sub_adj_mat, 
+                                      weighted=T, mode="undirected", diag=F)
+
+#l = igraph::layout_with_fr(network, niter = 5000)
+l = igraph::layout_with_mds(network)
+#l = igraph::layout_with_kk(network)
+
+l = data.frame(l)
+l$gene = colnames(sub_adj_mat)
+rownames(l) = colnames(sub_adj_mat)
+
+tmp_df = merge(gene_pairs, l, by.x = "gn1", by.y = "gene")
+edge_df = merge(tmp_df, l, by.x = "gn2", by.y = "gene")
+edge_df = merge(edge_df, data.frame(max_ct), by.x = 1, by.y = 0, all.x = T)
+edge_df = merge(edge_df, data.frame(max_ct), by.x = 2, by.y = 0, all.x = T)
+colnames(edge_df)[8:9] = c("ct_g1", "ct_g2")
+edge_df$maj_g1 = ifelse(grepl("LSEC", edge_df$ct_g1), "Endothelial",
+                      ifelse(grepl("Hepatocytes", edge_df$ct_g1), "Hepatocytes",
+                             ifelse(grepl("Stellate cells", edge_df$ct_g1), "Mesenchymal",
+                                    ifelse(grepl("Cholangiocytes", edge_df$ct_g1), "Cholangiocytes", 
+                                           "Immune"))))
+edge_df$maj_g2 = ifelse(grepl("LSEC", edge_df$ct_g2), "Endothelial",
+                      ifelse(grepl("Hepatocytes", edge_df$ct_g2), "Hepatocytes",
+                             ifelse(grepl("Stellate cells", edge_df$ct_g2), "Mesenchymal",
+                                    ifelse(grepl("Cholangiocytes", edge_df$ct_g2), "Cholangiocytes", 
+                                           "Immune"))))
+
+point_df = l
+point_df$ct = max_ct[point_df$gene]
+point_df$ct2 = ifelse(grepl("LSEC", point_df$ct), "Endothelial",
+                      ifelse(grepl("Hepatocytes", point_df$ct), "Hepatocytes",
+                             ifelse(grepl("Stellate cells", point_df$ct), "Mesenchymal",
+                                    ifelse(grepl("Cholangiocytes", point_df$ct), "Cholangiocytes", 
+                                           "Immune"))))
+
+plt = ggplot()+
+  geom_segment(data = edge_df, mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y), alpha = 0.05)+
+  geom_point(data = point_df, mapping = aes(x = X1, y = X2, colour = ct2), alpha = 1)+
+    theme_classic()
+print(plt)
+
+pe_l = makeMedian(point_df, edge_df)
+
+plt2 = ggplot()+
+  geom_segment(data = pe_l[[2]], mapping = aes(x = X1.x, xend = X1.y, 
+                                                y = X2.x, yend = X2.y, size = Freq), 
+               alpha = 0.2)+
+  geom_point(data = pe_l[[1]], mapping = aes(x = X1, y = X2, fill = ct2), 
+             alpha = 1, pch = 21, size = 5)+
+  scale_size_continuous(range = c(0.2, 4))+
+  theme_classic()
+print(plt2)
+
+plt3 = ggplot()+
+  geom_segment(data = edge_df, mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y), alpha = 0.05)+
+  geom_point(data = point_df, mapping = aes(x = X1, y = X2, colour = ct2), alpha = 1)+
+  geom_segment(data = pe_l[[2]], mapping = aes(x = X1.x, xend = X1.y, 
+                                                y = X2.x, yend = X2.y, size = Freq), 
+               alpha = 0.2)+
+  geom_point(data = pe_l[[1]], mapping = aes(x = X1, y = X2, fill = ct2), 
+             alpha = 1, pch = 21, size = 5)+
+  scale_size_continuous(range = c(0.2, 4))+
+    theme_classic()
+print(plt3)
+
+
+pe_l_all = makeMedian(point_df, edge_df, cl = c("ct", "ct_g1", "ct_g2"))
+
+plt4 = ggplot()+
+  geom_segment(data = edge_df, mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y), alpha = 0.05)+
+  geom_point(data = point_df, mapping = aes(x = X1, y = X2, colour = ct), alpha = 1, show.legend = F)+
+  geom_segment(data = pe_l_all[[2]], mapping = aes(x = X1.x, xend = X1.y, 
+                                                y = X2.x, yend = X2.y, size = Freq), 
+               alpha = 0.1, show.legend = F)+
+  geom_point(data = pe_l_all[[1]], mapping = aes(x = X1, y = X2, fill = ct2), 
+             alpha = 1, pch = 21, size = 4)+
+  scale_size_continuous(range = c(0.2, 4))+
+    theme_classic()
+print(plt4)
+```
+
+```{r}
+set.seed(79679)
+l = uwot::umap(t(mean_exp_cond_lr), metric = "cosine", ret_nn = T, n_epochs = 1000)
+cl = dbscan::dbscan(l$embedding, eps = .4, minPts = 5)
+plot(l_cond$X1, l_cond$X2, col = cl$cluster)
+
+l_cond = data.frame(l$embedding)
+l_cond$gene = colnames(mean_exp_cond_lr)
+l_cond$cl = cl$cluster
+rownames(l_cond) = colnames(mean_exp_cond_lr)
+
+tmp_df = merge(gene_pairs_cond, l_cond, by.x = "gn1", by.y = "gene")
+edge_cond_df = merge(tmp_df, l_cond, by.x = "gn2", by.y = "gene")
+edge_cond_df = merge(edge_cond_df, data.frame(max_cond_ct_ct), by.x = 1, by.y = 0, all.x = T)
+edge_cond_df = merge(edge_cond_df, data.frame(max_cond_ct_ct), by.x = 2, by.y = 0, all.x = T)
+colnames(edge_cond_df)[11:12] = c("ct_g1", "ct_g2")
+colnames(edge_cond_df)[c(7,10)] = c("cl_g2", "cl_g1")
+edge_cond_df$maj_g1 = ifelse(grepl("LSEC", edge_cond_df$ct_g1), "Endothelial",
+                      ifelse(grepl("Hepatocytes", edge_cond_df$ct_g1), "Hepatocytes",
+                             ifelse(grepl("Stellate cells", edge_cond_df$ct_g1), "Mesenchymal",
+                                    ifelse(grepl("Cholangiocytes", edge_cond_df$ct_g1), "Cholangiocytes", 
+                                           "Immune"))))
+edge_cond_df$maj_g2 = ifelse(grepl("LSEC", edge_cond_df$ct_g2), "Endothelial",
+                      ifelse(grepl("Hepatocytes", edge_cond_df$ct_g2), "Hepatocytes",
+                             ifelse(grepl("Stellate cells", edge_cond_df$ct_g2), "Mesenchymal",
+                                    ifelse(grepl("Cholangiocytes", edge_cond_df$ct_g2), "Cholangiocytes", 
+                                           "Immune"))))
+edge_cond_df = merge(edge_cond_df, data.frame(max_cond_ct_cond), by.x = 1, by.y = 0, all.x = T)
+edge_cond_df = merge(edge_cond_df, data.frame(max_cond_ct_cond), by.x = 2, by.y = 0, all.x = T)
+colnames(edge_cond_df)[4] = "cond"
+
+point_cond_df = l_cond
+point_cond_df$ct = max_cond_ct_ct[point_cond_df$gene]
+point_cond_df$ct2 = ifelse(grepl("LSEC", point_cond_df$ct), "Endothelial",
+                      ifelse(grepl("Hepatocytes", point_cond_df$ct), "Hepatocytes",
+                             ifelse(grepl("Stellate cells", point_cond_df$ct), "Mesenchymal",
+                                    ifelse(grepl("Cholangiocytes", point_cond_df$ct), "Cholangiocytes", 
+                                           "Immune"))))
+point_cond_df$cond = max_cond_ct_cond[point_cond_df$gene]
+
+makeMedianCond = function(point_df, edge_df, cl = c("ct", "ct_g1", "ct_g2"), edge_by = "cond"){
+  mean_major = data.frame("X1" = tapply(point_df$X1, point_df[,cl[1]], median),
+                          "X2" = tapply(point_df$X2, point_df[,cl[1]], median))
+  mean_major[,cl[1]] = rownames(mean_major)
+  
+  edge_df[,cl[2]] = factor(edge_df[,cl[2]], levels = unique(edge_df[,cl[2]]))
+  edge_df[,cl[3]] = factor(edge_df[,cl[3]], levels = unique(edge_df[,cl[3]]))
+  
+  edge_l = list()
+  for(i in unique(edge_df[,edge_by])){
+    sub_edge_df = edge_df[edge_df[,edge_by]==i,]
+    maj_mat = table(sub_edge_df[,cl[2]], sub_edge_df[,cl[3]])
+    edge_major = data.frame(maj_mat + t(maj_mat))
+    edge_major = merge(edge_major, mean_major, by.x = 1, by.y = 3)
+    edge_major = merge(edge_major, mean_major, by.x = 2, by.y = 3)
+    edge_l[[i]] = edge_major
+  }
+  edge_major = Reduce(rbind, edge_l)
+  edge_major[,edge_by] = unlist(lapply(names(edge_l), function(x) rep(x, nrow(edge_l[[x]]))))
+  
+  return(list(mean_major = mean_major, edge_major = edge_major))
+}
+
+pe_cond_l = makeMedianCond(point_cond_df, edge_cond_df, 
+                           edge_by = "cond", cl = c("cl", "cl_g1", "cl_g2"))
+
+sub_e = edge_cond_df$max_cond_ct_cond.x==edge_cond_df$max_cond_ct_cond.y
+sub_e = edge_cond_df#[sub_e,]
+#sub_e$cond = sub_e$max_cond_ct_cond.x
+plt4 = ggplot()+
+  facet_wrap(~cond)+
+  #geom_segment(data = sub_e, mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y), 
+  #             alpha = 0.05)+
+  geom_point(data = point_cond_df, mapping = aes(x = X1, y = X2, colour = as.character(cl)), 
+             alpha = 1, show.legend = T)+
+  geom_segment(data = pe_cond_l[[2]], mapping = aes(x = X1.x, xend = X1.y, 
+                                                y = X2.x, yend = X2.y, size = Freq), 
+               alpha = 0.1, show.legend = F)+
+  geom_point(data = pe_cond_l[[1]], mapping = aes(x = X1, y = X2, fill = as.character(cl)), 
+             alpha = 1, pch = 21, size = 4)+
+  scale_size_continuous(range = c(0.2, 4))+
+    theme_classic()
+print(plt4)
 ```
 
 
