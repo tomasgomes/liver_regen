@@ -17,6 +17,7 @@ knitr::opts_knit$get("root.dir")
 Load libraries
 
 ```{r}
+library(dplyr)
 library(Seurat)
 library(ggplot2)
 library(ggrepel)
@@ -388,6 +389,14 @@ dev.off()
 Import markers
 
 ```{r}
+markers = c("ASGR1", "APOB", "APOC3", "CYP2E1", "HAMP", "ORM1", "SAA1", "NNMT", "FABP1", "MT1G", "ORM2", "TTR", "HP", "APOC1", "APOA2","FGB","CYP3A4","CPS1","ARG1","SAA2",# Hep
+            "KRT7","CLDN4","EPCAM", "TACSTD2", "CD24", "KRT19", "ANXA4", "CXCL6", "FXYD2", "SOX4",  "CRYAB","DEFB1","SLC12A2","MMP7","TNFRSF12A","CXCL1","BICC1","S100A14","DCDC2","PLPP2",# Cho
+            "CLEC4G","PECAM1","CD36", "FCN3", "DNASE1L3", "CLEC1B", "CRHBP", "AKAP12", "IFI27", "GNG11", "IL33","FLT1","PRSS23","ENG","RAMP3","F8","VWF","CLDN5","CCL14","LYVE1",# End
+            "DCN","COLEC11","ACTA2", "CCL2", "TAGLN", "IGFBP3", "BGN", "LUM", "COL3A1", "MYL9", "TPM2","AEBP1","GGT5","ASPN","COL14A1","PTGDS","COL6A1","CYR61","COLEC10","CXCL12",# Mes
+            "PTPRC","HLA-DQA1","LYZ", "LILRB2", "MARCO", "C1QB", "FCGR3A",  "NKG7", "MS4A1", "MZB1", "CCL5","KLRD1","AREG","MS4A7","AXL","CD69","GPR183","TLR2","CD44","IL7R") # Imm
+mk_list = list("Hepatocytes" = markers[1:10], "Cholangiocytes" = markers[21:30], 
+               "Endothelial" = markers[41:50], "Mesenchymal" = markers[61:70], "Immune" = markers[81:90])
+
 cell_type_mk = readRDS(file = "results/integr_allcells/cell_type_mk_major.RDS")
 fresh_de = list()
 for(n in unique(cell_type_mk$major_all$cluster)){
@@ -420,7 +429,7 @@ for(n in names(fresh_de)){
   both_DE$iscol = ifelse(cond_fc & cond_pv, 
                          ifelse(both_DE$gene %in% mk_list[[n]], "istop", "isDE"), "notDE")
   both_DE$iscol = factor(both_DE$iscol, levels = rev(c("istop", "isDE", "notDE")))
-  both_DE$istop = both_DE$gene %in% mk_list[[n]][1:3]
+  both_DE$istop = both_DE$gene %in% mk_list[[n]]#[1:3]
   both_list[[n]] = both_DE
   top_mk[[n]] = both_DE$gene[cond_fc & cond_pv][1:20]
 }
@@ -478,12 +487,14 @@ callback = function(hc, mat){
 
 pdf("figure_panels/fig1/major_celltypes_heatmap_freshfrozen_10.pdf", 
     useDingbats = F, height = 7.5, width = 6)
-heat = pheatmap::pheatmap(mean_ct[markers[c(41:50, 61:70, 81:90,  1:10, 21:30)],], clustering_method = "ward.D2", treeheight_row = 0, 
-                   annotation_col = annot_df, cluster_rows = F, treeheight_col = 20, fontsize_row = 5.5,
-                   annotation_colors = list("processing" = c("fresh" = "#d4d4d4", "frozen" = "#5d5d5d"),
-                                            "cell.type" = colsmajor[-6]),
-                   show_colnames = F, #clustering_callback = callback,
-                   color = colorRampPalette(rev(brewer.pal(n = 9, name = "RdBu")))(100))
+heat = pheatmap::pheatmap(mean_ct[markers[c(41:50, 61:70, 81:90,  1:10, 21:30)],], 
+                          clustering_method = "ward.D2", treeheight_row = 0, annotation_col = annot_df,
+                          cluster_rows = F, treeheight_col = 20, fontsize_row = 5.5,
+                          annotation_colors = list("processing" = c("fresh" = "#d4d4d4", 
+                                                                    "frozen" = "#5d5d5d"),
+                                                   "cell.type" = colsmajor[-6]),
+                          show_colnames = F, 
+                          color = colorRampPalette(rev(brewer.pal(n = 9, name = "RdBu")))(100))
 dev.off()
 ```
 
@@ -506,7 +517,7 @@ for(n in names(both_list)){
     geom_vline(xintercept = 0, colour = "grey40")+
     geom_hline(yintercept = 0, colour = "grey40")+
     geom_point()+
-    geom_text_repel(data = both_DE[both_DE$istop,], mapping = aes(label = gene),
+    geom_text_repel(data = both_DE[both_DE$istop & both_DE$iscol=="istop",], mapping = aes(label = gene),
                     fontface = "bold")+
     theme_bw()+
     scale_colour_manual(values = cols_use)+
@@ -720,8 +731,8 @@ m_ct_fresh[m_ct_fresh<(-4)] = -4.01
 
 annot_df = unique(plot_df[,c(3,4)])
 annot_df = data.frame(row.names = annot_df$names_clusters, "ct" = annot_df$names_major)
-heat = pheatmap::pheatmap(m_ct_fresh[c(4,7,10,9,5,14,11,8,3,12,1,6,2,13),], 
-                          clustering_method = "ward.D2", treeheight_row = 0, scale = "row",
+heat = pheatmap::pheatmap(scale(m_ct_fresh[c(4,7,10,9,5,14,11,8,3,12,1,6,2,13),]), 
+                          clustering_method = "ward.D2", treeheight_row = 0,
                           treeheight_col = 20, fontsize_row = 8, fontsize_col = 8,
                           cluster_cols = F, cluster_rows = F,
                           annotation_row = annot_df, annotation_colors = list(ct = colsmajor[-6]),
@@ -739,6 +750,9 @@ UMAP with cell types
 
 ```{r}
 allcells_css = readRDS(file = "data/processed/allcells_css_reannot.RDS")
+
+load(file = "data/processed/healthy_srat_beforeFiltering.RData")
+load(file = "data/processed/cond_srat_beforeFiltering.RData")
 ```
 
 ```{r}
@@ -1323,6 +1337,37 @@ print(vio_counts_ct)
 dev.off()
 ```
 
+nUMI in filtered and kept cells
+
+```{r}
+c_meta = Reduce(rbind, lapply(cond_srat, function(x) x@meta.data))[,c(11,12,13,14,15,17,23)]
+h_meta = Reduce(rbind, lapply(healthy_srat, function(x) x@meta.data))[,c(11,12,13,14,15,17,23)]
+all_meta = rbind(h_meta, c_meta)
+
+all_meta$keep_allfilt = factor(c("No", "Yes")[all_meta$keep_allfilt+1], levels = c("Yes", "No"))
+all_meta$Name = factor(all_meta$Name, 
+                       levels = paste0("sc_", c(paste0("H",1:3),paste0("E",c(1:3,5:7)),paste0("R",c(1:3,5:7)))))
+levels(all_meta$Name) = paste0("sc_", c(paste0("H",1:3),paste0("E",1:6),paste0("R",1:6)))
+
+n_cells = all_meta %>% count(Name, Fraction, keep_allfilt)
+
+plt = ggplot(all_meta, aes(x = Fraction, y = nCount_SCT, fill = keep_allfilt, colour = keep_allfilt))+
+  facet_wrap(~Name, scales = "free", nrow = 3)+
+  geom_violin(scale = "width")+
+  scale_colour_manual(values = c("Yes" = "grey20","No" = "grey80"))+
+  scale_fill_manual(values = c("Yes" = "grey20","No" = "grey80"))+
+  scale_y_log10()+
+  labs(y = "nUMI", colour = "keep", fill = "keep")+
+  theme(strip.background = element_rect(fill = "transparent", colour = "black", size = 1),
+        strip.text = element_text(margin = margin(2,0,2,0), size = 9),
+        axis.ticks = element_line(), 
+        axis.text.y = element_text(size = 6.5))
+
+pdf("figure_panels/fig2/filtering_nUMI.pdf", height = 3.3, width = 7.1, useDingbats = F)
+print(plt)
+dev.off()
+```
+
 UMAP with healthy donors split
 
 ```{r, fig.height=2, fig.width=3}
@@ -1832,7 +1877,6 @@ write.csv(rcl_genes, file = "figure_panels/fig3/hep_regen_clusters_fdr.csv", row
 
 
 
-
 # Figure 4
 ## Main Figure
 Load data
@@ -1846,6 +1890,8 @@ mksimp = read.csv("results/endothelial/markers_endo_subpop_simp.csv", header = T
 mksimp = mksimp[order(mksimp$avg_logFC, decreasing = T),]
 
 top_genes = readRDS(file = "results/cond_effect/top_genes_mk.RDS")
+
+go_end = readRDS("results/endothelial/GOTerms_correlations.RDS")
 ```
 
 UMAPs
@@ -2104,7 +2150,39 @@ print(heat_plt)
 dev.off()
 ```
 
+GO Terms
 
+```{r}
+go_theme = theme_bw()+
+  theme(axis.text = element_text(colour = "black", size = 7.5),
+        axis.title = element_text(size = 8),
+        plot.title = element_text(size = 9),
+        plot.title.position = "plot",
+        plot.subtitle = element_text(size = 7.5),
+        axis.text.y = element_text(vjust = 0.6, colour = c("grey45", "grey17")),
+        panel.grid.major.y = element_blank())
+
+gopltFunc = function(plot_df, tit = "", subtit = ""){
+  plot_df$Description = breakStr(plot_df$Description, 30)
+  plot_df$Description = factor(plot_df$Description, levels = rev(plot_df$Description))
+  plot_df$fill = as.character(rep(1:2, ceiling(nrow(plot_df)/2)))[1:nrow(plot_df)]
+  plt = ggplot(plot_df, aes(x = -log10(qvalue), y = Description, fill = fill))+
+    geom_col(show.legend = F)+
+    scale_x_continuous(expand = c(0,0), lim = c(0, max(-log10(plot_df$qvalue))+1))+
+    scale_fill_manual(values = c("grey17", "grey45"))+
+    labs(title = tit, subtitle = subtit)+
+    go_theme
+  return(plt)
+}
+
+pdf("figure_panels/fig_endo/end_go_emb_corr.pdf", height = 3.2, width = 3.6, useDingbats = F)
+print(gopltFunc(go_end$cor_he, tit = "GO Terms - Embolised", subtit = "cor >= 0.3"))
+dev.off()
+
+pdf("figure_panels/fig_endo/end_go_reg_corr.pdf", height = 3.2, width = 3.6, useDingbats = F)
+print(gopltFunc(go_end$cor_hr, tit = "GO Terms - Regenerating", subtit = "cor >= 0.3"))
+dev.off()
+```
 
 
 
@@ -2135,6 +2213,8 @@ gsea_list = readRDS(file = "./results/cell_comm/gsea_interactions_mutInfo_condCo
 # network data
 load("results/cell_comm/median_networks_cond.RData")
 load("results/cell_comm/networks_cond.RData")
+load("results/cell_comm/median_networks_cond_umap.RData")
+load("results/cell_comm/networks_cond_umap.RData")
 ```
 
 Plot changes in number of interactions per condition
@@ -2480,7 +2560,7 @@ print(dev_plt)
 dev.off()
 ```
 
-Network plots
+Network plots - MDS
 
 ```{r}
 pltboth = ggplot()+
@@ -2542,7 +2622,69 @@ print(plt_cond_l_ch$regenerating)
 dev.off()
 ```
 
+Network plots - UMAP
 
+```{r}
+pltboth = ggplot()+
+  geom_point(data = point_cond_umap_df, mapping = aes(x = X1, y = X2, colour = ct2), 
+             alpha = 0.6, show.legend = NA, size = 1.3)+
+  geom_segment(data = pe_umap_l[[2]], 
+               mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq), 
+               alpha = 0.15, show.legend = F)+
+  geom_point(data = pe_umap_l[[1]], 
+             mapping = aes(x = X1, y = X2, fill = ct), 
+             alpha = 1, pch = 21, size = 4)+
+  guides(colour = guide_legend(override.aes = list(size = 2.3)))+
+  scale_size_continuous(range = c(0, 4), limits = range(pe_l[[2]]$Freq))+
+  scale_colour_manual(values = colsmajor)+
+  scale_fill_manual(values = colsallct)+
+  theme_classic()+ 
+  theme(aspect.ratio = 1, 
+        axis.line = element_blank(),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        legend.title = element_blank(),
+        legend.key.size = unit(0.35, "cm"),
+        legend.spacing.y = unit(0.1, "cm"))
+pdf("figure_panels/fig4/mainFig_inet_cond_umap_all.pdf", height = 3.1, width = 5.2, useDingbats = F)
+print(pltboth)
+dev.off()
+
+plt_cond_l_ch = list()
+for(cc in unique(pe_umap_cond_l_ch[[2]]$cond)){
+  plt_cond_l_ch[[cc]] = ggplot()+
+    geom_segment(data = pe_umap_cond_l_ch[[2]][pe_umap_cond_l_ch[[2]]$cond==cc,], 
+                 mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq, alpha = Freq))+
+    geom_point(data = pe_umap_cond_l_ch[[1]], 
+               mapping = aes(x = X1, y = X2, fill = ct), 
+               alpha = 1, pch = 21, size = 4)+
+    scale_size_continuous(range = c(0, 4), limits = range(pe_umap_cond_l_ch[[2]]$Freq))+
+    scale_alpha_continuous(range = c(0, 1), limits = range(pe_umap_cond_l_ch[[2]]$Freq))+
+    scale_fill_manual(values = colsallct)+
+    labs(title = cc)+
+    guides(size = guide_legend(direction = "horizontal", nrow = 2),
+           alpha = guide_legend(direction = "horizontal", nrow = 2))+
+    theme_classic()+ 
+    theme(aspect.ratio = 1, 
+          axis.line = element_blank(),
+          axis.text = element_blank(),
+          axis.title = element_blank(),
+          axis.ticks = element_blank(),
+          panel.background = element_rect(colour = "black"),
+          legend.title = element_blank(),
+          legend.key.size = unit(0.35, "cm"))
+}
+plt_cond_l_ch[["leg"]] = cowplot::get_legend(plt_cond_l_ch[["healthy"]])
+
+pdf("figure_panels/fig4/mainFig_inet_cond_umap_median.pdf", height = 3.2, width = 5, useDingbats = F)
+print(plt_cond_l_ch$healthy)
+print(plt_cond_l_ch$embolised)
+print(plt_cond_l_ch$regenerating)
+dev.off()
+```
+
+Heatmaps for interactions with immune cells
 
 ```{r}
 # interactions unique to healthy or to emb/regen
@@ -2577,7 +2719,6 @@ pdf("figure_panels/fig4/mainFig_immuneNetInteract.pdf", height = 2.86, width = 7
 print(imm_plt)
 dev.off()
 ```
-
 
 
 ## Supplementary
@@ -2684,156 +2825,3 @@ dev.off()
 
 
 
-
-# OLD CODE
-
-```{r}
-plot_df = hep_cells$healthy@meta.data
-
-hep_d_h = ggplot(plot_df[sample(1:nrow(plot_df), nrow(plot_df), replace = F),], aes(x = zonation_pt))+
-  geom_density(fill = "orange", alpha = 0.3, colour = "grey40")+
-  geom_rug(mapping = aes(colour = Donor), outside = F, length = unit(0.5, "cm"))+
-  scale_y_continuous(expand = c(0,0), limits = c(0, 17.5))+
-  scale_x_continuous(expand = c(0,0))+
-  theme(legend.position = c(0.03,0.9),
-        axis.line = element_blank(),
-        axis.text = element_blank(),
-        axis.title = element_blank())
-
-top_genes_h = names(hep_qvals_list$healthy[order(hep_qvals_list$healthy, decreasing = F)])[1:100]
-#scaled_bins = scale(t(hep_mean_bins$healthy[,top_genes_h]), center = T, scale = T)
-scaled_bins = t(apply(t(hep_mean_bins$healthy[,top_genes_h]), 1, rank))
-rownames(scaled_bins) = top_genes_h
-cl = hclust(dist(scaled_bins), method = "ward.D2")
-
-plot_df2 = reshape2::melt(scaled_bins)
-plot_df2$Var1 = factor(plot_df2$Var1, levels = cl$labels[cl$order])
-plot_df2$Var2 = factor(plot_df2$Var2, levels = colnames(scaled_bins))
-
-labs = ifelse(levels(plot_df2$Var1) %in% c("SAA1", "CYP2E1", "PLA2G2A", "GLUL", "C3", "IGFBP2","MT1M"),
-              levels(plot_df2$Var1), "")
-
-plt_heat_hep_h = ggplot(plot_df2, aes(x = Var2, y = Var1, fill = value))+
-  geom_tile()+
-  scale_fill_viridis_c(option = "A")+
-  scale_y_discrete(labels = labs)+
-  labs(x = "Zonation pseudotime")+
-  theme(axis.text.x = element_blank(),
-        axis.title.y = element_blank(),
-        axis.ticks.y = element_line(),
-        axis.line.x = element_blank(),
-        legend.position = "none")
-
-cowplot::plot_grid(hep_d_h, plt_heat_hep_h, nrow = 2, 
-                   align = "v", axis = "tblr", rel_heights = c(0.5, 1))
-```
-
-```{r}
-plot_df = rbind(hep_cells$healthy@meta.data[,c("Condition", "Donor", "zonation_pt", "zonation_int")],
-                hep_cells$embolised@meta.data[,c("Condition", "Donor", "zonation_pt", "zonation_int")],
-                hep_cells$regenerating@meta.data[,c("Condition", "Donor", "zonation_pt", "zonation_int")])
-
-plot_df$Condition = factor(plot_df$Condition, levels = rev(c("healthy", "embolised", "regenerating")))
-
-dplt = ggplot(plot_df, aes(x = zonation_pt, y = Condition, fill = Condition))+
-  geom_density_ridges(alpha = 0.8)+
-  scale_x_continuous(expand = c(0,0))+
-  scale_y_discrete(expand = c(0.05,0))+
-  scale_fill_manual(values = colcond)+
-  theme(legend.position = "none",
-        axis.text.y = element_text(size = 8))
-
-plot_df$Condition = factor(plot_df$Condition, levels = c("healthy", "embolised", "regenerating"))
-donordplt = ggplot(plot_df, aes(x = zonation_pt, y = Donor, fill = Donor))+
-  facet_wrap(~Condition)+
-  geom_density_ridges(alpha = 0.8, size = 0.3)+
-  scale_x_continuous(expand = c(0,0))+
-  scale_y_discrete(expand = c(0.05,0))+
-  #scale_fill_manual(values = colcond)+
-  theme(legend.position = "none",
-        axis.text.y = element_text(size = 8))
-
-pdf("figure_panels/fig3/hep_zonation_density.pdf", height = 2.3, width = 3, useDingbats = F)
-print(dplt)
-dev.off()
-pdf("figure_panels/fig3/hep_zonation_donor_density.pdf", height = 5, width = 6, useDingbats = F)
-print(donordplt)
-dev.off()
-
-
-plot_df = rbind(end_cells$healthy@meta.data[,c("Condition", "Donor", "zonation_pt", "zonation_int")],
-                end_cells$embolised@meta.data[,c("Condition", "Donor", "zonation_pt", "zonation_int")],
-                end_cells$regenerating@meta.data[,c("Condition", "Donor", "zonation_pt", "zonation_int")])
-
-plot_df$Condition = factor(plot_df$Condition, levels = rev(c("healthy", "embolised", "regenerating")))
-plot_df = plot_df[order(plot_df$zonation_pt, decreasing = F),]
-
-dplt = ggplot(plot_df, aes(x = -zonation_pt, y = Condition, fill = Condition))+
-  geom_density_ridges(alpha = 0.8)+
-  scale_x_continuous(expand = c(0,0))+
-  scale_y_discrete(expand = c(0.05,0))+
-  scale_fill_manual(values = colcond)+
-  theme(legend.position = "none",
-        axis.text.y = element_text(size = 8))
-
-plot_df$Condition = factor(plot_df$Condition, levels = c("healthy", "embolised", "regenerating"))
-donordplt = ggplot(plot_df, aes(x = zonation_pt, y = Donor, fill = Donor))+
-  facet_wrap(~Condition)+
-  geom_density_ridges(alpha = 0.8, size = 0.3)+
-  scale_x_continuous(expand = c(0,0))+
-  scale_y_discrete(expand = c(0.05,0))+
-  #scale_fill_manual(values = colcond)+
-  theme(legend.position = "none",
-        axis.text.y = element_text(size = 8))
-
-pdf("figure_panels/fig3/end_zonation_density.pdf", height = 2.3, width = 3, useDingbats = F)
-print(dplt)
-dev.off()
-pdf("figure_panels/fig3/end_zonation_donor_density.pdf", height = 5, width = 6, useDingbats = F)
-print(donordplt)
-dev.off()
-```
-
-Percentage of cells from each condition along the trajectory
-
-```{r}
-plot_df = rbind(hep_cells$healthy@meta.data[,c("Condition", "zonation_pt")],
-                hep_cells$embolised@meta.data[,c("Condition", "zonation_pt")],
-                hep_cells$regenerating@meta.data[,c("Condition", "zonation_pt")])
-plot_df$Condition = factor(plot_df$Condition, levels = c("healthy", "embolised", "regenerating"))
-plot_df$bins100 = cut(plot_df$zonation_pt, 100)
-
-propplt = ggplot(plot_df, aes(x = bins100, fill = Condition))+
-  geom_bar(position = "fill")+
-  labs(x = "zonation (binned)", y = "proportion")+
-  scale_y_continuous(limits = c(0,1), expand = c(0,0))+
-  scale_fill_manual(values = colcond)+
-  guides(fill=guide_legend(title.position="top"))+
-  theme(axis.text.x = element_blank(),
-        legend.title.align = 0,
-        legend.position = "bottom")
-
-pdf("figure_panels/fig3/hep_zonation_proportion.pdf", height = 2.3, width = 3, useDingbats = F)
-print(propplt)
-dev.off()
-
-plot_df = rbind(end_cells$healthy@meta.data[,c("Condition", "zonation_pt")],
-                end_cells$embolised@meta.data[,c("Condition", "zonation_pt")],
-                end_cells$regenerating@meta.data[,c("Condition", "zonation_pt")])
-plot_df$Condition = factor(plot_df$Condition, levels = c("healthy", "embolised", "regenerating"))
-plot_df$bins100 = cut(-plot_df$zonation_pt, 100)
-
-propplt = ggplot(plot_df, aes(x = bins100, fill = Condition))+
-  geom_bar(position = "fill")+
-  labs(x = "zonation (binned)", y = "proportion")+
-  scale_y_continuous(limits = c(0,1), expand = c(0,0))+
-  scale_fill_manual(values = colcond)+
-  guides(fill=guide_legend(title.position="top"))+
-  theme(axis.text.x = element_blank(),
-        legend.title.align = 0,
-        legend.position = "bottom")
-
-pdf("figure_panels/fig3/end_zonation_proportion.pdf", height = 2.3, width = 3, useDingbats = F)
-print(propplt)
-dev.off()
-```

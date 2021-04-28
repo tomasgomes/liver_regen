@@ -31,6 +31,7 @@ library(Seurat)
 library(ggplot2)
 library(ggridges)
 library(dplyr)
+library(igraph)
 library(data.table)
 ```
 
@@ -1003,6 +1004,8 @@ write.csv(ct_int_exp, col.names = T, row.names = F, quote = F,
 ```
 
 
+## Cell-cell communication networks
+Load data to make cell comm networks
 
 ```{r}
 redone_meta = list()
@@ -1018,6 +1021,7 @@ allcells_redone = AddMetaData(allcells_css, redone_meta_all)
 allcells_redone = allcells_redone[,!is.na(allcells_redone$cell_type)]
 ```
 
+Functions used to make cell comm networks
 
 ```{r}
 makeMedian = function(point_df, edge_df, cl = c("ct2", "maj_g1", "maj_g2")){
@@ -1080,7 +1084,7 @@ makeMedianCond = function(point_df, edge_df, cl = c("ct", "ct_g1", "ct_g2"), edg
 }
 ```
 
-TRY PLOTTING ALL + INTERACTIONS PER CONDITION, OR INTERACTIONS UNIQUE TO CONDITION
+Plot ligands and receptors with MDS
 
 ```{r, fig.width=16, fig.height=4.6}
 inter_df = readRDS(file = "results/cell_comm/cond_diff_interact_DE.RDS")
@@ -1320,1220 +1324,110 @@ save(pe_l, pe_cond_l, pe_cond_l_u, pe_cond_l_h, pe_cond_l_ch,
      file = "results/cell_comm/median_networks_cond.RData")
 ```
 
-
-
-
-
-
-
-
-
-
-
+Plot ligands and receptors with UMAP
 
 ```{r}
-inter_df = readRDS(file = "results/cell_comm/cond_diff_interact_DE.RDS")
-
-gene_pairs = unique(rbind(inter_df$healthy[,c("id_cp_interaction", "gn1", "gn2")],
-                          inter_df$embolised[,c("id_cp_interaction", "gn1", "gn2")],
-                          inter_df$regenerating[,c("id_cp_interaction", "gn1", "gn2")]))
-
-all_lr_genes = unique(c(as.character(inter_df$healthy$gn1), as.character(inter_df$healthy$gn2),
-                        as.character(inter_df$embolised$gn1), as.character(inter_df$embolised$gn2),
-                        as.character(inter_df$regenerating$gn1), as.character(inter_df$regenerating$gn2)))
-all_lr_genes = all_lr_genes[all_lr_genes %in% rownames(allcells_redone@assays$SCT@data)]
-
-mean_exp_lr = apply(allcells_redone@assays$SCT@data[all_lr_genes,], 1, 
-                    function(x) tapply(x, allcells_redone$cell_type, mean))
-
-max_ct = rownames(mean_exp_lr)[apply(mean_exp_lr, 2, which.max)]
-names(max_ct) = colnames(mean_exp_lr)
-
-cor_lr = cor(mean_exp_lr, method = "sp")
-diag(cor_lr) = 0
-
-#use_g = names(max_ct)[max_ct %in% c("Stellate cells", "Hepatocytes", "Endothelial cells (non-LSEC)", "Cholangiocytes")]
-
-library(igraph)
-adj_mat = cor_lr>0.3
-sub_adj_mat = adj_mat[rowSums(adj_mat)>=3, colSums(adj_mat)>=3]
-network = graph_from_adjacency_matrix(sub_adj_mat, 
-                                      weighted=T, mode="undirected", diag=F)
-
-#l = igraph::layout_with_fr(network, niter = 5000)
-l = igraph::layout_with_mds(network)
-#l = igraph::layout_with_kk(network)
-
-l = data.frame(l)
-l$gene = colnames(sub_adj_mat)
-rownames(l) = colnames(sub_adj_mat)
-
-tmp_df = merge(gene_pairs, l, by.x = "gn1", by.y = "gene")
-edge_df = merge(tmp_df, l, by.x = "gn2", by.y = "gene")
-edge_df = merge(edge_df, data.frame(max_ct), by.x = 1, by.y = 0, all.x = T)
-edge_df = merge(edge_df, data.frame(max_ct), by.x = 2, by.y = 0, all.x = T)
-colnames(edge_df)[8:9] = c("ct_g1", "ct_g2")
-edge_df$maj_g1 = ifelse(grepl("LSEC", edge_df$ct_g1), "Endothelial",
-                      ifelse(grepl("Hepatocytes", edge_df$ct_g1), "Hepatocytes",
-                             ifelse(grepl("Stellate cells", edge_df$ct_g1), "Mesenchymal",
-                                    ifelse(grepl("Cholangiocytes", edge_df$ct_g1), "Cholangiocytes", 
-                                           "Immune"))))
-edge_df$maj_g2 = ifelse(grepl("LSEC", edge_df$ct_g2), "Endothelial",
-                      ifelse(grepl("Hepatocytes", edge_df$ct_g2), "Hepatocytes",
-                             ifelse(grepl("Stellate cells", edge_df$ct_g2), "Mesenchymal",
-                                    ifelse(grepl("Cholangiocytes", edge_df$ct_g2), "Cholangiocytes", 
-                                           "Immune"))))
-
-point_df = l
-point_df$ct = max_ct[point_df$gene]
-point_df$ct2 = ifelse(grepl("LSEC", point_df$ct), "Endothelial",
-                      ifelse(grepl("Hepatocytes", point_df$ct), "Hepatocytes",
-                             ifelse(grepl("Stellate cells", point_df$ct), "Mesenchymal",
-                                    ifelse(grepl("Cholangiocytes", point_df$ct), "Cholangiocytes", 
-                                           "Immune"))))
-
-plt = ggplot()+
-  geom_segment(data = edge_df, mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y), alpha = 0.05)+
-  geom_point(data = point_df, mapping = aes(x = X1, y = X2, colour = ct2), alpha = 1)+
-    theme_classic()
-print(plt)
-
-pe_l = makeMedian(point_df, edge_df)
-
-plt2 = ggplot()+
-  geom_segment(data = pe_l[[2]], mapping = aes(x = X1.x, xend = X1.y, 
-                                                y = X2.x, yend = X2.y, size = Freq), 
-               alpha = 0.2)+
-  geom_point(data = pe_l[[1]], mapping = aes(x = X1, y = X2, fill = ct2), 
-             alpha = 1, pch = 21, size = 5)+
-  scale_size_continuous(range = c(0.2, 4))+
-  theme_classic()
-print(plt2)
-
-plt3 = ggplot()+
-  geom_segment(data = edge_df, mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y), alpha = 0.05)+
-  geom_point(data = point_df, mapping = aes(x = X1, y = X2, colour = ct2), alpha = 1)+
-  geom_segment(data = pe_l[[2]], mapping = aes(x = X1.x, xend = X1.y, 
-                                                y = X2.x, yend = X2.y, size = Freq), 
-               alpha = 0.2)+
-  geom_point(data = pe_l[[1]], mapping = aes(x = X1, y = X2, fill = ct2), 
-             alpha = 1, pch = 21, size = 5)+
-  scale_size_continuous(range = c(0.2, 4))+
-    theme_classic()
-print(plt3)
-
-
-pe_l_all = makeMedian(point_df, edge_df, cl = c("ct", "ct_g1", "ct_g2"))
-
-plt4 = ggplot()+
-  geom_segment(data = edge_df, mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y), alpha = 0.05)+
-  geom_point(data = point_df, mapping = aes(x = X1, y = X2, colour = ct), alpha = 1, show.legend = F)+
-  geom_segment(data = pe_l_all[[2]], mapping = aes(x = X1.x, xend = X1.y, 
-                                                y = X2.x, yend = X2.y, size = Freq), 
-               alpha = 0.1, show.legend = F)+
-  geom_point(data = pe_l_all[[1]], mapping = aes(x = X1, y = X2, fill = ct2), 
-             alpha = 1, pch = 21, size = 4)+
-  scale_size_continuous(range = c(0.2, 4))+
-    theme_classic()
-print(plt4)
-```
-
-```{r}
-set.seed(79679)
+set.seed(2954)
 l = uwot::umap(t(mean_exp_cond_lr), metric = "cosine", ret_nn = T, n_epochs = 1000)
-cl = dbscan::dbscan(l$embedding, eps = .4, minPts = 5)
-plot(l_cond$X1, l_cond$X2, col = cl$cluster)
-
 l_cond = data.frame(l$embedding)
 l_cond$gene = colnames(mean_exp_cond_lr)
-l_cond$cl = cl$cluster
 rownames(l_cond) = colnames(mean_exp_cond_lr)
-
 tmp_df = merge(gene_pairs_cond, l_cond, by.x = "gn1", by.y = "gene")
-edge_cond_df = merge(tmp_df, l_cond, by.x = "gn2", by.y = "gene")
-edge_cond_df = merge(edge_cond_df, data.frame(max_cond_ct_ct), by.x = 1, by.y = 0, all.x = T)
-edge_cond_df = merge(edge_cond_df, data.frame(max_cond_ct_ct), by.x = 2, by.y = 0, all.x = T)
-colnames(edge_cond_df)[11:12] = c("ct_g1", "ct_g2")
-colnames(edge_cond_df)[c(7,10)] = c("cl_g2", "cl_g1")
-edge_cond_df$maj_g1 = ifelse(grepl("LSEC", edge_cond_df$ct_g1), "Endothelial",
-                      ifelse(grepl("Hepatocytes", edge_cond_df$ct_g1), "Hepatocytes",
-                             ifelse(grepl("Stellate cells", edge_cond_df$ct_g1), "Mesenchymal",
-                                    ifelse(grepl("Cholangiocytes", edge_cond_df$ct_g1), "Cholangiocytes", 
+edge_cond_umap_df = merge(tmp_df, l_cond, by.x = "gn2", by.y = "gene")
+edge_cond_umap_df = merge(edge_cond_umap_df, data.frame(max_cond_ct_ct), by.x = 1, by.y = 0, all.x = T)
+edge_cond_umap_df = merge(edge_cond_umap_df, data.frame(max_cond_ct_ct), by.x = 2, by.y = 0, all.x = T)
+colnames(edge_cond_umap_df)[9:10] = c("ct_g1", "ct_g2")
+edge_cond_umap_df$maj_g1 = ifelse(grepl("LSEC", edge_cond_umap_df$ct_g1), "Endothelial",
+                      ifelse(grepl("Hepatocytes", edge_cond_umap_df$ct_g1), "Hepatocytes",
+                             ifelse(grepl("Stellate cells", edge_cond_umap_df$ct_g1), "Mesenchymal",
+                                    ifelse(grepl("Cholangiocytes", edge_cond_umap_df$ct_g1),
+                                           "Cholangiocytes", "Immune"))))
+edge_cond_umap_df$maj_g2 = ifelse(grepl("LSEC", edge_cond_umap_df$ct_g2), "Endothelial",
+                      ifelse(grepl("Hepatocytes", edge_cond_umap_df$ct_g2), "Hepatocytes",
+                             ifelse(grepl("Stellate cells", edge_cond_umap_df$ct_g2), "Mesenchymal",
+                                    ifelse(grepl("Cholangiocytes", edge_cond_umap_df$ct_g2),
+                                           "Cholangiocytes", "Immune"))))
+edge_cond_umap_df = merge(edge_cond_umap_df, data.frame(max_cond_ct_cond), by.x = 1, by.y = 0, all.x = T)
+edge_cond_umap_df = merge(edge_cond_umap_df, data.frame(max_cond_ct_cond), by.x = 2, by.y = 0, all.x = T)
+colnames(edge_cond_umap_df)[4] = "cond"
+
+point_cond_umap_df = l_cond
+point_cond_umap_df$ct = max_cond_ct_ct[point_cond_umap_df$gene]
+point_cond_umap_df$ct2 = ifelse(grepl("LSEC", point_cond_umap_df$ct), "Endothelial",
+                      ifelse(grepl("Hepatocytes", point_cond_umap_df$ct), "Hepatocytes",
+                             ifelse(grepl("Stellate cells", point_cond_umap_df$ct), "Mesenchymal",
+                                    ifelse(grepl("Cholangiocytes", point_cond_umap_df$ct), "Cholangiocytes", 
                                            "Immune"))))
-edge_cond_df$maj_g2 = ifelse(grepl("LSEC", edge_cond_df$ct_g2), "Endothelial",
-                      ifelse(grepl("Hepatocytes", edge_cond_df$ct_g2), "Hepatocytes",
-                             ifelse(grepl("Stellate cells", edge_cond_df$ct_g2), "Mesenchymal",
-                                    ifelse(grepl("Cholangiocytes", edge_cond_df$ct_g2), "Cholangiocytes", 
-                                           "Immune"))))
-edge_cond_df = merge(edge_cond_df, data.frame(max_cond_ct_cond), by.x = 1, by.y = 0, all.x = T)
-edge_cond_df = merge(edge_cond_df, data.frame(max_cond_ct_cond), by.x = 2, by.y = 0, all.x = T)
-colnames(edge_cond_df)[4] = "cond"
+point_cond_umap_df$cond = max_cond_ct_cond[point_cond_umap_df$gene]
 
-point_cond_df = l_cond
-point_cond_df$ct = max_cond_ct_ct[point_cond_df$gene]
-point_cond_df$ct2 = ifelse(grepl("LSEC", point_cond_df$ct), "Endothelial",
-                      ifelse(grepl("Hepatocytes", point_cond_df$ct), "Hepatocytes",
-                             ifelse(grepl("Stellate cells", point_cond_df$ct), "Mesenchymal",
-                                    ifelse(grepl("Cholangiocytes", point_cond_df$ct), "Cholangiocytes", 
-                                           "Immune"))))
-point_cond_df$cond = max_cond_ct_cond[point_cond_df$gene]
 
-makeMedianCond = function(point_df, edge_df, cl = c("ct", "ct_g1", "ct_g2"), edge_by = "cond"){
-  mean_major = data.frame("X1" = tapply(point_df$X1, point_df[,cl[1]], median),
-                          "X2" = tapply(point_df$X2, point_df[,cl[1]], median))
-  mean_major[,cl[1]] = rownames(mean_major)
-  
-  edge_df[,cl[2]] = factor(edge_df[,cl[2]], levels = unique(edge_df[,cl[2]]))
-  edge_df[,cl[3]] = factor(edge_df[,cl[3]], levels = unique(edge_df[,cl[3]]))
-  
-  edge_l = list()
-  for(i in unique(edge_df[,edge_by])){
-    sub_edge_df = edge_df[edge_df[,edge_by]==i,]
-    maj_mat = table(sub_edge_df[,cl[2]], sub_edge_df[,cl[3]])
-    edge_major = data.frame(maj_mat + t(maj_mat))
-    edge_major = merge(edge_major, mean_major, by.x = 1, by.y = 3)
-    edge_major = merge(edge_major, mean_major, by.x = 2, by.y = 3)
-    edge_l[[i]] = edge_major
-  }
-  edge_major = Reduce(rbind, edge_l)
-  edge_major[,edge_by] = unlist(lapply(names(edge_l), function(x) rep(x, nrow(edge_l[[x]]))))
-  
-  return(list(mean_major = mean_major, edge_major = edge_major))
-}
+pe_umap_l = makeMedian(point_cond_umap_df, edge_cond_umap_df, cl = c("ct", "ct_g1", "ct_g2"))
 
-pe_cond_l = makeMedianCond(point_cond_df, edge_cond_df, 
-                           edge_by = "cond", cl = c("cl", "cl_g1", "cl_g2"))
-
-sub_e = edge_cond_df$max_cond_ct_cond.x==edge_cond_df$max_cond_ct_cond.y
-sub_e = edge_cond_df#[sub_e,]
-#sub_e$cond = sub_e$max_cond_ct_cond.x
-plt4 = ggplot()+
-  facet_wrap(~cond)+
-  #geom_segment(data = sub_e, mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y), 
-  #             alpha = 0.05)+
-  geom_point(data = point_cond_df, mapping = aes(x = X1, y = X2, colour = as.character(cl)), 
-             alpha = 1, show.legend = T)+
-  geom_segment(data = pe_cond_l[[2]], mapping = aes(x = X1.x, xend = X1.y, 
-                                                y = X2.x, yend = X2.y, size = Freq), 
-               alpha = 0.1, show.legend = F)+
-  geom_point(data = pe_cond_l[[1]], mapping = aes(x = X1, y = X2, fill = as.character(cl)), 
+# plot total gene correlation projection and median network
+pltboth = ggplot()+
+  geom_point(data = point_cond_umap_df, mapping = aes(x = X1, y = X2, colour = ct2), 
+             alpha = 0.25, show.legend = F)+
+  scale_shape_manual(values = c(0,4,19))+
+  geom_segment(data = pe_umap_l[[2]], 
+               mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq), 
+               alpha = 0.15, show.legend = F)+
+  geom_point(data = pe_umap_l[[1]], 
+             mapping = aes(x = X1, y = X2, fill = ct), 
              alpha = 1, pch = 21, size = 4)+
-  scale_size_continuous(range = c(0.2, 4))+
+  scale_size_continuous(range = c(0, 4), limits = range(pe_l[[2]]$Freq))+
+  theme_classic()+ theme(aspect.ratio = 1)
+print(pltboth)
+
+pltboth = ggplot()+
+  geom_segment(data = edge_cond_umap_df, 
+               mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y), 
+               alpha = 0.03, show.legend = F)+
+  geom_point(data = point_cond_umap_df, mapping = aes(x = X1, y = X2, colour = ct2), 
+             alpha = 0.6, show.legend = F)+
+  scale_shape_manual(values = c(0,4,19))+
+  geom_point(data = pe_umap_l[[1]], 
+             mapping = aes(x = X1, y = X2, fill = ct), 
+             alpha = 1, pch = 21, size = 4)+
+  scale_size_continuous(range = c(0, 4), limits = range(pe_l[[2]]$Freq))+
+  theme_classic()+ theme(aspect.ratio = 1)
+print(pltboth)
+
+# get median per cell type, per condition - HEALTHY COMPARISON NETWORK
+pe_umap_cond_l_ch = makeMedianCond(point_cond_umap_df, 
+                                   edge_cond_umap_df[edge_cond_umap_df$id_cp_interaction%in%comph_inters,],
+                                   edge_by = "cond", cl = c("ct", "ct_g1", "ct_g2"))
+
+plt_umap_cond_l_ch = list()
+for(cc in unique(pe_cond_l[[2]]$cond)){
+  plt_umap_cond_l_ch[[cc]] = ggplot()+
+    geom_segment(data = pe_umap_cond_l_ch[[2]][pe_umap_cond_l_ch[[2]]$cond==cc,], 
+                 mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq, alpha = Freq))+
+    geom_point(data = pe_umap_cond_l_ch[[1]], 
+               mapping = aes(x = X1, y = X2, fill = ct), 
+               alpha = 1, pch = 21, size = 4)+
+    scale_size_continuous(range = c(0, 4), limits = range(pe_umap_cond_l_ch[[2]]$Freq))+
+    scale_alpha_continuous(limits = range(pe_umap_cond_l_ch[[2]]$Freq))+
+    labs(title = cc)+
+    guides(size = guide_legend(direction = "horizontal", nrow = 2),
+           alpha = guide_legend(direction = "horizontal", nrow = 2))+
     theme_classic()
-print(plt4)
-```
-
-
-
-# Interaction analysis in zonation
-Number of interactions per bin, per condition, in Hep and LSEC - only with other cell types!
-
-```{r}
-ninter_zon = list()
-df_inter_zon = list()
-matct_zon_list = list()
-ints_list = list()
-for(zon in c("LSEC_", "Hepa")){
-  for(n in names(reform_list)[4:6]){
-    id = paste0(n,"_",substr(zon,1,4))
-    ints = unique(reform_list[[n]][grepl(zon, reform_list[[n]]$ct1) | grepl(zon, reform_list[[n]]$ct2),1:3])
-    for(i in 1:nrow(ints)){
-      if(!grepl(zon, ints[i,"ct2"])){
-        tmp = ints[i,"ct2"]
-        ints[i,"ct2"] = ints[i,"ct1"]
-        ints[i,"ct1"] = tmp
-      }
-    }
-    ints$ct2 = factor(ints$ct2, levels = paste0(strsplit(ints$ct2[1], "_")[[1]][1],"_Z",1:10))
-    ints$ct1[grepl("Hepa", ints$ct1)] = "Hepatocytes"
-    ints$ct1[grepl("LSEC_", ints$ct1)] = "LSEC"
-    ints_list[[id]] = unique(ints)
-      
-    matct_zon_list[[id]] = reshape2::dcast(ints_list[[id]], formula = ct1~ct2)
-    rownames(matct_zon_list[[id]]) = matct_zon_list[[id]][,1]
-    matct_zon_list[[id]] = matct_zon_list[[id]][,-1]
-    ninter_zon[[id]] = colSums(matct_zon_list[[id]])
-  }
-  df = data.frame(cbind(ninter_zon[[paste0("healthy_bins_", substr(zon, 1, 4))]],
-                        ninter_zon[[paste0("embolised_bins_", substr(zon, 1, 4))]],
-                        ninter_zon[[paste0("regenerating_bins_", substr(zon, 1, 4))]]))
-  colnames(df) = c("healthy", "embolised", "regenerating")
-  df$zon = factor(rownames(df), levels = rownames(df))
-  df_inter_zon[[substr(zon,1,4)]] = reshape2::melt(df)
-
-  ncells = data.frame("healthy" = table(meta_l$healthy_bins$cell_type),
-                      "embolised" = table(meta_l$embolised_bins$cell_type),
-                      "regenerating" = table(meta_l$regenerating_bins$cell_type))[,c(1,2,4,6)]
-  colnames(ncells) = c("celltype", "healthy", "embolised", "regenerating")
-  ncells = reshape2::melt(ncells)
-  df_inter_zon[[substr(zon,1,4)]] = merge(df_inter_zon[[substr(zon,1,4)]], ncells, by = c(1,2))
-  colnames(df_inter_zon[[substr(zon,1,4)]]) = c("zon", "cond", "n_inter", "n_cells")
 }
-ggplot(df_inter_zon$Hepa, aes(x = zon, y = n_inter, colour = cond, group = cond))+
-  geom_point(mapping = aes(size = n_cells))+
-  geom_line()+
-  scale_x_discrete(labels = 1:10)+
-  labs(title = "Hepatocytes", x = "Zonation (10 bins)", y = "# interactions")+
-  theme_classic()
-ggplot(df_inter_zon$LSEC, aes(x = zon, y = n_inter, colour = cond, group = cond))+
-  geom_point(mapping = aes(size = n_cells))+
-  geom_line()+
-  scale_x_discrete(labels = 1:10)+
-  labs(title = "LSEC", x = "Zonation (10 bins)", y = "# interactions")+
-  theme_classic()
+plt_umap_cond_l_ch[["leg"]] = cowplot::get_legend(plt_umap_cond_l_ch[["healthy"]])
 
-saveRDS(df_inter_zon, file = "results/cell_comm/number_interactions_zonation.RDS")
-saveRDS(matct_zon_list, file = "results/cell_comm/zonation_interactions_celltype.RDS")
-saveRDS(ints_list, file = "results/cell_comm/interactions_zonation_list.RDS")
+# plot HEALTHY COMPARISON NETWORK median per condition
+cowplot::plot_grid(plt_umap_cond_l_ch[[1]]+theme(legend.position = "none"), 
+                   plt_umap_cond_l_ch[[2]]+theme(legend.position = "none"),
+                   plt_umap_cond_l_ch[[3]]+theme(legend.position = "none"), plt_umap_cond_l_ch$leg, 
+                   ncol = 4, rel_widths = c(1,1,1,0.5))
 ```
 
-
+Save UMAP network objects
 
 ```{r}
-intsplot = c("CPI-SS0241A1F57", "CPI-SC0530C27A8", "CPI-SS087E0E3FB", 
-             "CPI-SC0F8D27FBC", "CPI-SC095A2C115", "CPI-SC0E1037D03")
-
-namesdf = unique(ct_int_exp[ct_int_exp$interact %in% intsplot & 
-                              (ct_int_exp$ct=="LSEC" | ct_int_exp$ct_target=="LSEC"), 1:5])
-fulln = c()
-for(i in 1:nrow(namesdf)){
-  newn = if(namesdf$ct[i]=="LSEC"){
-    paste0(namesdf$gene[i], "-", namesdf$gene_target[i])
-  } else{
-    paste0(namesdf$gene_target[i], "-", namesdf$gene[i])
-  }
-  fulln = c(fulln, newn)
-}
-namesdf$full = fulln
-
-namesdf = namesdf[!duplicated(namesdf$interact),]
-namesdf = data.frame(row.names = namesdf$interact, name = namesdf$full)
-
-for(n in names(ints_list)[1:3]){
-  pltdf = table(unique(ints_list[[n]])$id_cp_interaction, unique(ints_list[[n]])$ct2)
-  plot_df = pltdf[intsplot[intsplot %in% rownames(pltdf)],]
-  if(is.table(plot_df)){
-    rownames(plot_df) = namesdf[rownames(plot_df),1]
-    print(pheatmap::pheatmap(plot_df, cluster_cols = F, main = n))
-  }
-}
+save(edge_cond_umap_df, point_cond_umap_df, file = "results/cell_comm/networks_cond_umap.RData")
+save(pe_umap_l, pe_umap_cond_l_ch, 
+     file = "results/cell_comm/median_networks_cond_umap.RData")
 ```
 
 
 
-
-```{r}
-pltdf_groups = list()
-pltdf_ct = list()
-for(n in names(ints_list)){
-  df = merge(ints_list[[n]], ct_int_exp, by = 1)
-  df = unique(df[,c(1:3,12)])
-  
-  if(grepl("LSEC", n)){
-    subdf = df[df$ct1!="LSEC",]
-  } else{
-    subdf = df[df$ct1!="Hepatocytes",]
-  }
-  tabdf = table(subdf$description, subdf$ct2)
-  pltdf_groups[[n]] = data.frame(tabdf[rowSums(tabdf)>0,])
-  pltdf_groups[[n]] = pltdf_groups[[n]][order(pltdf_groups[[n]]$Var2),]
-  pltdf_groups[[n]]$norm = unlist(tapply(pltdf_groups[[n]]$Freq, pltdf_groups[[n]]$Var2, 
-                                         function(x) x/sum(x)))
-  
-  tabdf = table(subdf$ct1, subdf$ct2)
-  pltdf_ct[[n]] = data.frame(tabdf[rowSums(tabdf)>0,])
-  pltdf_ct[[n]] = pltdf_ct[[n]][order(pltdf_ct[[n]]$Var2),]
-  pltdf_ct[[n]]$norm = unlist(tapply(pltdf_ct[[n]]$Freq, pltdf_ct[[n]]$Var2, 
-                                     function(x) x/sum(x)))
-}
-lsec_zon_int_groups = Reduce(rbind, pltdf_groups[1:3])
-lsec_zon_int_groups$cond = c(rep("healthy", nrow(pltdf_groups$healthy_bins_LSEC)),
-                             rep("embolised", nrow(pltdf_groups$embolised_bins_LSEC)),
-                             rep("regenerating", nrow(pltdf_groups$regenerating_bins_LSEC)))
-hep_zon_int_groups = Reduce(rbind, pltdf_groups[4:6])
-hep_zon_int_groups$cond = c(rep("healthy", nrow(pltdf_groups$healthy_bins_Hepa)),
-                            rep("embolised", nrow(pltdf_groups$embolised_bins_Hepa)),
-                            rep("regenerating", nrow(pltdf_groups$regenerating_bins_Hepa)))
-
-lsec_zon_int_ct = Reduce(rbind, pltdf_ct[1:3])
-lsec_zon_int_ct$cond = c(rep("healthy", nrow(pltdf_ct$healthy_bins_LSEC)),
-                         rep("embolised", nrow(pltdf_ct$embolised_bins_LSEC)),
-                         rep("regenerating", nrow(pltdf_ct$regenerating_bins_LSEC)))
-hep_zon_int_ct = Reduce(rbind, pltdf_ct[4:6])
-hep_zon_int_ct$cond = c(rep("healthy", nrow(pltdf_ct$healthy_bins_Hepa)),
-                        rep("embolised", nrow(pltdf_ct$embolised_bins_Hepa)),
-                        rep("regenerating", nrow(pltdf_ct$regenerating_bins_Hepa)))
-
-
-
-ggplot(lsec_zon_int_groups, 
-       aes(x = Var2, y = Freq, colour = cond, group = cond))+
-  facet_wrap(~Var1)+
-  geom_point()+geom_line()+
-  theme_bw()
-ggplot(hep_zon_int_groups, 
-       aes(x = Var2, y = Freq, colour = cond, group = cond))+
-  facet_wrap(~Var1)+
-  geom_point()+geom_line()+
-  theme_bw()
-
-ggplot(lsec_zon_int_ct, 
-       aes(x = Var2, y = Freq, colour = cond, group = cond))+
-  facet_wrap(~Var1)+
-  geom_point()+geom_line()+
-  theme_bw()
-ggplot(hep_zon_int_ct, 
-       aes(x = Var2, y = Freq, colour = cond, group = cond))+
-  facet_wrap(~Var1)+
-  geom_point()+geom_line()+
-  theme_bw()
-
-ggplot(pltdf_groups$regenerating_bins_LSEC, aes(x = Var2, y = Freq, colour = Var1, group = Var1))+
-  geom_point()+geom_line()+
-  labs(title = "regenerating_bins_LSEC")+
-  theme_bw()
-ggplot(pltdf_groups$regenerating_bins_LSEC, aes(x = Var2, y = Freq, fill = Var1, group = Var1))+
-  geom_area(position = "stack")+
-  labs(title = "regenerating_bins_LSEC")+
-  theme_bw()
-ggplot(pltdf_groups$healthy_bins_LSEC, aes(x = Var2, y = Freq, fill = Var1, group = Var1))+
-  geom_area(position = "stack")+
-  labs(title = "healthy_bins_LSEC")+
-  theme_bw()
-ggplot(pltdf_groups$regenerating_bins_LSEC, aes(x = Var2, y = norm, fill = Var1, group = Var1))+
-  geom_area(position = "stack")+
-  labs(title = "regenerating_bins_LSEC")+
-  theme_bw()
-ggplot(pltdf_groups$healthy_bins_LSEC, aes(x = Var2, y = norm, fill = Var1, group = Var1))+
-  geom_area(position = "stack")+
-  labs(title = "healthy_bins_LSEC")+
-  theme_bw()
-```
-
-Number of interactions each cell type has with each bin
-
-```{r}
-#```{r, fig.width=10, fig.height=4.2}
-pheatmap::pheatmap(matct_zon_list$healthy_bins_Hepa, cluster_cols = F,scale = "row",
-                   clustering_method = "ward.D", main = "Hep healthy")
-pheatmap::pheatmap(matct_zon_list$embolised_bins_Hepa[,-10], cluster_cols = F,scale = "row",
-                   clustering_method = "ward.D", main = "Hep embolised")
-pheatmap::pheatmap(matct_zon_list$regenerating_bins_Hepa, cluster_cols = F,scale = "row",
-                   clustering_method = "ward.D", main = "Hep regenerating")
-
-pheatmap::pheatmap(matct_zon_list$healthy_bins_LSEC, cluster_cols = F,scale = "row",
-                   clustering_method = "ward.D", main = "LSEC healthy")
-pheatmap::pheatmap(matct_zon_list$embolised_bins_LSEC, cluster_cols = F,scale = "row",
-                   clustering_method = "ward.D", main = "LSEC embolised")
-pheatmap::pheatmap(matct_zon_list$regenerating_bins_LSEC, cluster_cols = F,scale = "row",
-                   clustering_method = "ward.D", main = "LSEC regenerating")
-
-
-pheatmap::pheatmap(cbind(t(apply(matct_zon_list$healthy_bins_Hepa, 1, function(x) x/sum(x))), 
-                         t(apply(matct_zon_list$embolised_bins_Hepa[,-10], 1, function(x) x/sum(x))), 
-                         t(apply(matct_zon_list$regenerating_bins_Hepa, 1, function(x) x/sum(x)))), 
-                   cluster_cols = F, gaps_col = c(10,10, 19,19),
-                   clustering_method = "ward.D", main = "Hepatocytes")
-pheatmap::pheatmap(cbind(t(apply(matct_zon_list$healthy_bins_LSEC, 1, function(x) x/sum(x))), 
-                         t(apply(matct_zon_list$embolised_bins_LSEC, 1, function(x) x/sum(x))), 
-                         t(apply(matct_zon_list$regenerating_bins_LSEC, 1, function(x) x/sum(x)))), 
-                   cluster_cols = F, gaps_col = c(10,10, 20,20),
-                   clustering_method = "ward.D", main = "LSEC")
-```
-
-Important tables
-
-```{r}
-write.csv(lsec_interact, file = "results/cell_comm/tables/Interact_LSEC_regions.csv", 
-          col.names = T, row.names = F, quote = F)
-write.csv(hepa_interact, file = "results/cell_comm/tables/Interact_Hep_regions.csv", 
-          col.names = T, row.names = F, quote = F)
-
-for(n in names(matict_zon_list)){
-  write.csv(matict_zon_list[[n]], col.names = T, row.names = F, quote = F,
-            file = paste0("results/cell_comm/tables/Interact_", n, "_regions_detail.csv"))
-}
-```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-Counting interactions
-
-```{r}
-ninter_all = lapply(inter_counts_l, function(x) data.frame("interactions" = rowSums(x)))
-ninter_send = lapply(inter_counts_dir, function(x) data.frame("interactions" = rowSums(x$`1`)))
-ninter_recv = lapply(inter_counts_dir, function(x) data.frame("interactions" = colSums(x$`1`)))
-```
-
-Heatmaps for total interactions
-
-```{r}
-# interaction scores
-## healthy
-tmp = mut_info_list$healthy
-tmp$score = tmp$mi*mut_info_list$healthy$n
-mm = reshape2::dcast(tmp, source~target, value.var = "score")
-rownames(mm) = mm[,1]
-mm = mm[,-1]
-pdf("results/cell_comm/healthy_total_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(mm, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100),
-                   annotation_col = ninter_all$healthy)
-dev.off()
-
-## regenerating
-tmp = mut_info_list$regenerating
-tmp$score = tmp$mi*mut_info_list$regenerating$n
-mr = reshape2::dcast(tmp, source~target, value.var = "score")
-rownames(mr) = mr[,1]
-mr = mr[,-1]
-pdf("results/cell_comm/regenerating_total_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(mr, clustering_method = "ward.D2", 
-                   color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100),
-                   annotation_col = ninter_all$regenerating)
-dev.off()
-
-cols = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdBu")))(100)
-## difference between scores
-yy = mm-mr
-yy[yy>6] = 6
-yy[yy<(-10)] = -10
-cols_n = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "OrRd"))(100)
-lims_cols_h = c(round(min(ninter_all$healthy$interactions)*1/min(ninter_all$regenerating$interactions), 0),
-                round(max(ninter_all$healthy$interactions)*100/max(ninter_all$regenerating$interactions), 0))
-cols_h = cols_n[(lims_cols_h[1]):(lims_cols_h[2])]
-pdf("results/cell_comm/HvR_total_interaction_scores.pdf", useDingbats = F, 
-    width = 6.2, height = 6)
-pheatmap::pheatmap(yy, color = cols, 
-                   breaks = rev(c(seq(max(yy), 0, length.out = 50), 
-                                  seq(-0.001, min(yy), length.out = 50))),
-                   clustering_method = "ward.D2", 
-                   annotation_col = data.frame(row.names = rownames(ninter_all$healthy),
-                                               "H" = ninter_all$healthy$interactions, 
-                                               "R" = ninter_all$regenerating$interactions),
-                   annotation_colors = list("H" = cols_h,
-                                            "R" = cols_n))
-dev.off()
-
-# number of interactions
-pdf("results/cell_comm/healthy_total_interaction_number.pdf", useDingbats = F, 
-    width = 6.2, height = 6)
-pheatmap::pheatmap(inter_counts_l$healthy, clustering_method = "ward.D2", 
-                   color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100),
-                   annotation_col = ninter_all$healthy)
-dev.off()
-pdf("results/cell_comm/regenerating_total_interaction_number.pdf", useDingbats = F, 
-    width = 6.2, height = 6)
-pheatmap::pheatmap(inter_counts_l$regenerating, clustering_method = "ward.D2", 
-                   color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100),
-                   annotation_col = ninter_all$regenerating)
-dev.off()
-
-## difference between number of interactins
-x = inter_counts_l$healthy-inter_counts_l$regenerating
-brks =  seq(-max(abs(x)), max(abs(x)), length.out = 100)
-brks2 = brks[(max(x)-brks)>=0]
-pdf("results/cell_comm/HvR_total_interaction_number.pdf", useDingbats = F, 
-    width = 6.2, height = 6)
-pheatmap::pheatmap(x, color = cols, breaks = rev(c(seq(max(x), 0, length.out = 50), 
-                                                   seq(-0.001, min(x), length.out = 50))), 
-                   clustering_method = "ward.D2", 
-                   annotation_col = data.frame(row.names = rownames(ninter_all$healthy),
-                                               "H" = ninter_all$healthy$interactions, 
-                                               "R" = ninter_all$regenerating$interactions),
-                   annotation_colors = list("H" = cols_h,
-                                            "R" = cols_n))
-dev.off()
-```
-
-Heatmaps for directed interactions
-
-```{r}
-# interaction scores
-## healthy
-tmp = mut_info_dir_list$healthy
-tmp$score = tmp$mi*mut_info_dir_list$healthy$n
-mm = reshape2::dcast(tmp, source~target, value.var = "score")
-rownames(mm) = mm[,1]
-mm = mm[,-1]
-pdf("results/cell_comm/healthy_directed_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(mm, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100),
-                   annotation_row = ninter_send$healthy, annotation_col = ninter_recv$healthy)
-dev.off()
-
-## regenerating
-tmp = mut_info_dir_list$regenerating
-tmp$score = tmp$mi*mut_info_dir_list$regenerating$n
-mr = reshape2::dcast(tmp, source~target, value.var = "score")
-rownames(mr) = mr[,1]
-mr = mr[,-1]
-pdf("results/cell_comm/regenerating_directed_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(mr, clustering_method = "ward.D2", color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "PuBuGn"))(100),
-                   annotation_row = ninter_send$regenerating, annotation_col = ninter_recv$regenerating)
-dev.off()
-
-cols = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdBu")))(100)
-## difference between scores
-yy = mm-mr
-yy[yy>3] = 3
-yy[yy<(-2)] = -2
-cols_n = colorRampPalette(RColorBrewer::brewer.pal(n = 9, name = "Purples"))(100)
-lims_cols_h = c(round(min(ninter_recv$healthy$interactions)*1/min(ninter_recv$regenerating$interactions), 0),
-                round(max(ninter_recv$healthy$interactions)*100/max(ninter_recv$regenerating$interactions), 0))
-cols_hr = cols_n[(lims_cols_h[1]):(lims_cols_h[2])]
-pdf("results/cell_comm/HvR_directed_interaction_scores.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(yy, color = cols, breaks = rev(c(seq(max(yy), 0, length.out = 50), 
-                                                    seq(-0.001, min(yy), length.out = 50))), 
-                   clustering_method = "ward.D2", 
-                   annotation_col = data.frame(row.names = rownames(ninter_recv$healthy),
-                                               "H" = ninter_recv$healthy$interactions, 
-                                               "R" = ninter_recv$regenerating$interactions),
-                   annotation_row = data.frame(row.names = rownames(ninter_send$healthy),
-                                               "H" = ninter_send$healthy$interactions, 
-                                               "R" = ninter_send$regenerating$interactions),
-                   annotation_colors = list("H" = cols_hr,
-                                            "R" = cols_n))
-dev.off()
-
-# number of interactions
-pdf("results/cell_comm/healthy_directed_interaction_number.pdf", useDingbats = F, width = 6.2, height = 6)
-pheatmap::pheatmap(inter_counts_dir$healthy$`1`, clustering_method = "ward.D2", 
-                   color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, 
-                                                                     name = "PuBuGn"))(100),
-                   annotation_col = ninter_recv$healthy, annotation_row = ninter_send$healthy)
-dev.off()
-pdf("results/cell_comm/regenerating_directed_interaction_number.pdf", useDingbats = F, 
-    width = 6.2, height = 6)
-pheatmap::pheatmap(inter_counts_dir$regenerating$`1`, clustering_method = "ward.D2", 
-                   color = colorRampPalette(RColorBrewer::brewer.pal(n = 9, 
-                                                                     name = "PuBuGn"))(100),
-                   annotation_col = ninter_recv$regenerating, annotation_row = ninter_send$regenerating)
-dev.off()
-
-## difference between scores
-x = inter_counts_dir$healthy$`1`-inter_counts_dir$regenerating$`1`
-cols = colorRampPalette(rev(RColorBrewer::brewer.pal(n = 7, name = "RdBu")))(100)
-brks =  seq(-max(abs(x)), max(abs(x)), length.out = 100)
-brks2 = brks[(max(x)-brks)>=0]
-pdf("results/cell_comm/HvR_directed_interaction_number.pdf", useDingbats = F, 
-    width = 6.2, height = 6)
-pheatmap::pheatmap(x, color = cols, breaks = rev(c(seq(max(x), 0, length.out = 50), 
-                                                   seq(-0.001, min(x), length.out = 50))), 
-                   clustering_method = "ward.D2",
-                   annotation_col = data.frame(row.names = rownames(ninter_recv$healthy),
-                                               "H" = ninter_recv$healthy$interactions, 
-                                               "R" = ninter_recv$regenerating$interactions),
-                   annotation_row = data.frame(row.names = rownames(ninter_send$healthy),
-                                               "H" = ninter_send$healthy$interactions, 
-                                               "R" = ninter_send$regenerating$interactions),
-                   annotation_colors = list("H" = cols_hr,
-                                            "R" = cols_n))
-dev.off()
-```
-
-Compare detected interactions with condition DE genes (include: gene name of complex, if interaction is unique to condition, if elements of interaction are DE in that cell type) 
-
-```{r}
-cond_comparison_list = readRDS(file = "results/cond_effect/all_filt_cond_comps.RDS")
-
-# get unique interactions
-ints_regen = setdiff(unique(reform_list$regenerating[,"id_cp_interaction"]),
-                     unique(reform_list$healthy[,"id_cp_interaction"]))
-ints_healthy = setdiff(unique(reform_list$healthy[,"id_cp_interaction"]),
-                       unique(reform_list$regenerating[,"id_cp_interaction"]))
-
-# add genes from complexes
-complex_ref = unique(rbind(dec_l$healthy[dec_l$healthy$is_complex=="True",c(1,5)], 
-                             dec_l$regenerating[dec_l$regenerating$is_complex=="True",c(1,5)]))
-inter_df = list()
-for(n in c("healthy", "regenerating")){
-  tmp = merge(reform_list[[n]], complex_ref, by.x = 4, by.y = 2, all.x = T)[,c(2,3,4,1,5,8,6,7)]
-  inter_df[[n]] = merge(tmp, complex_ref, by.x = 5, by.y = 2, all.x = T)[,c(2,3,4,5,6,1,9,7,8)]
-  inter_df[[n]]$gene_name.x[is.na(inter_df[[n]]$gene_name.x)] = inter_df[[n]]$lr1[is.na(inter_df[[n]]$gene_name.x)]
-  inter_df[[n]]$gene_name.y[is.na(inter_df[[n]]$gene_name.y)] = inter_df[[n]]$lr2[is.na(inter_df[[n]]$gene_name.y)]
-  colnames(inter_df[[n]])[c(5,7)] = c("gn1", "gn2")
-}
-
-# add info on DE genes
-for(n in names(inter_df)){
-  gn1_isDE = c()
-  gn2_isDE = c()
-  mod = ifelse(n=="healthy", 1, -1)
-  for(i in 1:nrow(inter_df[[n]])){
-    ct1cond = cond_comparison_list$healthy_v_regenerating$cell_type$celltype==inter_df[[n]]$ct1[i]
-    ct2cond = cond_comparison_list$healthy_v_regenerating$cell_type$celltype==inter_df[[n]]$ct2[i]
-    gn1cond = cond_comparison_list$healthy_v_regenerating$cell_type$gene==as.character(inter_df[[n]]$gn1[i])
-    gn2cond = cond_comparison_list$healthy_v_regenerating$cell_type$gene==as.character(inter_df[[n]]$gn2[i])
-    
-    if(sum(ct1cond & gn1cond)>0){
-      gn1_isDE = c(gn1_isDE, cond_comparison_list$healthy_v_regenerating$cell_type$avg_logFC[ct1cond & gn1cond]*mod>0)
-    } else{
-      gn1_isDE = c(gn1_isDE, FALSE)
-    }
-    if(sum(ct2cond & gn2cond)>0){
-      gn2_isDE = c(gn2_isDE, cond_comparison_list$healthy_v_regenerating$cell_type$avg_logFC[ct2cond & gn2cond]*mod>0)
-    } else{
-      gn2_isDE = c(gn2_isDE, FALSE)
-    }
-  }
-  inter_df[[n]]$gn1_isDE = gn1_isDE
-  inter_df[[n]]$gn2_isDE = gn2_isDE
-}
-
-# add info on unique interactions
-inter_df$healthy$isUnique = inter_df$healthy$id_cp_interaction %in% ints_healthy
-inter_df$regenerating$isUnique = inter_df$regenerating$id_cp_interaction %in% ints_regen
-
-saveRDS(inter_df, file = "results/cell_comm/interaction_de_unique_HvR.RDS")
-```
-
-
-
-```{r}
-xxx = inter_df$healthy[(inter_df$healthy$gn1_isDE | inter_df$healthy$gn2_isDE) & inter_df$healthy$dir==1,c(1,2,3)]
-xxx = unique(xxx)
-pheatmap::pheatmap(table(xxx$ct1, xxx$ct2))
-xxx = inter_df$regenerating[(inter_df$regenerating$gn1_isDE | inter_df$regenerating$gn2_isDE) & inter_df$regenerating$dir==1,c(1,2,3)]
-xxx = unique(xxx)
-pheatmap::pheatmap(table(xxx$ct1, xxx$ct2))
-
-
-xxx = inter_df$healthy[inter_df$healthy$isUnique & inter_df$healthy$dir==1,c(1,2,3)]
-xxx = unique(xxx)
-pheatmap::pheatmap(table(xxx$ct1, xxx$ct2))
-xxx = inter_df$regenerating[inter_df$regenerating$isUnique & inter_df$regenerating$dir==1,c(1,2,3)]
-xxx = unique(xxx)
-pheatmap::pheatmap(table(xxx$ct1, xxx$ct2))
-```
-
-
-
-## Zonation Analysis
-Load zonation-varying genes
-
-```{r}
-reform_list = readRDS(file = "results/cell_comm/reform_list.RDS")
-dec_l = readRDS(file = "results/cell_comm/deconvoluted_list.RDS")
-
-# add genes from complexes
-complex_ref = unique(rbind(dec_l$healthy[dec_l$healthy$is_complex=="True",c(1,5)], 
-                             dec_l$regenerating[dec_l$regenerating$is_complex=="True",c(1,5)]))
-inter_df = list()
-for(n in c("healthy", "embolised", "regenerating")){
-  tmp = merge(reform_list[[n]], complex_ref, by.x = 4, by.y = 2, all.x = T)[,c(2,3,4,1,5,8,6,7)]
-  inter_df[[n]] = merge(tmp, complex_ref, by.x = 5, by.y = 2, all.x = T)[,c(2,3,4,5,6,1,9,7,8)]
-  inter_df[[n]]$gene_name.x[is.na(inter_df[[n]]$gene_name.x)] = inter_df[[n]]$lr1[is.na(inter_df[[n]]$gene_name.x)]
-  inter_df[[n]]$gene_name.y[is.na(inter_df[[n]]$gene_name.y)] = inter_df[[n]]$lr2[is.na(inter_df[[n]]$gene_name.y)]
-  colnames(inter_df[[n]])[c(5,7)] = c("gn1", "gn2")
-}
-```
-
-Load and prepare hepatocyte data
-
-```{r}
-load("results/zonation_cond/hep_binned_traj_qval_fits.RData")
-hep_fits = fits_b_list
-hep_traj = traj_list
-hep_qvals = qvals_b_list
-
-nbins = 100
-df_h = data.table("zonation_pt" = hep_traj$healthy)
-df_h$zonation_int = cut(df_h$zonation_pt, nbins)
-
-df_e = data.table("zonation_pt" = hep_traj$embolised)
-df_e = df_h[df_e, on="zonation_pt", roll=Inf, rollends = T]
-
-df_r = data.table("zonation_pt" = hep_traj$regenerating)
-df_r = df_h[df_r, on="zonation_pt", roll=Inf, rollends = T]
-
-mean_bins_h = apply(hep_cells$healthy@assays$SCT@data, 1, 
-                    function(x) tapply(x, df_h$zonation_int, mean))
-mean_bins_e = apply(hep_cells$embolised@assays$SCT@data, 1, 
-                    function(x) tapply(x, df_e$zonation_int, mean))
-mean_bins_r = apply(hep_cells$regenerating@assays$SCT@data, 1, 
-                    function(x) tapply(x, df_r$zonation_int, mean))
-
-hep_h_max = apply(hep_fits$healthy, 2, function(x) mean(order(x, decreasing = T)[1:10]))
-hep_e_max = apply(hep_fits$embolised, 2, function(x) mean(order(x, decreasing = T)[1:10]))
-hep_r_max = apply(hep_fits$regenerating, 2, function(x) mean(order(x, decreasing = T)[1:10]))
-std <- function(x) sd(x)/sqrt(length(x))
-hep_h_sdmax = apply(hep_fits$healthy, 2, function(x) std(order(x, decreasing = T)[1:10]))
-hep_e_sdmax = apply(hep_fits$embolised, 2, function(x) std(order(x, decreasing = T)[1:10]))
-hep_r_sdmax = apply(hep_fits$regenerating, 2, function(x) std(order(x, decreasing = T)[1:10]))
-```
-
-Load and prepare LSEC data
-
-```{r}
-load("results/zonation_cond/end_binned_traj_qval_fits.RData")
-end_fits = fits_b_list
-end_traj = traj_list
-end_qvals = qvals_b_list
-
-nbins = 100
-df_h = data.table("zonation_pt" = end_traj$healthy)
-df_h$zonation_int = cut(df_h$zonation_pt, nbins)
-
-df_e = data.table("zonation_pt" = end_traj$embolised)
-df_e = df_h[df_e, on="zonation_pt", roll=Inf, rollends = T]
-
-df_r = data.table("zonation_pt" = end_traj$regenerating)
-df_r = df_h[df_r, on="zonation_pt", roll=Inf, rollends = T]
-
-mean_bins_h = apply(end_cells$healthy@assays$SCT@data, 1, 
-                    function(x) tapply(x, df_h$zonation_int, mean))
-mean_bins_e = apply(end_cells$embolised@assays$SCT@data, 1, 
-                    function(x) tapply(x, df_e$zonation_int, mean))
-mean_bins_r = apply(end_cells$regenerating@assays$SCT@data, 1, 
-                    function(x) tapply(x, df_r$zonation_int, mean))
-
-end_h_max = apply(end_fits$healthy, 2, function(x) mean(order(x, decreasing = T)[1:10]))
-end_e_max = apply(end_fits$embolised, 2, function(x) mean(order(x, decreasing = T)[1:10]))
-end_r_max = apply(end_fits$regenerating, 2, function(x) mean(order(x, decreasing = T)[1:10]))
-std <- function(x) sd(x)/sqrt(length(x))
-end_h_sdmax = apply(end_fits$healthy, 2, function(x) std(order(x, decreasing = T)[1:10]))
-end_e_sdmax = apply(end_fits$embolised, 2, function(x) std(order(x, decreasing = T)[1:10]))
-end_r_sdmax = apply(end_fits$regenerating, 2, function(x) std(order(x, decreasing = T)[1:10]))
-```
-
-Get interactions mapped to the zonation
-
-```{r}
-zonation_alldat = list()
-zonation_filt = list()
-zon_ct = c("Hepatocytes" = "Hepa", "LSEC" = "LSEC_")
-for(n in names(zon_ct)){
-  zonation_alldat[[n]] = list()
-  zonation_filt[[n]] = list()
-  genes_list = lapply(inter_df, function(x) unique(c(as.character(x$gn1[grepl(zon_ct[n], x$ct1)]), 
-                                                       as.character(x$gn2[grepl(zon_ct[n], x$ct2)]))))
-  for(cc in names(hep_qvals)){
-    # select all interactions involving hepatocytes or LSEC
-    dfinterzon = data.frame("cell_type" = c(inter_df[[cc]]$ct1[grepl(zon_ct[n], inter_df[[cc]]$ct2) & 
-                                                                   inter_df[[cc]]$gn2 %in% genes_list[[cc]]], 
-                                            inter_df[[cc]]$ct2[grepl(zon_ct[n], inter_df[[cc]]$ct1) & 
-                                                                   inter_df[[cc]]$gn1 %in% genes_list[[cc]]]),
-                            "gene_ct" = c(as.character(inter_df[[cc]]$gn1[grepl(zon_ct[n], inter_df[[cc]]$ct2) &
-                                                                              inter_df[[cc]]$gn2 %in% genes_list[[cc]]]), 
-                                          as.character(inter_df[[cc]]$gn2[grepl(zon_ct[n], inter_df[[cc]]$ct1) & 
-                                                                              inter_df[[cc]]$gn1 %in% genes_list[[cc]]])),
-                            "gene_zon" = c(as.character(inter_df[[cc]]$gn2[grepl(zon_ct[n], inter_df[[cc]]$ct2) & 
-                                                                               inter_df[[cc]]$gn2 %in% genes_list[[cc]]]), 
-                                           as.character(inter_df[[cc]]$gn1[grepl(zon_ct[n], inter_df[[cc]]$ct1) & 
-                                                                               inter_df[[cc]]$gn1 %in% genes_list[[cc]]])),
-                            "interact" = c(as.character(inter_df[[cc]]$id_cp_interaction[grepl(zon_ct[n], inter_df[[cc]]$ct2) & 
-                                                                                             inter_df[[cc]]$gn2 %in% genes_list[[cc]]]), 
-                                           as.character(inter_df[[cc]]$id_cp_interaction[grepl(zon_ct[n], inter_df[[cc]]$ct1) & 
-                                                                                             inter_df[[cc]]$gn1 %in% genes_list[[cc]]])),
-                            "dir" = c(as.character(inter_df[[cc]]$dir[grepl(zon_ct[n], inter_df[[cc]]$ct2) & 
-                                                                          inter_df[[cc]]$gn2 %in% genes_list[[cc]]]),
-                                      as.character(inter_df[[cc]]$dir[grepl(zon_ct[n], inter_df[[cc]]$ct1) & 
-                                                                          inter_df[[cc]]$gn1 %in% genes_list[[cc]]])))
-    
-     # only genes varying along pseudospace
-    if(n=="Hepatocytes"){
-      var_genes = names(hep_qvals[[cc]])[hep_qvals[[cc]]<=0.05]
-      dfinterzon = merge(dfinterzon, data.frame(hep_h_max), by.x = 3, by.y = 0, all.x = T) # add maximums
-      dfinterzon = merge(dfinterzon, data.frame(hep_h_sdmax), by.x = 1, by.y = 0, all.x = T) # add se
-      dfinterzon = merge(dfinterzon, data.frame("range" = apply(hep_fits[[cc]], 2, function(x) diff(range(x)))), 
-                         by.x = 1, by.y = 0, all.x = T) # add expression range
-    } else{
-      var_genes = names(end_qvals[[cc]])[end_qvals[[cc]]<=0.05]
-      dfinterzon = merge(dfinterzon, data.frame(end_h_max), by.x = 3, by.y = 0, all.x = T) # add maximums
-      dfinterzon = merge(dfinterzon, data.frame(end_h_sdmax), by.x = 1, by.y = 0, all.x = T) # add se
-      dfinterzon = merge(dfinterzon, data.frame("range" = apply(end_fits[[cc]], 2, function(x) diff(range(x)))), 
-                         by.x = 1, by.y = 0, all.x = T) # add expression range
-    }
-    colnames(dfinterzon)[6:7] = c("max_zon", "max_se")
-    
-    # only keep genes that
-    ## are not in hepatocytes (i.e. are the genes in the other cell type)
-    ## have a low se for the max (meaning the maximum is well defined)
-    ## have an expression range of at least 0.1 (excludes lowly expressed, barely varying genes)
-    ## the genes in the hepatocytes have to be varying
-    ## additionally we only count each interaction once, because of the complexes
-    plot_df = unique(dfinterzon[!grepl(zon_ct[n], dfinterzon$cell_type) & dfinterzon$max_se<=5 & 
-                                  dfinterzon$range>=0.1 & dfinterzon$gene_zon %in% var_genes,-c(1,3)])
-    plot_df$cell_type = factor(plot_df$cell_type, levels = unique(plot_df$cell_type)[order(unique(plot_df$cell_type), decreasing = F)])
-    
-    zonation_alldat[[n]][[cc]] = dfinterzon
-    zonation_filt[[n]][[cc]] = plot_df
-  }
-}
-```
-
-
-
-```{r}
-allcond_hep_zon = Reduce(function(x,y) merge(x,y, by = c(1,2), all = T), 
-                         lapply(zonation_filt$Hepatocytes, function(x) x[,c(1,2,4)]))
-allcond_hep_zon_cc = allcond_hep_zon[complete.cases(allcond_hep_zon),]
-ggplot(allcond_hep_zon_cc, aes(x = max_zon.x, y = max_zon, colour = cell_type))+
-  geom_jitter(width = 2, height = 2)+
-  labs(x = "interactions in healthy zonation", y = "interactions in regen zonation")+
-  theme_bw()
-
-allcond_lsec_zon = Reduce(function(x,y) merge(x,y, by = c(1,2), all = T), 
-                         lapply(zonation_filt$LSEC, function(x) x[,c(1,2,4)]))
-allcond_lsec_zon_cc = allcond_lsec_zon[complete.cases(allcond_lsec_zon),]
-allcond_lsec_zon_cc$hr = allcond_lsec_zon_cc$max_zon.x-allcond_lsec_zon_cc$max_zon
-allcond_lsec_zon_cc$he = allcond_lsec_zon_cc$max_zon.x-allcond_lsec_zon_cc$max_zon.y
-
-ggplot(allcond_lsec_zon_cc, aes(x = max_zon.x, y = max_zon, colour = cell_type))+
-  geom_jitter(width = 2, height = 2)+
-  labs(x = "interactions in healthy zonation", y = "interactions in regen zonation")+
-  theme_bw()
-```
-
-
-
-```{r}
-all_inter = unique(rbind(inter_df$healthy[,c(1,4:7)],inter_df$embolised[,c(1,4:7)],inter_df$regenerating[,c(1,4:7)]))
-
-
-```
-
-
-
-
-```{r, fig.height=2, fig.width=3.5}
-plt_list = list()
-count_pos_lists = list()
-for(n in names(zonation_filt)){
-  count_pos_list = list()
-  for(cc in unique(names(zonation_filt[[n]]))){
-    count_pos = Reduce(cbind, tapply(as.factor(zonation_filt[[n]][[cc]]$max_zon), 
-                                     zonation_filt[[n]][[cc]]$cell_type, 
-                                     function(x) data.frame(table(x))))
-    rownames(count_pos) = count_pos[,1]
-    count_pos = count_pos[,-seq(3,29,2)]
-    colnames(count_pos) = c("max_pos", levels(zonation_filt[[n]][[cc]]$cell_type))
-    count_pos = count_pos[,c(1, hclust(dist(t(count_pos[,-1])), method="ward.D2")$order+1)]
-    count_pos = reshape2::melt(count_pos)
-    count_pos$max_pos = as.numeric(as.character(count_pos$max_pos))
-    count_pos$cond = cc
-    count_pos_list[[cc]] = count_pos
-  }
-  count_pos_all = Reduce(rbind, count_pos_list)
-  
-  count_pos_lists[[n]] = count_pos_list
-  
-  for(cc in names(count_pos_list)){
-    plt_list[[paste0(n, "_", cc)]] = ggplot(count_pos_list[[cc]], 
-                                            aes(x = max_pos, y = variable, size = value, colour = value))+
-      geom_point()+
-      #scale_colour_continuous(breaks = c(0,5,10,15,20), limits = c(0,20))+
-      #scale_size_continuous(breaks = c(0,5,10,15,20), limits = c(0,20))+
-      guides(colour = guide_legend(reverse = T), size = guide_legend(reverse = T))+
-      labs(x = "zonation", y = "Cell Type", 
-           colour = "# interactions", size = "# interactions")+
-      theme_bw()
-  }
-}
-```
-
-
-
-```{r}
-plt = ggplot(zonation_filt$Hepatocytes$healthy, aes(x = max_zon, y = cell_type, fill = cell_type))+
-  geom_density_ridges(alpha = 0.2)+
-  scale_x_continuous(limits = c(0,100))+
-  theme_bw()+
-  theme(legend.position = "none")
-
-
-abc = reshape2::acast(formula=cell_type~interact, data = plot_df)
-abcd = (abc>0) %*% t(abc>0)
-
-plot(mean_bins_h[,"VEGFA"], pch = 19, cex = 0.85)
-plot(hep_fits$healthy[,"PROS1"], pch = 19, cex = 0.85)
-```
-
-
-
-```{r}
-plt = ggplot(plot_df, aes(x = end_h_max, colour = cell_type))+
-  geom_density()+
-  scale_x_continuous(limits = c(0,100))+
-  theme_bw()
-
-ggplot(plot_df, aes(x = cell_type, y = end_h_max, colour = cell_type))+
-     ggbeeswarm::geom_beeswarm()+
-     scale_y_continuous(limits = c(0,100))+
-     theme_bw()
-
-
-abc = reshape2::acast(formula=cell_type~interact, data = plot_df)
-abcd = (abc>0) %*% t(abc>0)
-
-par(mfrow = c(2,2))
-plot(end_fits$healthy[,"FLT1"], pch = 19, cex = 0.85)
-plot(mean_bins_h[,"FLT1"], pch = 19, cex = 0.85)
-plot(end_cells$healthy$zonation_pt,end_cells$healthy@assays$SCT@data["FLT1",])
-plot(density(end_cells$healthy$zonation_pt[end_cells$healthy@assays$SCT@data["FLT1",]==0]))
-```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-```{r}
-inter_df = readRDS(file = "results/cell_comm/interaction_de_unique_HvR.RDS")
-inter_hr = rbind(inter_df$healthy[,1:9], inter_df$regenerating[,1:9])
-inter_hr$cond = c(rep("healthy", nrow(inter_df$healthy)),
-                  rep("regenerating", nrow(inter_df$regenerating)))
-inter_hr = inter_hr[grepl("LSEC_", inter_hr$ct1) | grepl("Hepa", inter_hr$ct1) |
-                      grepl("LSEC_", inter_hr$ct2) | grepl("Hepa", inter_hr$ct2), ]
-
-inter_diff = inter_hr[inter_hr$ct1!=inter_hr$ct2,]
-```
-
-
-```{r, fig.height=5, fig.width=5.2}
-hep_genes_h_0 = unique(c(as.character(inter_diff$gn1)[grepl("Hepa", inter_diff$ct1) &
-                                                      inter_diff$cond=="healthy"],
-                         as.character(inter_diff$gn2)[grepl("Hepa", inter_diff$ct2) &
-                                                      inter_diff$cond=="healthy"]))
-hep_genes_r_0 = unique(c(as.character(inter_diff$gn1)[grepl("Hepa", inter_diff$ct1) &
-                                                      inter_diff$cond=="regenerating"],
-                         as.character(inter_diff$gn2)[grepl("Hepa", inter_diff$ct2) &
-                                                      inter_diff$cond=="regenerating"]))
-
-nbins = 100
-df_h = data.table("zonation_pt" = hep_traj$healthy)
-df_h$zonation_int = cut(df_h$zonation_pt, nbins)
-
-df_r = data.table("zonation_pt" = hep_traj$regenerating)
-df_r = df_h[df_r, on="zonation_pt", roll=Inf, rollends = T]
-
-mean_bins_h = apply(hep_cells$healthy@assays$SCT@data, 1, 
-                    function(x) tapply(x, df_h$zonation_int, mean))
-mean_bins_r = apply(hep_cells$regenerating@assays$SCT@data, 1, 
-                    function(x) tapply(x, df_r$zonation_int, mean))
-
-hep_h_max = apply(mean_bins_h, 2, function(x) mean(order(x, decreasing = T)[1:10]))
-hep_r_max = apply(mean_bins_r, 2, function(x) mean(order(x, decreasing = T)[1:10]))
-
-xxx = data.frame(row.names = hep_genes_h_0, "h" = hep_h_max[hep_genes_h_0], 
-                 "r" = hep_r_max[hep_genes_h_0])
-xxx = xxx[complete.cases(xxx),]
-ggplot(xxx, aes(x = h, y = r))+geom_hex()+theme_bw()+theme(aspect.ratio = 1)
-cor(xxx)
-
-par(mfrow = c(2,2))
-plot(mean_bins_h[,"COL18A1"], pch = 19, cex = 0.85)
-plot(mean_bins_r[,"COL18A1"], pch = 19, cex = 0.85)
-plot(hep_fits$healthy[,"COL18A1"], pch = 19, cex = 0.85)
-plot(hep_fits$regenerating[,"COL18A1"], pch = 19, cex = 0.85)
-```
-
-```{r, fig.height=5, fig.width=5.2}
-end_genes_h = unique(c(as.character(inter_diff$gn1)[grepl("LSEC_", inter_diff$ct1) &
-                                                        inter_hr$cond=="healthy"],
-                         as.character(inter_diff$gn2)[grepl("LSEC_", inter_diff$ct2) &
-                                                        inter_diff$cond=="healthy"]))
-end_genes_r = unique(c(as.character(inter_diff$gn1)[grepl("LSEC_", inter_diff$ct1) &
-                                                      inter_hr$cond=="regenerating"],
-                       as.character(inter_diff$gn2)[grepl("LSEC_", inter_diff$ct2) &
-                                                      inter_diff$cond=="regenerating"]))
-
-nbins = 100
-df_h = data.table("zonation_pt" = end_traj$healthy)
-df_h$zonation_int = cut(df_h$zonation_pt, nbins)
-
-df_r = data.table("zonation_pt" = end_traj$regenerating)
-df_r = df_h[df_r, on="zonation_pt", roll=Inf, rollends = T]
-
-end_mean_bins_h = apply(end_cells$healthy@assays$SCT@data, 1, 
-                    function(x) tapply(x, df_h$zonation_int, mean))
-end_mean_bins_r = apply(end_cells$regenerating@assays$SCT@data, 1, 
-                    function(x) tapply(x, df_r$zonation_int, mean))
-
-end_h_max = apply(end_mean_bins_h, 2, function(x) mean(order(x, decreasing = T)[1:10]))
-end_r_max = apply(end_mean_bins_r, 2, function(x) mean(order(x, decreasing = T)[1:10]))
-
-xxx = data.frame(row.names = end_genes_h, "h" = end_h_max[end_genes_h], 
-                 "r" = end_r_max[end_genes_h])
-xxx = xxx[complete.cases(xxx),]
-ggplot(xxx, aes(x = h, y = r))+geom_hex()+theme_bw()+theme(aspect.ratio = 1)
-cor(xxx)
-
-par(mfrow = c(2,2))
-plot(end_mean_bins_h[,"PECAM1"], pch = 19, cex = 0.85)
-plot(end_mean_bins_r[,"PECAM1"], pch = 19, cex = 0.85)
-plot(end_fits$healthy[,"PECAM1"], pch = 19, cex = 0.85)
-plot(end_fits$regenerating[,"PECAM1"], pch = 19, cex = 0.85)
-```
-
-
-
-```{r}
-ct1 = inter_diff[grepl("Hepa", inter_diff$ct1),
-                 c("gn1", "ct2")]
-ct2 = inter_diff[grepl("Hepa", inter_diff$ct2),
-                 c("gn2", "ct1")]
-ct = unique(rbind(as.matrix(ct1), as.matrix(ct2)))
-
-ctg = merge(xxx, ct, by.x = 0, by.y = 1)
-
-ggplot(ctg, aes(x = h, y = r))+geom_hex()+theme_bw()+theme(aspect.ratio = 1)
-ggplot(ctg, aes(x = ct2, y = h, fill = ct2))+
-  geom_boxplot()+
-  theme_bw()+theme(aspect.ratio = 1)
-
-
-ct1 = inter_diff[grepl("LSEC_", inter_diff$ct1),
-                 c("gn1", "ct2")]
-ct2 = inter_diff[grepl("LSEC_", inter_diff$ct2),
-                 c("gn2", "ct1")]
-ct = unique(rbind(as.matrix(ct1), as.matrix(ct2)))
-
-ctg = merge(xxx, ct, by.x = 0, by.y = 1)
-
-ggplot(ctg, aes(x = h, y = r))+geom_hex()+theme_bw()+theme(aspect.ratio = 1)
-ggplot(ctg, aes(x = ct2, y = h, fill = ct2))+
-  geom_boxplot()+
-  theme_bw()+theme(aspect.ratio = 1)
-```
-
-
-
-```{r}
-library(org.Hs.eg.db)
-terms_list = c("extracellular matrix" = "GO:0031012", "chemokine activity" = "GO:0008009", 
-               "cytokine activity" = "GO:0005125", "multicellular organism development" = "GO:0007275")
-g_path = mget(terms_list, org.Hs.egGO2ALLEGS)
-refsymbol = org.Hs.egSYMBOL
-g_path = lapply(g_path, function(x) unlist(as.list(refsymbol[x])))
-names(g_path) = names(terms_list)
-
-g_path_df = data.frame("gene" = unlist(g_path),
-                       "terms" = unlist(lapply(names(g_path), 
-                                               function(x) rep(x, length(g_path[[x]])))),
-                       stringsAsFactors = F)
-g_path_df = g_path_df[!duplicated(g_path_df$gene),]
-xxx = merge(inter_df$healthy, g_path_df, by.x = "gn1", by.y = "gene", all.x = T)
-xxx = merge(xxx, g_path_df, by.x = "gn2", by.y = "gene", all.x = T)[,c(3:6,2,7,1,8:17)]
-```
-
-
-
-Calculate mutual information for total interactions
-
-```{r, fig.height=6, fig.width=6.2}
-mut_info_list = list()
-for(n in names(scoring_mats)){
-  mi_mat = matrix(0, nrow = ncol(scoring_mats[[n]]$mat_lig_ct), ncol = ncol(scoring_mats[[n]]$mat_rec_ct))
-  rownames(mi_mat) = colnames(mi_mat) = colnames(scoring_mats[[n]]$mat_lig_ct)
-  for(ct1 in colnames(scoring_mats[[n]]$mat_lig_ct)){
-    for(ct2 in colnames(scoring_mats[[n]]$mat_rec_ct)){
-      df = cbind(scoring_mats[[n]]$mat_lig_ct[,ct1], scoring_mats[[n]]$mat_rec_ct[,ct2])
-      df = df[complete.cases(df),]
-      norm_mi = mpmi::cmi(df)$mi[1,2] / sqrt(entropy::entropy(df[,1]) * entropy::entropy(df[,2]))
-      mi_mat[ct1, ct2] = norm_mi
-    }
-  }
-  m = data.frame(inter_counts_l[[n]], check.names = F)
-  m$r = rownames(m)
-  m = reshape2::melt(m)
-  mi_mat = reshape2::melt(mi_mat)
-  
-  mut_info_list[[n]] = merge(mi_mat, m, by = c(1,2))
-  colnames(mut_info_list[[n]]) = c("source", "target", "mi", "n")
-}
-saveRDS(mut_info_list, file = "results/cell_comm/mut_info_list.RDS")
-```
-
-Calculate mutual information for directed interactions
-
-```{r, fig.height=6, fig.width=6.2}
-mut_info_dir_list = list()
-for(n in names(scoring_mats_dir)){
-  mi_mat = matrix(0, nrow = ncol(scoring_mats_dir[[n]]$mat_lig_ct), 
-                  ncol = ncol(scoring_mats_dir[[n]]$mat_rec_ct))
-  rownames(mi_mat) = colnames(mi_mat) = colnames(scoring_mats_dir[[n]]$mat_lig_ct)
-  for(ct1 in colnames(scoring_mats_dir[[n]]$mat_lig_ct)){
-    for(ct2 in colnames(scoring_mats_dir[[n]]$mat_rec_ct)){
-      df = cbind(scoring_mats_dir[[n]]$mat_lig_ct[,ct1], scoring_mats_dir[[n]]$mat_rec_ct[,ct2])
-      df = df[complete.cases(df),]
-      if(nrow(df)==0){
-        mi_mat[ct1, ct2] = 0
-        next
-      }
-      norm_mi = mpmi::cmi(df)$mi[1,2] / sqrt(entropy::entropy(df[,1]) * entropy::entropy(df[,2]))
-      mi_mat[ct1, ct2] = norm_mi
-    }
-  }
-  mi_mat[mi_mat<0] = 0 # some values are negative because of the adjustment
-  
-  mut_info_dir_list[[n]] = mi_mat
-  
-  m = data.frame(inter_counts_dir[[n]]$`1`, check.names = F)
-  m$r = rownames(m)
-  m = reshape2::melt(m)
-  mi_mat = reshape2::melt(mi_mat)
-  
-  mut_info_dir_list[[n]] = merge(mi_mat, m, by = c(1,2))
-  colnames(mut_info_dir_list[[n]]) = c("source", "target", "mi", "n")
-}
-saveRDS(mut_info_dir_list, file = "results/cell_comm/mut_info_dir_list.RDS")
-```
-
-
-Counting the proportion of cell types per condition
-
-```{r}
-for(n in names(meta_l)){
-  meta_l[[n]]$Donor = allcells_css@meta.data[as.character(meta_l[[n]]$Cell), "Donor"]
-  meta_l[[n]]$Condition = allcells_css@meta.data[as.character(meta_l[[n]]$Cell), "Condition"]
-}
-meta_all = Reduce(rbind, meta_l[1:3])
-
-counts_cond = list()
-for(cc in c("healthy", "embolised", "regenerating")){
-  counts_cond[[cc]] = table(meta_all$cell_type[meta_all$Condition==cc],
-                      meta_all$Donor[meta_all$Condition==cc])
-  counts_cond[[cc]] = reshape2::melt(data.frame("cell_type" = rownames(counts_cond[[cc]]),
-                           apply(counts_cond[[cc]], 2, function(x) x/sum(x))))
-}
-counts_cond = Reduce(rbind, counts_cond)
-counts_cond$cond = c(rep("healthy", 54), rep(c("embolised", "regenerating"), each = 108))
-counts_cond$cond = factor(counts_cond$cond, levels = c("healthy", "embolised", "regenerating"))
-
-ggplot(counts_cond, aes(x = cond, y = value))+
-  facet_wrap(~cell_type, scale = "free")+
-  geom_line(mapping = aes(group = variable), colour = "grey85")+
-  geom_point()+
-  stat_summary(mapping = aes(group = cond, colour = cond), fun.data = "mean_se")+
-  labs(x = "Condition", y = "Cell Type frequency")+
-  theme_bw()
-```

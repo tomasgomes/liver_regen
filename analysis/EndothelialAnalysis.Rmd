@@ -1,5 +1,5 @@
 ---
-title: "R Notebook"
+title: "Endothelial analysis"
 output: html_notebook
 ---
 
@@ -121,6 +121,65 @@ Load data (from all cells)
 
 ```{r}
 allcells_css = readRDS(file = "data/processed/allcells_css.RDS")
+```
+
+
+
+# Healthy endothelial analysis for UMAP and signature plots
+Subset and process each condition (only LSEC)
+
+```{r}
+end_cells = list()
+for(cond in unique(allcells_css@meta.data$Condition)){
+  cat(cond)
+  end_cells[[cond]] = allcells_css[,grepl("LSEC ", allcells_css@meta.data$allcells_clusters) &
+                                     allcells_css@meta.data$Condition==cond]
+  if(cond=="healthy"){
+    end_cells[[cond]] = end_cells[[cond]][,grepl("LSEC ", end_cells[[cond]]@meta.data$names_clusters)]
+  }
+  print(dim(end_cells[[cond]]))
+  end_cells[[cond]] = suppressWarnings(SCTransform(end_cells[[cond]], do.correct.umi = T, 
+                                                   verbose = F, 
+                                                   vars.to.regress=c("unique_name","nCount_RNA"),
+                                                   variable.features.rv.th = 1, seed.use = 1,
+                                                   return.only.var.genes = F, 
+                                                   variable.features.n = NULL))
+  end_cells[[cond]] = RunPCA(end_cells[[cond]], verbose = F)
+  end_cells[[cond]] = RunUMAP(end_cells[[cond]], dims = 1:20, verbose = F)
+}
+```
+
+For healthy cells (which will serve as reference), do additional filtering and reprocessing
+
+```{r}
+DimPlot(end_cells$healthy, reduction = "umap", group.by = "allcells_clusters")
+gfresh = c("CLEC1B", "CLEC4G", "LYVE1", "CD14",  # central 
+           "PECAM1", "AQP1", "VWF", "CD34", # portal
+           "ALB", "MKI67", "TRAC", "DCN") 
+FeaturePlot(end_cells$healthy, features = gfresh, reduction = "umap")
+
+outcells = (end_cells$healthy@reductions$umap@cell.embeddings[,1]<(-4)) # this removes what seem to be central hepatocytes
+end_cells$healthy = end_cells$healthy[,!outcells]
+
+end_cells$healthy = suppressWarnings(SCTransform(end_cells$healthy, do.correct.umi = T, 
+                                                 verbose = F,
+                                                 vars.to.regress = c("unique_name","nCount_RNA"),
+                                                 variable.features.rv.th = 1, seed.use = 1,
+                                                 return.only.var.genes = F, 
+                                                 variable.features.n = NULL))
+end_cells$healthy = RunPCA(end_cells$healthy, verbose = F)
+end_cells$healthy = RunUMAP(end_cells$healthy, dims = 1:15, verbose = F)
+DimPlot(end_cells$healthy, reduction = "umap", group.by = "unique_name")
+
+end_cells$healthy = FindNeighbors(end_cells$healthy, reduction = "pca", dims = 1:15,
+                                  force.recalc = T, graph.name = "end")
+end_cells$healthy = FindClusters(end_cells$healthy, graph.name = "end", algorithm = 2, 
+                                 resolution = seq(0.1,0.8,0.1), verbose = F)
+DimPlot(end_cells$healthy, reduction = "umap", group.by = "end_res.0.2")
+end_cells$healthy = SetIdent(end_cells$healthy, value = "end_res.0.2")
+mk_end_h = FindAllMarkers(end_cells$healthy, assay = "SCT")
+
+saveRDS(end_cells$healthy, file = "results/zonation_healthy/end_healthy_srat.RDS")
 ```
 
 
@@ -488,26 +547,6 @@ ggplot(plot_df, aes(x = zonation_pt, y = endo_simp, fill = endo_simp))+
      theme(axis.text.y = element_blank(),
            legend.title.align = 0,
            legend.position = "bottom")
-```
-
-
-
-```{r}
-plot_df = only_end_cells@meta.data
-plot_df$pt = all_pred[colnames(only_end_cells)]
-plot_df$bins100 = cut(plot_df$pt, 10)
-plot_df$Condition = factor(plot_df$Condition, levels = c("healthy", "embolised", "regenerating"))
-
-ggplot(plot_df, aes(x = pt, y = endo_simp, fill = endo_simp))+
-     facet_wrap(~Condition)+
-     geom_violin()+
-     labs(x = "zonation", y = "clusters")+
-     scale_x_continuous(expand = c(0,0))+
-     guides(fill = guide_legend(title.position = "top", reverse = T))+
-     theme_bw()+
-     theme(axis.text.y = element_blank(),
-           legend.title.align = 0,
-           legend.position = "right")
 ```
 
 Do cross validation on the healthy trajectory

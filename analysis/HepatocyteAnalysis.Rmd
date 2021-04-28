@@ -1,5 +1,5 @@
 ---
-title: "Zonation analysis V3"
+title: "Hepatocyte zonation analysis"
 output: html_notebook
 ---
 
@@ -383,6 +383,7 @@ write.csv(all_corr, file = paste0("results/zonation_cond/hep_correlations_zonati
           col.names = T, row.names = F, quote = F)
 ```
 
+### Tests for finding genes varying along pseudotime
 Find varying genes - using all cells along the ranked pseudotime
 
 ```{r}
@@ -585,6 +586,7 @@ save(fits_db_list, qvals_db_list, traj_list,
      file = "results/zonation_cond/hep_binnedDonor_traj_qval_fits_rank.RData")
 ```
 
+### Save data
 Plot cell distributions in pseudotime
 
 ```{r}
@@ -809,8 +811,6 @@ dsSeurat = function(srat, variable, assay = "SCT", numis = "nCount_SCT", seed = 
 }
 ```
 
-
-## Hepatocytes
 Prepare genes and data
 
 ```{r}
