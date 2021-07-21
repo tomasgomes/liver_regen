@@ -1,0 +1,67 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+# General Setup
+Setup chunk
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 8)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_knit$get("root.dir")
+```
+
+Setup reticulate
+
+```{r}
+library(reticulate)
+knitr::knit_engines$set(python = reticulate::eng_python)
+py_available(initialize = FALSE)
+use_python(Sys.which("python"))
+py_config()
+```
+
+Load libraries
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(destiny)
+library(plyr)
+library(dplyr)
+library(RColorBrewer)
+```
+
+Load data (from all cells)
+
+```{r}
+allcells_css = readRDS(file = "data/processed/allcells_css.RDS")
+```
+
+
+
+# Immune cell clustering
+Subset immune cells
+
+```{r}
+immune_pops = c("Macrophages", "ab-T cells", "gd-T cells", "Plasmablasts", "cDCs 2", 
+                "B cells", "Kupffer cells", "cDCs 1", "pDCs")
+all_imm_cells = allcells_css[,allcells_css@meta.data$allcells_clusters %in% immune_pops]
+all_imm_cells = suppressWarnings(SCTransform(all_imm_cells, do.correct.umi = T, verbose = F, 
+                                             vars.to.regress=c("unique_name","nCount_RNA"),
+                                             variable.features.rv.th = 1, seed.use = 1,
+                                             return.only.var.genes = F, 
+                                             variable.features.n = NULL))
+all_imm_cells = RunPCA(all_imm_cells, verbose = F)
+all_imm_cells = RunUMAP(all_imm_cells, dims = 1:25, verbose = F)
+DimPlot(all_imm_cells, reduction = "umap", group.by = "Condition")
+DimPlot(all_imm_cells, reduction = "umap", group.by = "allcells_simp")
+DimPlot(all_imm_cells, reduction = "umap", group.by = "Donor")
+DimPlot(all_imm_cells, reduction = "umap", group.by = "Phase")
+FeaturePlot(all_imm_cells, reduction = "umap", features = c("MKI67", "ALB", "S100A8", "COLEC11",
+                                                            "CLEC1B", "CLEC14A", "PTPRC", "EPCAM",
+                                                            "CD14", "TRAC", "CD3E", "CD8A"))
+```

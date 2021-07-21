@@ -1504,38 +1504,6 @@ plt_dists = ggplot(hep_df, aes(x = bins10, fill = Condition))+
 pdf("figure_panels/fig3/hep_zonation_conditionDist.pdf", height = 2.3, width = 3.6, useDingbats = F)
 print(plt_dists)
 dev.off()
-
-end_df = data.frame(vals = c(end_cells$healthy$zonation_pt, end_cells$embolised$zonation_pt,
-                              end_cells$regenerating$zonation_pt), 
-                     Condition = c(rep("healthy", length(end_cells$healthy$zonation_pt)), 
-                                   rep("embolised", length(end_cells$embolised$zonation_pt)), 
-                                   rep("regenerating", length(end_cells$regenerating$zonation_pt))),
-                     Donor = c(end_cells$healthy$Donor, 
-                               end_cells$embolised$Donor, end_cells$regenerating$Donor),
-                     ct = c(end_cells$healthy$allcells_simp, 
-                               end_cells$embolised$allcells_simp, end_cells$regenerating$allcells_simp))
-end_df$bins10 = cut(end_df$vals, 10)
-end_df$Condition = factor(end_df$Condition, levels = c("healthy", "embolised", "regenerating"))
-levels(end_df$Donor) = c("sc_E1/R1", "sc_E2/R2", "sc_E3/R3", "sc_E4/R4", "sc_E5/R5", "sc_E6/R6", 
-                         "sc_H1", "sc_H2", "sc_H3")
-
-plt_dists = ggplot(end_df, aes(x = bins10, fill = Condition))+
-     facet_wrap(~Condition)+
-     geom_bar()+
-     labs(x = "zonation (binned)", y = "Number of cells")+
-     scale_y_continuous(expand = c(0,0))+
-     scale_fill_manual(values = colcond)+
-     coord_flip()+
-     guides(fill = guide_legend(title.position = "left"))+
-     theme(axis.text.y = element_blank(),
-           legend.title.align = 0,
-           legend.position = "bottom",
-           legend.box.margin = margin(0,0,0,0),
-           legend.box.spacing = unit(0.05, "cm"))
-
-pdf("figure_panels/fig3/end_zonation_conditionDist.pdf", height = 2.3, width = 3.6, useDingbats = F)
-print(plt_dists)
-dev.off()
 ```
 
 Donor density per condition
@@ -1559,26 +1527,6 @@ hep_don = ggplot(hep_df, aes(x = vals, colour = Donor))+
 
 pdf("figure_panels/fig3/hep_zonation_conditionDonors.pdf", height = 3, width = 3.6, useDingbats = F)
 print(hep_don)
-dev.off()
-
-end_don = ggplot(end_df, aes(x = vals, colour = Donor))+
-     facet_wrap(~Condition, scales = "free_y")+
-     geom_hline(yintercept = 0)+
-     geom_density()+
-     labs(x = "zonation", y = "cell density")+
-     scale_y_continuous(expand = c(0,0))+
-     coord_flip()+
-     guides(colour = guide_legend(title.position = "left", nrow = 3))+
-     theme(axis.text.y = element_blank(),
-           axis.ticks.x = element_line(),
-           strip.text = element_text(margin = margin(0.04,0,0.04,0, "cm"), size = 7.5),
-           legend.title.align = 0,
-           legend.position = "bottom",
-           legend.box.margin = margin(0,0,0,0),
-           legend.box.spacing = unit(0.05, "cm"))
-
-pdf("figure_panels/fig3/end_zonation_conditionDonors.pdf", height = 3, width = 3.6, useDingbats = F)
-print(end_don)
 dev.off()
 ```
 
@@ -1604,27 +1552,6 @@ hep_don = ggplot(hep_df, aes(x = vals, colour = Condition))+
 
 pdf("figure_panels/fig3/hep_zonation_DonorsCond.pdf", height = 3, width = 3.6, useDingbats = F)
 print(hep_don)
-dev.off()
-
-end_don = ggplot(end_df, aes(x = vals, colour = Condition))+
-     facet_wrap(~Donor, scales = "free_y")+
-     geom_hline(yintercept = 0)+
-     geom_density()+
-     labs(x = "zonation", y = "cell density")+
-     scale_colour_manual(values = colcond)+
-     scale_y_continuous(expand = c(0,0))+
-     coord_flip()+
-     guides(colour = guide_legend(title.position = "left", ncol = 3))+
-     theme(axis.text.y = element_blank(),
-           axis.ticks.x = element_line(),
-           strip.text = element_text(margin = margin(0.04,0,0.04,0, "cm"), size = 7.5),
-           legend.title.align = 0,
-           legend.position = "bottom",
-           legend.box.margin = margin(0,0,0,0),
-           legend.box.spacing = unit(0.05, "cm"))
-
-pdf("figure_panels/fig3/end_zonation_DonorsCond.pdf", height = 3, width = 3.6, useDingbats = F)
-print(end_don)
 dev.off()
 ```
 
@@ -2074,6 +2001,47 @@ plt_dists = ggplot(end_df, aes(x = Var2, fill = Var1, y = Freqnorm_h))+
 pdf("figure_panels/fig_endo/endo_zonation_conditionDist_norm.pdf", 
     height = 2, width = 3.8, useDingbats = F)
 print(plt_dists)
+dev.off()
+```
+
+Donor distributions
+
+```{r}
+end_df = only_end_cells@meta.data[only_end_cells$goodcl,]
+
+end_df = data.frame(vals = end_df$zonation_pt, 
+                    Condition = end_df$Condition,
+                    Donor = end_df$Donor,
+                    ct = end_df$endo_simp)
+end_df$bins10 = cut(end_df$vals, 10)
+end_df$Condition = factor(end_df$Condition, levels = c("healthy", "regenerating", "embolised"))
+end_df$Donor = factor(end_df$Donor)
+end_df$Donor = plyr::revalue(end_df$Donor, c("HD1" = "sc_H1", "HD2" = "sc_H2", "HD3" = "sc_H3", 
+                                             "DD1" = "sc_R1/E1", "DD2" = "sc_R2/E2", "DD3" = "sc_R3/E3",
+                                             "DD5" = "sc_R4/E4", "DD6" = "sc_R5/E5", "DD7" = "sc_R6/E6"))
+end_df$Donor = factor(end_df$Donor, levels = levels(end_df$Donor)[c(7:9, 1:6)])
+
+end_don = ggplot(end_df, aes(x = vals, colour = Condition))+
+  facet_wrap(~Donor, scales = "free_y")+
+  geom_hline(yintercept = 0)+
+  geom_density(size = 1.05)+
+  labs(x = "Zonation", y = "Cell density")+
+  scale_colour_manual(values = colcond)+
+  scale_y_continuous(expand = c(0,0))+
+  coord_flip()+
+  guides(colour = guide_legend(title.position = "left", ncol = 3))+
+  theme(axis.text.y = element_blank(),
+        axis.ticks.x = element_line(),
+        strip.text = element_text(margin = margin(0.04,0,0.04,0, "cm"), size = 7.5),
+        strip.background = element_rect(fill = "white", colour = "white"),
+        legend.title.align = 0,
+        aspect.ratio = 0.8,
+        legend.position = "bottom",
+        legend.box.margin = margin(0,0,0,0),
+        legend.box.spacing = unit(0.05, "cm"))
+
+pdf("figure_panels/fig_endo/end_zonation_DonorsCond.pdf", height = 3.8, width = 3.4, useDingbats = F)
+print(end_don)
 dev.off()
 ```
 
