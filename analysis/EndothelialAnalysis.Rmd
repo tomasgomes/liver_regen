@@ -288,7 +288,7 @@ only_end_cells = SetIdent(only_end_cells, value = "pca25_res.0.9")
 mkend = FindAllMarkers(only_end_cells, logfc.threshold = 0.2, pseudocount.use = 0.1)
 write.csv(mkend[mkend$p_val_adj<=0.05,], 
           file = "results/endothelial/markers_endo_subpop_only.csv", row.names = T, quote = F)
-saveRDS(mkend, file = "./results/endothelial/clust_markers_endo_only.RDS")
+saveRDS(mkend, file = "results/endothelial/clust_markers_endo_only.RDS")
 ```
 
 Annotate the clusters for ECs only

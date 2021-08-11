@@ -1,0 +1,272 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+# General Setup
+Setup chunk
+
+```{r, setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 8)
+knitr::opts_knit$set(root.dir = normalizePath(".."))
+knitr::opts_knit$get("root.dir")
+```
+
+Setup reticulate
+
+```{r}
+library(reticulate)
+knitr::knit_engines$set(python = reticulate::eng_python)
+py_available(initialize = FALSE)
+use_python(Sys.which("python"))
+py_config()
+```
+
+Load libraries
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(plyr)
+library(dplyr)
+library(RColorBrewer)
+```
+
+
+
+# Load data
+Load immune cell data
+
+```{r}
+allcells_css = readRDS(file = "data/processed/allcells_css.RDS")
+end_cells = readRDS(file = "results/endothelial/only_end_cells_zon.RDS")
+hep_cells = readRDS(file = "results/zonation_cond/hep_cells_zonation_rank.RDS")
+imm_cells = readRDS(file = "results/immune/all_imm_cells.RDS")
+
+endpop_df = data.frame(row.names = colnames(end_cells),
+                       "subpops" = end_cells@meta.data$endo_simp)
+immpop_df = data.frame(row.names = colnames(imm_cells),
+                       "subpops" = imm_cells@meta.data$immune_annot)
+heppop_df = lapply(hep_cells, function(x) cbind(colnames(x), as.character(x$zonation_int)))
+heppop_df = Reduce(rbind, heppop_df)
+heppop_df = data.frame(row.names = heppop_df[,1],
+                       subpops = factor(heppop_df[,2]))
+levels(heppop_df$subpops) = c("(-0.00099,0.333]" = "Hepatocytes_Z1",
+                              "(0.333,0.667]" = "Hepatocytes_Z2",
+                              "(0.667,1]" = "Hepatocytes_Z3")
+heppop_df$subpops = as.character(heppop_df$subpops)
+
+subpop_df = rbind(endpop_df, immpop_df, heppop_df)
+subpop_df$subpops[subpop_df$subpops=="Cycling cells"] = "Dividing endothelial cells"
+
+# add subpop metadata
+allcells_css = AddMetaData(allcells_css, subpop_df)
+allcells_css$subpops[is.na(allcells_css$subpops)] = allcells_css$allcells_major[is.na(allcells_css$subpops)]
+allcells_css$subpops[allcells_css$subpops=="Hepatocyte-Monocyte interaction"] = "Doublets"
+
+# the cells in this object named "Hepatocytes", "Endothelial cells", and "Doublets" have to be removed
+## the first two are cells that didn't pass the hep and end analysis
+sub_allcells_css = allcells_css[,!(allcells_css$subpops %in% c("Hepatocytes", "Endothelial cells",
+                                                               "Doublets"))]
+
+sub_allcells_css$anno_cond = paste0(sub_allcells_css$subpops, "_", sub_allcells_css$Condition)
+saveRDS(sub_allcells_css, file = "results/cirrhosis/sub_allcells_css.RDS")
+```
+
+Load Ramachandran data
+
+```{r}
+load("../../data/published/Ramachandran_liver/tissue.rdata")
+
+cirr_data = CreateSeuratObject(counts = tissue@raw.data, meta.data = tissue@meta.data)
+```
+
+Renormalise, since the original data doesn't look ok
+
+```{r}
+cirr_data = suppressWarnings(SCTransform(cirr_data, do.correct.umi = T, verbose = F, 
+                                         vars.to.regress=c("dataset", "nCount_RNA"),
+                                         variable.features.rv.th = 1, seed.use = 1,
+                                         return.only.var.genes = F, variable.features.n = NULL))
+
+
+cirr_data$anno_cond = paste0(cirr_data$annotation_indepth, "_", cirr_data$condition)
+saveRDS(cirr_data, file = "results/cirrhosis/cirr_data_renorm.RDS")
+```
+
+Get DE genes between conditions
+
+```{r}
+cirr_data = SetIdent(cirr_data, value = "annotation_indepth")
+mk_ct_list = list()
+condct = table(cirr_data$annotation_indepth, cirr_data$condition)
+condct = condct[apply(condct, 1, function(x) all(x>=5)),]
+for(ct in rownames(condct)){
+  mk_ct_list[[ct]] = FindMarkers(cirr_data, ident.1 = "Cirrhotic", ident.2 = "Uninjured", assay = "SCT",
+                                 group.by = "condition", pseudocount.use = 0.1, subset.ident = ct)
+}
+saveRDS(mk_ct_list, file = "results/cirrhosis/mk_ct_CvsH.RDS")
+
+cirr_data = SetIdent(cirr_data, value = "annotation_lineage")
+mk_li_list = list()
+condct = table(cirr_data$annotation_lineage, cirr_data$condition)
+condct = condct[apply(condct, 1, function(x) all(x>=5)),]
+for(ct in rownames(condct)){
+  mk_li_list[[ct]] = FindMarkers(cirr_data, ident.1 = "Cirrhotic", ident.2 = "Uninjured", assay = "SCT",
+                                 group.by = "condition", pseudocount.use = 0.1, subset.ident = ct)
+}
+saveRDS(mk_li_list, file = "results/cirrhosis/mk_li_CvsH.RDS")
+```
+
+Markers for each MPs cell population
+
+```{r}
+cirr_data = SetIdent(cirr_data, value = "annotation_indepth")
+mk_cirr_mps = FindAllMarkers(cirr_data[,grepl("MPs", cirr_data$annotation_indepth)], 
+                             assay = "SCT", pseudocount.use = 0.1, only.pos = T, logfc.threshold = 0.15)
+mk_cirr_mps = mk_cirr_mps[mk_cirr_mps$p_val_adj<=0.05,]
+mk_cirr_mps = mk_cirr_mps[order(mk_cirr_mps$avg_log2FC, decreasing = T),]
+```
+
+
+
+```{r}
+top50_g = lapply(unique(mk_cirr_mps$cluster), 
+                 function(x) mk_cirr_mps[mk_cirr_mps$cluster==x, "gene"][1:50])
+names(top50_g) = unique(mk_cirr_mps$cluster)
+
+sub_allcells_css = AddModuleScore(sub_allcells_css, features = top50_g, nbin = 30, seed = 1)
+colnames(sub_allcells_css@meta.data)[grepl("Cluster", 
+                                           colnames(sub_allcells_css@meta.data))] = names(top50_g)
+
+mp_cells = c("Macrophages (HES4+)","Dividing cDCs","activated DCs","cDC1","cDC2","Kupffer cells",
+             "Monocytes (IGSF21+ GPR34+)","Macrophages", "Monocytes (TREM2+ CD9+)",
+             "Monocytes (secretory)","Kupffer cells (SUCNR1+)")
+feat = colnames(sub_allcells_css@meta.data)[grepl("MPs",colnames(sub_allcells_css@meta.data))]
+feat = sort(feat)
+sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat[1:4], idents = mp_cells, ncol = 2)+NoLegend()
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat[5:8], idents = mp_cells, ncol = 2)+NoLegend()
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat[9:13], idents = mp_cells, ncol = 3)+NoLegend()
+```
+
+
+
+```{r}
+cir_sigs50 = lapply(mk_ct_list, function(x) rownames(x[order(x$avg_log2FC, decreasing = T),])[1:50])
+
+sub_allcells_css = AddModuleScore(sub_allcells_css, features = cir_sigs50, nbin = 30, seed = 1, 
+                                  name = "Cirr")
+colnames(sub_allcells_css@meta.data)[grepl("Cirr", 
+                                           colnames(sub_allcells_css@meta.data))] = paste0("Cirr_",names(cir_sigs50))
+
+mp_cells = c("Macrophages (HES4+)","Dividing cDCs","activated DCs","cDC1","cDC2","Kupffer cells",
+             "Monocytes (IGSF21+ GPR34+)","Macrophages", "Monocytes (TREM2+ CD9+)",
+             "Monocytes (secretory)","Kupffer cells (SUCNR1+)")
+feat = colnames(sub_allcells_css@meta.data)[grepl("Cirr_",colnames(sub_allcells_css@meta.data)) &
+                                              grepl("MPs",colnames(sub_allcells_css@meta.data))]
+feat = sort(feat)
+sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat[1:4], idents = mp_cells, ncol = 2)+NoLegend()
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat[5:8], idents = mp_cells, ncol = 2)+NoLegend()
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat[9:11], idents = mp_cells, ncol = 2)+NoLegend()
+```
+
+
+
+```{r}
+mp_cells = c("Hepatocytes_Z1", "Hepatocytes_Z2", "Hepatocytes_Z3", "Cholangiocytes")
+feat = c("Cirr_Cholangiocytes (1)", "Cirr_Cholangiocytes (2)", 
+         "Cirr_Cholangiocytes (3)", "Cirr_Hepatocytes")
+sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat, idents = mp_cells, ncol = 2)
+```
+
+
+
+```{r}
+mp_cells = c(unique(sub_allcells_css$subpops)[grepl("EC", unique(sub_allcells_css$subpops))], 
+             "Stellate cells")
+feat = c(colnames(sub_allcells_css@meta.data)[grepl("Cirr_",colnames(sub_allcells_css@meta.data)) &
+                                              grepl("Endothe",colnames(sub_allcells_css@meta.data))],
+         "Cirr_Mesenchyme (1)", "Cirr_Mesenchyme (2)", "Cirr_Myofibroblasts")
+sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat[1:6], idents = mp_cells, ncol = 3)
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat[7:9], idents = mp_cells, ncol = 3)
+```
+
+
+
+```{r}
+mp_cells = c(unique(sub_allcells_css$subpops)[grepl("NK", unique(sub_allcells_css$subpops))], 
+             "ILC3")
+feat = c(colnames(sub_allcells_css@meta.data)[grepl("Cirr_",colnames(sub_allcells_css@meta.data)) &
+                                              grepl("ILCs ",colnames(sub_allcells_css@meta.data))])
+sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat, idents = mp_cells, ncol = 3)
+```
+
+
+
+```{r}
+mp_cells = c(unique(sub_allcells_css$subpops)[grepl("T ce", unique(sub_allcells_css$subpops))], 
+             "Treg", "TRM cells")
+feat = c(colnames(sub_allcells_css@meta.data)[grepl("Cirr_",colnames(sub_allcells_css@meta.data)) &
+                                              grepl("Tcells",colnames(sub_allcells_css@meta.data))])
+feat = sort(feat[-7])
+sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat, idents = mp_cells, ncol = 3)
+```
+
+
+
+```{r}
+cir_sigs50 = lapply(mk_li_list, function(x) rownames(x[order(x$avg_log2FC, decreasing = T),])[1:50])
+
+sub_allcells_css = AddModuleScore(sub_allcells_css, features = cir_sigs50, nbin = 20, seed = 1, 
+                                  #pool = unique(lapply(mk_li_list, function(x) rownames(x))),
+                                  ctrl = 500, name = "Cirr_li_")
+colnames(sub_allcells_css@meta.data)[grepl("Cirr_li_", 
+                                           colnames(sub_allcells_css@meta.data))] = paste0("Cirr_li_",names(cir_sigs50))
+
+mp_cells = c("Macrophages (HES4+)","Dividing cDCs","activated DCs","cDC1","cDC2","Kupffer cells",
+             "Monocytes (IGSF21+ GPR34+)","Macrophages", "Monocytes (TREM2+ CD9+)",
+             "Monocytes (secretory)","Kupffer cells (SUCNR1+)")
+feat = colnames(sub_allcells_css@meta.data)[grepl("Cirr_li_",colnames(sub_allcells_css@meta.data))]
+feat = sort(feat)
+sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat[1:4], idents = mp_cells, ncol = 2)+NoLegend()
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat[5:8], idents = mp_cells, ncol = 2)+NoLegend()
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat[9:11], idents = mp_cells, ncol = 2)+NoLegend()
+
+
+mp_cells = c("Hepatocytes_Z1", "Hepatocytes_Z2", "Hepatocytes_Z3", "Cholangiocytes")
+VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+        features = feat[c(2,4)], idents = mp_cells, ncol = 2)+NoLegend()
+```
+
+
+
+
+
+ - get population signatures
+ - direct comparison of cell populations
+
+
+

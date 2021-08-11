@@ -1,5 +1,5 @@
 ---
-title: "R Notebook"
+title: "Immune population analysis"
 output: html_notebook
 ---
 
@@ -43,12 +43,15 @@ allcells_css = readRDS(file = "data/processed/allcells_css.RDS")
 
 
 
-# Immune cell clustering
+# Immune cell subsetting
 Subset immune cells
 
 ```{r}
-immune_pops = c("Macrophages", "ab-T cells", "gd-T cells", "Plasmablasts", "cDCs 2", 
-                "B cells", "Kupffer cells", "cDCs 1", "pDCs")
+# the dividing cells are T/NK, will update label at the end
+immune_pops = c("ab-T cells", "gd-T cells", 
+                "Plasmablasts", "cDCs 2", 
+                "Macrophages", "Kupffer cells",
+                "B cells",  "cDCs 1", "pDCs", "Dividing cells")
 all_imm_cells = allcells_css[,allcells_css@meta.data$allcells_clusters %in% immune_pops]
 all_imm_cells = suppressWarnings(SCTransform(all_imm_cells, do.correct.umi = T, verbose = F, 
                                              vars.to.regress=c("unique_name","nCount_RNA"),
@@ -58,10 +61,341 @@ all_imm_cells = suppressWarnings(SCTransform(all_imm_cells, do.correct.umi = T, 
 all_imm_cells = RunPCA(all_imm_cells, verbose = F)
 all_imm_cells = RunUMAP(all_imm_cells, dims = 1:25, verbose = F)
 DimPlot(all_imm_cells, reduction = "umap", group.by = "Condition")
-DimPlot(all_imm_cells, reduction = "umap", group.by = "allcells_simp")
+DimPlot(all_imm_cells, reduction = "umap", group.by = "allcells_clusters")
 DimPlot(all_imm_cells, reduction = "umap", group.by = "Donor")
 DimPlot(all_imm_cells, reduction = "umap", group.by = "Phase")
 FeaturePlot(all_imm_cells, reduction = "umap", features = c("MKI67", "ALB", "S100A8", "COLEC11",
                                                             "CLEC1B", "CLEC14A", "PTPRC", "EPCAM",
                                                             "CD14", "TRAC", "CD3E", "CD8A"))
 ```
+
+
+## Lymphoid cell analysis
+Subset Lymphoid cells
+
+```{r}
+immune_pops = c("ab-T cells", "gd-T cells", "Plasmablasts", "B cells")
+all_l_cells = allcells_css[,allcells_css@meta.data$allcells_clusters %in% immune_pops]
+all_l_cells = suppressWarnings(SCTransform(all_l_cells, do.correct.umi = T, verbose = F, 
+                                             vars.to.regress=c("unique_name","nCount_RNA"),
+                                             variable.features.rv.th = 1, seed.use = 1,
+                                             return.only.var.genes = F, 
+                                             variable.features.n = NULL))
+all_l_cells = RunPCA(all_l_cells, verbose = F)
+all_l_cells = RunUMAP(all_l_cells, dims = 1:25, verbose = F)
+DimPlot(all_l_cells, reduction = "umap", group.by = "Condition")
+DimPlot(all_l_cells, reduction = "umap", group.by = "allcells_clusters")
+DimPlot(all_l_cells, reduction = "umap", group.by = "Donor")
+DimPlot(all_l_cells, reduction = "umap", group.by = "Phase")
+FeaturePlot(all_l_cells, reduction = "umap", features = c("MKI67", "ALB", "S100A8", "COLEC11",
+                                                            "NKG7", "TRGC1", "PTPRC", "EPCAM",
+                                                            "CD14", "TRAC", "CD3E", "CD8A"))
+```
+
+Cluster and get markers
+
+```{r}
+all_l_cells = FindNeighbors(all_l_cells, reduction = "pca", dims = 1:25,
+                            prune.SNN = 1/5, force.recalc = T, graph.name = "pca25")
+all_l_cells = FindClusters(all_l_cells, algorithm = 2, verbose = F, graph.name = "pca25",
+                           resolution = seq(0.1, 2, 0.1))
+DimPlot(all_l_cells, reduction = "umap", group.by = "pca25_res.0.4", label = T)
+DimPlot(all_l_cells, reduction = "umap", group.by = "Donor", label = F)
+DimPlot(all_l_cells, reduction = "umap", group.by = "Condition", label = F)
+
+all_l_cells = SetIdent(all_l_cells, value = "pca25_res.0.4")
+mk_lcells = FindAllMarkers(all_l_cells, logfc.threshold = 0.2, pseudocount.use = 0.1)
+write.csv(mk_lcells[mk_lcells$p_val_adj<=0.05,], 
+          file = "results/immune/markers_lymphoid_subpop_all.csv", row.names = T, quote = F)
+
+
+mk02 = FindMarkers(all_l_cells, ident.1 = "0", ident.2 = "2", 
+                   logfc.threshold = 0.2, pseudocount.use = 0.1)
+```
+
+Add annotations
+
+```{r}
+new_l_labs = c("0" = "ab-T cells 1",
+               "1" = "NK/gd-T cells",
+               "2" = "ab-T cells 2",
+               "3" = "Infiltrating NK cells", # PTGDS,CX3CR1 (infilt)
+               "4" = "IgA+ Plasma cells",
+               "5" = "B cells",
+               "6" = "IgG+ Plasma cells",
+               "7" = "Dividing NK cells",
+               "8" = "ab-T cells (stress)")
+
+all_l_cells$lymphoid_annot = new_l_labs[as.character(all_l_cells$pca25_res.0.4)]
+```
+
+Subset T/NK cells
+
+```{r}
+immune_pops = c("ab-T cells 1", "ab-T cells 2", "NK/gd-T cells", "Infiltrating NK cells")
+all_t_cells = all_l_cells[,all_l_cells@meta.data$lymphoid_annot %in% immune_pops]
+all_t_cells = suppressWarnings(SCTransform(all_t_cells, do.correct.umi = T, verbose = F, 
+                                             vars.to.regress=c("unique_name","nCount_RNA"),
+                                             variable.features.rv.th = 1, seed.use = 1,
+                                             return.only.var.genes = F, 
+                                             variable.features.n = NULL))
+all_t_cells = RunPCA(all_t_cells, verbose = F)
+all_t_cells = RunUMAP(all_t_cells, dims = 1:25, verbose = F)
+DimPlot(all_t_cells, reduction = "umap", group.by = "Condition")
+DimPlot(all_t_cells, reduction = "umap", group.by = "allcells_clusters")
+DimPlot(all_t_cells, reduction = "umap", group.by = "lymphoid_annot")
+DimPlot(all_t_cells, reduction = "umap", group.by = "Donor")
+DimPlot(all_t_cells, reduction = "umap", group.by = "Phase")
+FeaturePlot(all_t_cells, reduction = "umap", features = c("MKI67", "ALB", "S100A8", "COLEC11",
+                                                            "NKG7", "TRGC1", "PTPRC", "EPCAM",
+                                                            "CD14", "TRAC", "CD3E", "CD8A"))
+```
+
+Cluster and get markers
+
+```{r}
+all_t_cells = FindNeighbors(all_t_cells, reduction = "pca", dims = 1:25,
+                            prune.SNN = 1/5, force.recalc = T, graph.name = "pca25")
+all_t_cells = FindClusters(all_t_cells, algorithm = 2, verbose = F, graph.name = "pca25",
+                           resolution = seq(0.1, 2, 0.1))
+DimPlot(all_t_cells, reduction = "umap", group.by = "pca25_res.0.9", label = T)
+DimPlot(all_t_cells, reduction = "umap", group.by = "Donor", label = F)
+DimPlot(all_t_cells, reduction = "umap", group.by = "Condition", label = F)
+DimPlot(all_t_cells, reduction = "umap", group.by = "t_annot", label = T)
+
+all_t_cells = SetIdent(all_t_cells, value = "pca25_res.0.9")
+mk_tcells = FindAllMarkers(all_t_cells, logfc.threshold = 0.2, pseudocount.use = 0.1)
+write.csv(mk_tcells[mk_tcells$p_val_adj<=0.05,], 
+          file = "results/immune/markers_t_subpop_all.csv", row.names = T, quote = F)
+
+saveRDS(mk_tcells, file = "./results/immune/clust_markers_t.RDS")
+
+mk97 = FindMarkers(all_t_cells, ident.1 = "9", ident.2 = "7", 
+                   logfc.threshold = 0.2, pseudocount.use = 0.1)
+mk26 = FindMarkers(all_t_cells, ident.1 = "2", ident.2 = "6",
+                   logfc.threshold = 0.2, pseudocount.use = 0.1)
+mk813 = FindMarkers(all_t_cells, ident.1 = "8", ident.2 = "13",
+                   logfc.threshold = 0.2, pseudocount.use = 0.1)
+```
+
+
+
+```{r}
+# https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5007630/
+new_t_labs = c("0" = "NK cells 1",
+               "1" = "TRM cells", # may have CD4 and CD8; ITGA1
+               "2" = "MAIT cells 2", # CXCR6, CCR6, CCR5, some RORC (not DE with the ILC3), some ZBTB16
+               "3" = "NK cells 2",
+               "4" = "NK cells 3",
+               "5" = "CD8 ab-T cells 2",
+               "6" = "MAIT cells 1", # hard to be sure, but has many hallmarks, even higher CD8A
+               "7" = "Infiltrating NK cells",
+               "8" = "Naive CD4+ T cells", 
+               "9" = "gd-T cells", # CD3+ vs cl7, TRDC/TRG
+               "10" = "CD8 ab-T cells 3",
+               "11" = "CD8 ab-T cells 1",
+               "12" = "Treg",
+               "13" = "ILC3") # KIT, AHR, RORC, no CD3/CD8/CD4
+
+all_t_cells$t_annot = new_t_labs[as.character(all_t_cells$pca25_res.0.9)]
+```
+
+
+## Myeloid cell analysis
+Subset Myeloid cells
+
+```{r}
+immune_pops = c("cDCs 2", "Macrophages", "Kupffer cells", "cDCs 1", "pDCs")
+all_m_cells = allcells_css[,allcells_css@meta.data$allcells_clusters %in% immune_pops]
+all_m_cells = suppressWarnings(SCTransform(all_m_cells, do.correct.umi = T, verbose = F, 
+                                             vars.to.regress=c("unique_name","nCount_RNA"),
+                                             variable.features.rv.th = 1, seed.use = 1,
+                                             return.only.var.genes = F, 
+                                             variable.features.n = NULL))
+all_m_cells = RunPCA(all_m_cells, verbose = F)
+all_m_cells = RunUMAP(all_m_cells, dims = 1:25, verbose = F)
+DimPlot(all_m_cells, reduction = "umap", group.by = "Condition")
+DimPlot(all_m_cells, reduction = "umap", group.by = "allcells_clusters")
+DimPlot(all_m_cells, reduction = "umap", group.by = "Donor")
+DimPlot(all_m_cells, reduction = "umap", group.by = "Phase")
+FeaturePlot(all_m_cells, reduction = "umap", features = c("MKI67", "ALB", "S100A8", "COLEC11",
+                                                            "NKG7", "TRGC1", "PTPRC", "EPCAM",
+                                                            "CD14", "TRAC", "CD3E", "CD8A"))
+```
+
+Clustering and markers
+
+```{r}
+all_m_cells = FindNeighbors(all_m_cells, reduction = "pca", dims = 1:25,
+                            prune.SNN = 1/5, force.recalc = T, graph.name = "pca25")
+all_m_cells = FindClusters(all_m_cells, algorithm = 2, verbose = F, graph.name = "pca25",
+                           resolution = seq(0.1, 2, 0.1))
+DimPlot(all_m_cells, reduction = "umap", group.by = "pca25_res.0.6", label = T)
+DimPlot(all_m_cells, reduction = "umap", group.by = "Donor", label = F)
+DimPlot(all_m_cells, reduction = "umap", group.by = "Condition", label = F)
+DimPlot(all_m_cells, reduction = "umap", group.by = "allcells_clusters", label = F)
+
+all_m_cells = SetIdent(all_m_cells, value = "pca25_res.0.6")
+mk_mcells = FindAllMarkers(all_m_cells, logfc.threshold = 0.2, pseudocount.use = 0.1)
+write.csv(mk_mcells[mk_mcells$p_val_adj<=0.05,], 
+          file = "results/immune/markers_m_subpop_all.csv", row.names = T, quote = F)
+
+saveRDS(mk_mcells, file = "./results/immune/clust_markers_myeloid.RDS")
+
+mk1011 = FindMarkers(all_m_cells, ident.1 = "10", ident.2 = "11",
+                     logfc.threshold = 0.2, pseudocount.use = 0.1)
+```
+
+Add annotations
+
+```{r}
+mrks_q = SoupX::quickMarkers(all_m_cells@assays$SCT@counts,
+                             all_m_cells@active.ident, N = 10)
+View(mrks_q[mrks_q$qval<=0.05,])
+
+new_m_labs = c("0" = "Kupffer cells",
+               "1" = "Monocytes/cDCs",
+               "2" = "Macrophages",
+               "3" = "Monocytes/cDCs",
+               "4" = "Kupffer cells",
+               "5" = "Monocytes/cDCs",
+               "6" = "Monocytes/cDCs",
+               "7" = "Macrophages",
+               "8" = "Monocytes/cDCs",
+               "9" = "cDC1",
+               "10" = "pDCs",
+               "11" = "pDCs",
+               "12" = "Dividing cDCs",
+               "13" = "Kupffer cells",
+               "14" = "Hepatocytes")
+
+all_m_cells$mye_annot = new_m_labs[as.character(all_m_cells$pca25_res.0.6)]
+```
+
+Subset Monocytes
+
+```{r}
+immune_pops = c("2", "7", "1", "6", "8", "3", "5", "4", "13", "0", "9")
+all_mon_cells = all_m_cells[,all_m_cells@meta.data$pca25_res.0.6 %in% immune_pops &
+                            all_m_cells@meta.data$allcells_clusters %in% c("Macrophages", "cDCs 1",
+                                                                           "cDCs 2", "Kupffer cells")]
+all_mon_cells = suppressWarnings(SCTransform(all_mon_cells, do.correct.umi = T, verbose = F, 
+                                             vars.to.regress=c("unique_name","nCount_RNA"),
+                                             variable.features.rv.th = 1, seed.use = 1,
+                                             return.only.var.genes = F, 
+                                             variable.features.n = NULL))
+all_mon_cells = RunPCA(all_mon_cells, verbose = F)
+all_mon_cells = RunUMAP(all_mon_cells, dims = 1:25, verbose = F)
+DimPlot(all_mon_cells, reduction = "umap", group.by = "Condition")
+DimPlot(all_mon_cells, reduction = "umap", group.by = "allcells_clusters")
+DimPlot(all_mon_cells, reduction = "umap", group.by = "pca25_res.0.6")
+DimPlot(all_mon_cells, reduction = "umap", group.by = "Donor")
+DimPlot(all_mon_cells, reduction = "umap", group.by = "Phase")
+FeaturePlot(all_mon_cells, reduction = "umap", features = c("MKI67", "ALB", "S100A8", "COLEC11",
+                                                            "NKG7", "TRGC1", "PTPRC", "EPCAM",
+                                                            "CD14", "TRAC", "CD3E", "CD8A"))
+```
+
+Clustering and markers
+
+```{r}
+all_mon_cells = FindNeighbors(all_mon_cells, reduction = "pca", dims = 1:25,
+                            prune.SNN = 1/5, force.recalc = T, graph.name = "pca25")
+all_mon_cells = FindClusters(all_mon_cells, algorithm = 2, verbose = F, graph.name = "pca25",
+                           resolution = seq(0.1, 2, 0.1))
+DimPlot(all_mon_cells, reduction = "umap", group.by = "pca25_res.0.5", label = T)
+DimPlot(all_mon_cells, reduction = "umap", group.by = "allcells_clusters", label = T)
+DimPlot(all_mon_cells, reduction = "umap", group.by = "Donor", label = F)
+DimPlot(all_mon_cells, reduction = "umap", group.by = "Condition", label = F)
+
+all_mon_cells = SetIdent(all_mon_cells, value = "pca25_res.0.5")
+mk_mon = FindAllMarkers(all_mon_cells, logfc.threshold = 0.2, pseudocount.use = 0.1)
+write.csv(mk_mon[mk_mon$p_val_adj<=0.05,], 
+          file = "results/immune/markers_mon_subpop_all.csv", row.names = T, quote = F)
+
+saveRDS(mk_mon, file = "./results/immune/clust_markers_mon.RDS")
+
+mk61 = FindMarkers(all_mon_cells, ident.1 = "6", ident.2 = "1", 
+                   logfc.threshold = 0.2, pseudocount.use = 0.1)
+mk21 = FindMarkers(all_mon_cells, ident.1 = "2", ident.2 = "1", 
+                   logfc.threshold = 0.2, pseudocount.use = 0.1)
+```
+
+Add annotations
+
+```{r}
+new_m_labs = c("0" = "Kupffer cells",
+               "1" = "cDC2",
+               "2" = "Monocytes (IGSF21+ GPR34+)", # similar to those identified here https://www.nature.com/articles/s41586-020-2922-4 
+               "3" = "Macrophages (HES4+)", # very similar to 5, HES4 is one of its most unique markers
+               "4" = "Kupffer cells (SUCNR1+)", # disproves https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1986575/; these KC are inflammatory/antiviral
+               "5" = "Macrophages",
+               "6" = "Monocytes (TREM2+ CD9+)", # in ramachandran et al, assoc with fibrotic scars
+               ## in their projection, also close to KC
+               "7" = "cDC2",
+               "8" = "cDC1",
+               "9" = "Monocytes (secretory)", # related to 2 and 6
+               "10" = "activated DCs") # CD80, CD86, CCR7
+
+all_mon_cells$mono_annot = new_m_labs[as.character(all_mon_cells$pca25_res.0.5)]
+```
+
+
+## Put annotations on single immune cell object
+Make dataframe with new annotations
+
+```{r}
+newannot_l = list(ldf = all_l_cells@meta.data[,c("allcells_clusters", "lymphoid_annot")],
+                  tdf = all_t_cells@meta.data[,c("allcells_clusters", "t_annot")],
+                  mdf = all_m_cells@meta.data[,c("allcells_clusters", "mye_annot")],
+                  mondf = all_mon_cells@meta.data[,c("allcells_clusters", "mono_annot")])
+for(n in names(newannot_l)){
+  newannot_l[[n]]$cells = rownames(newannot_l[[n]])
+}
+
+newannot_df = Reduce(function(x,y){merge(x,y, by = "cells", all = T)}, newannot_l)[,c(1,3,5,7,9)]
+
+newannot_df$t_annot[is.na(newannot_df$t_annot)] = newannot_df$lymphoid_annot[is.na(newannot_df$t_annot)]
+newannot_df$mono_annot[is.na(newannot_df$mono_annot)] = newannot_df$mye_annot[is.na(newannot_df$mono_annot)]
+newannot_df$immune_annot = newannot_df$t_annot
+newannot_df$immune_annot[is.na(newannot_df$immune_annot)] = newannot_df$mono_annot[is.na(newannot_df$immune_annot)]
+
+newannot_df = data.frame(row.names = newannot_df$cells, 
+                         immune_annot = newannot_df$immune_annot)
+```
+
+Add to the immune Seurat object
+
+```{r, fig.width=12, fig.height=12}
+all_imm_cells = AddMetaData(all_imm_cells, metadata = newannot_df)
+# the original "Dividing cells" will be relabeled "Dividing T/NK cells",
+## and the newly annotated "Dividing NK cells" will be renamed to match this
+all_imm_cells$immune_annot[is.na(all_imm_cells$immune_annot)] = "Dividing T/NK cells"
+all_imm_cells$immune_annot[all_imm_cells$immune_annot=="Dividing NK cells"] = "Dividing T/NK cells"
+all_imm_cells$immune_annot[all_imm_cells$immune_annot=="Hepatocytes"] = "Hepatocyte-Monocyte interaction"
+
+DimPlot(all_l_cells, group.by = "lymphoid_annot", reduction = "umap", label = T)+NoLegend()+ggtitle("Lymphoid cells")
+DimPlot(all_t_cells, group.by = "t_annot", reduction = "umap", label = T)+NoLegend()+ggtitle("T and NK cells (subset of Lymphoid)")
+DimPlot(all_m_cells, group.by = "mye_annot", reduction = "umap", label = T)+NoLegend()+ggtitle("Myeloid cells")
+DimPlot(all_mon_cells, group.by = "mono_annot", reduction = "umap", label = T)+NoLegend()+ggtitle("Monocytes cells (subset of Myeloid)")
+DimPlot(all_imm_cells, group.by = "allcells_clusters", reduction = "umap", label = T)+NoLegend()+ggtitle("Immune cells (original annotation)")
+DimPlot(all_imm_cells, group.by = "immune_annot", reduction = "umap", label = T)+NoLegend()+ggtitle("Immune cells (new detailed annotation)")
+```
+
+Save Seurat objects
+
+```{r}
+saveRDS(all_l_cells, file = "results/immune/all_l_cells.RDS")
+saveRDS(all_t_cells, file = "results/immune/all_t_cells.RDS")
+saveRDS(all_m_cells, file = "results/immune/all_m_cells.RDS")
+saveRDS(all_mon_cells, file = "results/immune/all_mon_cells.RDS")
+saveRDS(all_imm_cells, file = "results/immune/all_imm_cells.RDS")
+```
+
+
+
+
+
+
+
+

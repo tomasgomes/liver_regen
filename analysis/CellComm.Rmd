@@ -36,149 +36,156 @@ library(data.table)
 ```
 
 
-
 # Load and preprocess data
 Load data (from all cells)
 
 ```{r}
 allcells_css = readRDS(file = "data/processed/allcells_css.RDS")
-end_cells = readRDS(file = "results/zonation_cond/end_cells_zonation_rank.RDS")
+end_cells = readRDS(file = "results/endothelial/only_end_cells_zon.RDS")
 hep_cells = readRDS(file = "results/zonation_cond/hep_cells_zonation_rank.RDS")
+imm_cells = readRDS(file = "results/immune/all_imm_cells.RDS")
+```
+
+Prepare a global object with all necessary metadata
+
+```{r}
+endpop_df = data.frame(row.names = colnames(end_cells),
+                       "subpops" = end_cells@meta.data$endo_simp)
+immpop_df = data.frame(row.names = colnames(imm_cells),
+                       "subpops" = imm_cells@meta.data$immune_annot)
+heppop_df = lapply(hep_cells, function(x) cbind(colnames(x), as.character(x$zonation_int)))
+heppop_df = Reduce(rbind, heppop_df)
+heppop_df = data.frame(row.names = heppop_df[,1],
+                       subpops = factor(heppop_df[,2]))
+levels(heppop_df$subpops) = c("(-0.00099,0.333]" = "Hepatocytes_Z1",
+                              "(0.333,0.667]" = "Hepatocytes_Z2",
+                              "(0.667,1]" = "Hepatocytes_Z3")
+heppop_df$subpops = as.character(heppop_df$subpops)
+
+subpop_df = rbind(endpop_df, immpop_df, heppop_df)
+subpop_df$subpops[subpop_df$subpops=="Cycling cells"] = "Dividing endothelial cells"
+
+# add subpop metadata
+allcells_css = AddMetaData(allcells_css, subpop_df)
+allcells_css$subpops[is.na(allcells_css$subpops)] = allcells_css$allcells_major[is.na(allcells_css$subpops)]
+allcells_css$subpops[allcells_css$subpops=="Hepatocyte-Monocyte interaction"] = "Doublets"
+
+# the cells in this object named "Hepatocytes", "Endothelial cells", and "Doublets" have to be removed
+## the first two are cells that didn't pass the hep and end analysis
+sub_allcells_css = allcells_css[,!(allcells_css$subpops %in% c("Hepatocytes", "Endothelial cells",
+                                                               "Doublets"))]
+
+# add simplified column - merge some populations, don't include cycling pops and stressed T cells
+sub_allcells_css$subpops_simp = sub_allcells_css$subpops
+sub_allcells_css$subpops_simp[grepl("MAIT", sub_allcells_css$subpops_simp)] = "MAIT cells"
+sub_allcells_css$subpops_simp[grepl("NK cells ", sub_allcells_css$subpops_simp)] = "NK cells"
+sub_allcells_css$subpops_simp[grepl("LSEC (high MT", sub_allcells_css$subpops_simp, 
+                                    fixed = T)] = "LSEC (high MT)"
+sub_allcells_css$subpops_simp[grepl("CD8 ab-T ", sub_allcells_css$subpops_simp, 
+                                    fixed = T)] = "CD8 ab-T cells"
+simp_allcells_css = sub_allcells_css[,!(sub_allcells_css$subpops_simp %in% c("ab-T cells (stress)", "Dividing cDCs", "Dividing endothelial cells","Dividing T/NK cells"))]
 ```
 
 Subset and process each condition
 
 ```{r}
-cpdb_path = "results/cell_comm/CellPhoneDB_runs"
+#cpdb_path = "results/cell_comm/CellPhoneDB_runs_updt"
+cpdb_path = "/local1/USERS/tomasgomes/CellPhoneDB_runs_updt"
 
 cond_cells = list()
-for(cond in unique(allcells_css@meta.data$Condition)){
-  print(cond)
-  cond_cells[[cond]] = allcells_css[,allcells_css@meta.data$Condition==cond]
+for(cond in unique(sub_allcells_css@meta.data$Condition)){
+  # subset condition
+  cond_cells[[cond]] = sub_allcells_css[,sub_allcells_css@meta.data$Condition==cond]
   
-  # remove doublet cells
-  cond_cells[[cond]] = cond_cells[[cond]][,cond_cells[[cond]]@meta.data$allcells_major!="Doublets"]
-  cond_cells[[cond]] = cond_cells[[cond]][,cond_cells[[cond]]@meta.data$allcells_simp!="Dividing cells"]
-  
-  # remove contaminating hepatocytes
-  cond_cells[[cond]] = cond_cells[[cond]][,colnames(cond_cells[[cond]]) %in% colnames(hep_cells[[cond]]) | cond_cells[[cond]]@meta.data$allcells_major!="Hepatocytes"]
-  
-  # remove contaminating endothelial cells
-  cond_cells[[cond]] = cond_cells[[cond]][,colnames(cond_cells[[cond]]) %in% colnames(end_cells[[cond]]) | !startsWith(cond_cells[[cond]]@meta.data$allcells_simp,"LSEC")]
-  
-  # add zonation labels
+  # define metadata
   meta = data.frame(row.names = rownames(cond_cells[[cond]]@meta.data),
                     "Cell" = rownames(cond_cells[[cond]]@meta.data), 
-                    "cell_type" = as.character(cond_cells[[cond]]@meta.data$allcells_simp),
+                    "cell_type" = as.character(cond_cells[[cond]]@meta.data$subpops),
                     stringsAsFactors = F)
-  
-  hep_zones = hep_cells[[cond]]@meta.data$zonation_int
-  levels(hep_zones) = c("(-0.00099,0.333]" = "Hepatocytes_Z1",
-                        "(0.333,0.667]" = "Hepatocytes_Z2",
-                        "(0.667,1]" = "Hepatocytes_Z3")
-  hep_zones = as.character(hep_zones)
-  names(hep_zones) = colnames(hep_cells[[cond]])
-  meta[names(hep_zones),"cell_type"] = hep_zones
-  
-  end_zones = end_cells[[cond]]@meta.data$zonation_int
-  levels(end_zones) = c("(-0.00099,0.333]" = "LSEC_Z1",
-                        "(0.333,0.667]" = "LSEC_Z2",
-                        "(0.667,1]" = "LSEC_Z3")
-  end_zones = as.character(end_zones)
-  names(end_zones) = colnames(end_cells[[cond]])
-  meta[names(end_zones),"cell_type"] = end_zones
-  
-  write.table(meta, file = paste0(cpdb_path, "/", cond, "_meta_names_simp.txt"), 
-            sep = "\t", col.names = T, row.names = F, quote = F)
-  
-  # more bins for zonation
-  # define the intervals based on healthy
-  df_h = data.table("zonation_pt" = hep_cells$healthy$zonation_pt)
-  df_h$zonation_int10 = cut(df_h$zonation_pt, 10)
-  
-  df_e = data.table("zonation_pt" = hep_cells$embolised$zonation_pt)
-  df_e = df_h[df_e, on="zonation_pt", roll=Inf, rollends = T]
-  
-  df_r = data.table("zonation_pt" = hep_cells$regenerating$zonation_pt)
-  df_r = df_h[df_r, on="zonation_pt", roll=Inf, rollends = T]
-  
-  hep_list_z = list("healthy" = df_h, "embolised" = df_e, "regenerating" = df_r)
-  
-  # define the intervals based on healthy
-  df_h = data.table("zonation_pt" = end_cells$healthy$zonation_pt)
-  df_h$zonation_int10 = cut(df_h$zonation_pt, 10)
-  
-  df_e = data.table("zonation_pt" = end_cells$embolised$zonation_pt)
-  df_e = df_h[df_e, on="zonation_pt", roll=Inf, rollends = T]
-  
-  df_r = data.table("zonation_pt" = end_cells$regenerating$zonation_pt)
-  df_r = df_h[df_r, on="zonation_pt", roll=Inf, rollends = T]
-  
-  end_list_z = list("healthy" = df_h, "embolised" = df_e, "regenerating" = df_r)
-  
-  hep_zones = hep_list_z[[cond]]$zonation_int10
-  levels(hep_zones) = paste0("Hepatocytes_Z", 1:10)
-  hep_zones = as.character(hep_zones)
-  names(hep_zones) = colnames(hep_cells[[cond]])
-  meta[names(hep_zones),"cell_type"] = hep_zones
-  
-  end_zones = end_list_z[[cond]]$zonation_int10
-  levels(end_zones) = paste0("LSEC_Z", 1:10)
-  end_zones = as.character(end_zones)
-  names(end_zones) = colnames(end_cells[[cond]])
-  meta[names(end_zones),"cell_type"] = end_zones
-  
-  write.table(meta, file = paste0(cpdb_path, "/", cond, "_meta_names_bins.txt"), 
+  write.table(meta, file = paste0(cpdb_path, "/", cond, "/", cond, "_meta_names.txt"), 
             sep = "\t", col.names = T, row.names = F, quote = F)
   
   # normalise and save
   cond_cells[[cond]] = suppressWarnings(SCTransform(cond_cells[[cond]], do.correct.umi = T, 
-                                                   verbose = F, 
-                                                   vars.to.regress=c("unique_name",
-                                                                     "nCount_RNA"),
-                                                   variable.features.rv.th = 1, seed.use = 1,
-                                                   return.only.var.genes = F, 
-                                                   variable.features.n = NULL))
+                                                    vars.to.regress=c("unique_name", "nCount_RNA"),
+                                                    variable.features.rv.th = 1, seed.use = 1,
+                                                    return.only.var.genes = F, verbose = F,
+                                                    variable.features.n = NULL))
   
   dat = cbind(rownames(cond_cells[[cond]]@assays$SCT@data),
               Matrix::as.matrix(cond_cells[[cond]]@assays$SCT@data))
   colnames(dat)[1] = "Gene"
-  write.table(dat, file = paste0(cpdb_path, "/", cond, "_exp_norm.txt"), 
+  write.table(dat, file = paste0(cpdb_path, "/", cond, "/", cond, "_exp_norm.txt"), 
+              sep = "\t", col.names = T, row.names = F, quote = F)
+  
+  
+  # subset condition
+  cond_cells[[cond]] = simp_allcells_css[,simp_allcells_css@meta.data$Condition==cond]
+  
+  # define metadata
+  meta_simp = data.frame(row.names = rownames(cond_cells[[cond]]@meta.data),
+                         "Cell" = rownames(cond_cells[[cond]]@meta.data), 
+                         "cell_type" = as.character(cond_cells[[cond]]@meta.data$subpops_simp),
+                         stringsAsFactors = F)
+  write.table(meta_simp, file = paste0(cpdb_path, "/", cond, "_simp/", cond, "_meta_names.txt"), 
+            sep = "\t", col.names = T, row.names = F, quote = F)
+   
+  # normalise and save
+  cond_cells[[cond]] = suppressWarnings(SCTransform(cond_cells[[cond]], do.correct.umi = T, 
+                                                    vars.to.regress=c("unique_name", "nCount_RNA"),
+                                                    variable.features.rv.th = 1, seed.use = 1,
+                                                    return.only.var.genes = F, verbose = F,
+                                                    variable.features.n = NULL))
+  
+  dat = cbind(rownames(cond_cells[[cond]]@assays$SCT@data),
+              Matrix::as.matrix(cond_cells[[cond]]@assays$SCT@data))
+  colnames(dat)[1] = "Gene"
+  write.table(dat, file = paste0(cpdb_path, "/", cond, "_simp/", cond, "_exp_norm.txt"), 
               sep = "\t", col.names = T, row.names = F, quote = F)
 }
 ```
+
 
 ## Running CellPhoneDB
 Commands for runnin CellPhoneDB will be written here. Results are output to the `local1` disk to avoid I/O issues, but the output folders should then be copied to: `results/cell_comm_healthy/CellPhoneDB_runs`.  
 NOTE: for some reason I'm getting a SegFault when trying to run the heatmap_plot command. This was run on the Euler server instead.
 
+cellphonedb method statistical_analysis /local1/USERS/tomasgomes/CellPhoneDB_runs_updt/healthy/healthy_meta_names.txt /local1/USERS/tomasgomes/CellPhoneDB_runs_updt/healthy/healthy_exp_norm.txt --threads=12 --output-path=/local1/USERS/tomasgomes/liver/CellPhoneDB_runs_updt/healthy --project-name healthy --counts-data gene_name
+
+cellphonedb method statistical_analysis /local1/USERS/tomasgomes/CellPhoneDB_runs_updt/healthy_simp/healthy_meta_names.txt /local1/USERS/tomasgomes/CellPhoneDB_runs_updt/healthy_simp/healthy_exp_norm.txt --threads=12 --output-path=/local1/USERS/tomasgomes/liver/CellPhoneDB_runs_updt/healthy_simp --project-name healthy_simp --counts-data gene_name
+
 ```{r}
 for(n in names(cond_cells)){
-  comm1 = paste0("cellphonedb method statistical_analysis results/cell_comm/CellPhoneDB_runs/", n, "_meta_names_simp.txt results/cell_comm/CellPhoneDB_runs/", n, "_exp_norm.txt --threads=8 --output-path=/local1/USERS/tomasgomes/liver/CellPhoneDB_res --project-name ", n, " --counts-data gene_name")
-  comm2 = paste0("cp -r /local1/USERS/tomasgomes/liver/CellPhoneDB_res/", n, " results/cell_comm/CellPhoneDB_runs/")
-  comm3 = paste0("cellphonedb plot heatmap_plot --pvalues-path ./results/cell_comm/CellPhoneDB_runs/", n, "/pvalues.txt --output-path ./results/cell_comm/CellPhoneDB_runs/", n, "/ --count-name counts_heat.pdf --count-network-name count_net.txt --interaction-count-name count_inter.txt ./results/cell_comm/CellPhoneDB_runs/", n, "_meta_names_simp.txt")
+  comm1 = paste0("cellphonedb method statistical_analysis /local1/USERS/tomasgomes/CellPhoneDB_runs_updt/", n, "/", n, "_meta_names.txt /local1/USERS/tomasgomes/CellPhoneDB_runs_updt/", n, "/", n, "_exp_norm.txt --threads=12 --output-path=/local1/USERS/tomasgomes/liver/CellPhoneDB_runs_updt/", n, " --project-name ", n, " --counts-data gene_name")
+  comm2 = paste0("cp -r /local1/USERS/tomasgomes/liver/CellPhoneDB_runs_updt/", n, "/", n, " results/cell_comm/CellPhoneDB_runs_updt/")
+  comm3 = paste0("cp -r /local1/USERS/tomasgomes/CellPhoneDB_runs_updt/", n, "/", n, "_meta_names.txt results/cell_comm/CellPhoneDB_runs_updt/", n, "/")
+  comm4 = paste0("cellphonedb plot heatmap_plot --pvalues-path ./results/cell_comm/CellPhoneDB_runs_updt/", n, "/pvalues.txt --output-path ./results/cell_comm/CellPhoneDB_runs_updt/", n, "/ --count-name counts_heat.pdf --count-network-name count_net.txt --interaction-count-name count_inter.txt /local1/USERS/tomasgomes/CellPhoneDB_runs_updt/", n, "/", n, "_meta_names.txt")
   
   print(n)
   print(comm1)
   print(comm2)
   print(comm3)
+  print(comm4)
   print(".")
 }
 ```
 
 ```{r}
 for(n in names(cond_cells)){
-  comm1 = paste0("cellphonedb method statistical_analysis results/cell_comm/CellPhoneDB_runs/", n, "_meta_names_bins.txt results/cell_comm/CellPhoneDB_runs/", n, "_exp_norm.txt --threads=8 --output-path=/local1/USERS/tomasgomes/liver/CellPhoneDB_res --project-name ", n, "_bins --counts-data gene_name")
-  comm2 = paste0("cp -r /local1/USERS/tomasgomes/liver/CellPhoneDB_res/", n, "_bins results/cell_comm/CellPhoneDB_runs/")
-  comm3 = paste0("cellphonedb plot heatmap_plot --pvalues-path ./results/cell_comm/CellPhoneDB_runs/", n, "_bins/pvalues.txt --output-path ./results/cell_comm/CellPhoneDB_runs/", n, "_bins/ --count-name counts_heat.pdf --count-network-name count_net.txt --interaction-count-name count_inter.txt ./results/cell_comm/CellPhoneDB_runs/", n, "_meta_names_bins.txt")
+  comm1 = paste0("cellphonedb method statistical_analysis /local1/USERS/tomasgomes/CellPhoneDB_runs_updt/", n, "_simp/", n, "_meta_names.txt /local1/USERS/tomasgomes/CellPhoneDB_runs_updt/", n, "_simp/", n, "_exp_norm.txt --threads=12 --output-path=/local1/USERS/tomasgomes/liver/CellPhoneDB_runs_updt/", n, "_simp --project-name ", n, "_simp --counts-data gene_name")
+  comm2 = paste0("cp -r /local1/USERS/tomasgomes/liver/CellPhoneDB_runs_updt/", n, "_simp/", n, "_simp results/cell_comm/CellPhoneDB_runs_updt/")
+  comm3 = paste0("cp -r /local1/USERS/tomasgomes/CellPhoneDB_runs_updt/", n, "_simp/", n, "_meta_names.txt results/cell_comm/CellPhoneDB_runs_updt/", n, "_simp/")
+  comm4 = paste0("cellphonedb plot heatmap_plot --pvalues-path ./results/cell_comm/CellPhoneDB_runs_updt/", n, "_simp/pvalues.txt --output-path ./results/cell_comm/CellPhoneDB_runs_updt/", n, "_simp/ --count-name counts_heat.pdf --count-network-name count_net.txt --interaction-count-name count_inter.txt /local1/USERS/tomasgomes/CellPhoneDB_runs_updt/", n, "_simp/", n, "_meta_names.txt")
   
   print(n)
   print(comm1)
   print(comm2)
   print(comm3)
+  print(comm4)
   print(".")
 }
 ```
+
 
 
 # Process results
