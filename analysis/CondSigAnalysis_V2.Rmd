@@ -235,7 +235,7 @@ new_l_labs = c("0" = "ab-T cells 1", "1" = "NK/gd-T cells", "2" = "ab-T cells 2"
                "6" = "IgG+ Plasma cells", "7" = "Dividing NK cells", "8" = "ab-T cells (stress)")
 mk_lcells$cluster = new_l_labs[as.character(mk_lcells$cluster)]
 write.csv(mk_lcells[mk_lcells$p_val_adj<=0.05,], 
-          file = "results/cond_effect_v2/cell_type_mk_lymhoid.csv", row.names = T, quote = F)
+          file = "results/cond_effect_v2/cell_type_mk_lymphoid.csv", row.names = T, quote = F)
 
 mk_tcells = readRDS("./results/immune/clust_markers_t.RDS")
 new_t_labs = c("0" = "NK cells 1", "1" = "TRM cells", "2" = "MAIT cells 2", "3" = "NK cells 2",
@@ -255,6 +255,636 @@ mk_mon$cluster = new_m_labs[as.character(mk_mon$cluster)]
 write.csv(mk_mon[mk_mon$p_val_adj<=0.05,], 
           file = "results/cond_effect_v2/cell_type_mk_myeloid.csv", row.names = T, quote = F)
 ```
+
+
+
+```{r}
+abtab = read.csv("data/other/AB_summary.csv", header = T)[,1:4]
+abtab$TARGET = toupper(abtab$TARGET)
+ct_ab = cell_type_mk$all[cell_type_mk$all$p_val_adj<=0.05,]
+ct_ab$hasAB = ct_ab$gene %in% abtab$TARGET
+
+
+mrks_q = SoupX::quickMarkers(sub_allcells_css@assays$SCT@counts,
+                             sub_allcells_css$subpops, N = 10)
+```
+
+
+
+```{r}
+ct_df = unique(sub_allcells_css@meta.data[,c("subpops", "allcells_major")])
+tab_ctCond = table(sub_allcells_css$subpops, sub_allcells_css$Condition)
+tab_ctCond_imm = tab_ctCond[!(grepl("LSEC", rownames(tab_ctCond)) | 
+                                grepl("Hepa", rownames(tab_ctCond)) |
+                                grepl("Stella", rownames(tab_ctCond)) | 
+                                grepl("Cholan", rownames(tab_ctCond)) | 
+                                grepl("endoth", rownames(tab_ctCond)) | 
+                                grepl("EC", rownames(tab_ctCond))),]
+t(t(tab_ctCond_imm)/colSums(tab_ctCond_imm))*100
+```
+
+
+```{r}
+tab_ctCond = table(sub_allcells_css$subpops, sub_allcells_css$Condition)
+tab_ctCond_imm = tab_ctCond[!(grepl("LSEC", rownames(tab_ctCond)) | 
+                                grepl("Hepa", rownames(tab_ctCond)) |
+                                grepl("Stella", rownames(tab_ctCond)) | 
+                                grepl("Cholan", rownames(tab_ctCond)) | 
+                                grepl("endoth", rownames(tab_ctCond)) | 
+                                grepl("EC", rownames(tab_ctCond))),]
+t(t(tab_ctCond_imm)/colSums(tab_ctCond_imm))*100
+
+ct_df = unique(sub_allcells_css@meta.data[,c("subpops", "allcells_major")])
+don_cond_df = unique(sub_allcells_css@meta.data[,c("Name", "Donor", "Condition")])
+tab_ctCond = table(sub_allcells_css$subpops, sub_allcells_css$Name)
+tab_ctCond_imm = tab_ctCond[!(grepl("LSEC", rownames(tab_ctCond)) | 
+                                grepl("Hepa", rownames(tab_ctCond)) |
+                                grepl("Stella", rownames(tab_ctCond)) | 
+                                grepl("Cholan", rownames(tab_ctCond)) | 
+                                grepl("endoth", rownames(tab_ctCond)) | 
+                                grepl("EC", rownames(tab_ctCond))),]
+imm_props = t(t(tab_ctCond_imm)/colSums(tab_ctCond_imm))*100
+imm_props = merge(data.frame(imm_props), don_cond_df, by.x = 2, by.y = 1)
+
+ggplot(imm_props, aes(x = Condition, y = Freq, group = Condition, colour = Condition))+
+  facet_wrap(~Var1, scales = "free")+
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.3, dodge.width = 1))+
+  stat_summary(fun.data = mean_se, position = position_dodge(width = 1), 
+               alpha = 0.35, colour = "black")+
+  theme(legend.position = "none")
+```
+
+Load interactions data
+
+```{r}
+reform_list = readRDS("results/cell_comm/updt/reform_list.RDS")
+net_names_l = readRDS("results/cell_comm/updt/count_net_list.RDS")
+dec_l = readRDS("results/cell_comm/updt/deconvoluted_list.RDS")
+lr_annot = read.csv("../../gene_refs/human/CellPhoneDB/protein_input.csv")
+prot_g = read.csv("../../gene_refs/human/CellPhoneDB/gene_input.csv")
+
+notsec = lr_annot$uniprot[lr_annot$secreted=="False"]
+notsec_genes = unique(prot_g$gene_name[prot_g$uniprot %in% notsec])
+
+colcond = c("healthy" = "orange", "regenerating" = "salmon", 
+            "embolised" = "darkred", "embolized" = "darkred")
+```
+
+Count only non-secreted interactions
+
+```{r}
+reform_list_int = list()
+for(n in names(reform_list)[1:3]){
+  reform_list_int[[n]] = reform_list[[n]][reform_list[[n]]$lr1 %in% notsec_genes &
+                                            reform_list[[n]]$lr2 %in% notsec_genes,]
+  reform_list_int[[n]] = reform_list_int[[n]][!duplicated(reform_list_int[[n]][,1:3]),1:3]
+}
+
+# count interactions
+infer_df = data.frame(expand.grid(unique(reform_list_int$healthy$ct1), 
+                                  unique(reform_list_int$healthy$ct1)))
+nr = nrow(infer_df)
+infer_df = rbind(infer_df, infer_df, infer_df)
+infer_df$count = 0
+infer_df$cond = rep(names(reform_list)[1:3], each = nr)
+colnames(infer_df)[1:2] = c("SOURCE", "TARGET")
+for(i in 1:nrow(infer_df)){
+  tmp = reform_list_int[[infer_df[i,4]]]
+  infer_df[i,3] = dim(tmp[(tmp$ct1==infer_df[i,1] & tmp$ct2==infer_df[i,2]) |
+                            (tmp$ct2==infer_df[i,1] & tmp$ct1==infer_df[i,2]),])[1]
+}
+
+hmat = reshape2::dcast(infer_df[infer_df$cond=="healthy",1:3], formula = SOURCE~TARGET, 
+                       value.var = "count")
+rownames(hmat) = hmat[,1]
+hmat = hmat[,-1]
+emat = reshape2::dcast(infer_df[infer_df$cond=="embolised",1:3], formula = SOURCE~TARGET, 
+                       value.var = "count")
+rownames(emat) = emat[,1]
+emat = emat[,-1]
+rmat = reshape2::dcast(infer_df[infer_df$cond=="regenerating",1:3], formula = SOURCE~TARGET, 
+                       value.var = "count")
+rownames(rmat) = rmat[,1]
+rmat = rmat[,-1]
+
+pheatmap::pheatmap(rmat-hmat, clustering_method = "ward.D", fontsize = 8, 
+                   treeheight_col = 28, treeheight_row = 28, main = "regen-healthy")
+pheatmap::pheatmap(emat-hmat, clustering_method = "ward.D", fontsize = 8, 
+                   treeheight_col = 28, treeheight_row = 28, main = "emb-healthy")
+```
+
+Add info on AB available (for lr1 and lr2), contact interaction, unique to condition
+
+```{r}
+reform_info = list()
+for(n in names(reform_list)[1:3]){
+  reform_info[[n]] = reform_list[[n]][,-7]
+  reform_info[[n]]$condition = n
+}
+
+# is the interaction condition-specific?
+for(n in names(reform_info)){
+  other_cond = names(reform_info)[names(reform_info)!=n]
+  reform_info[[n]]$condition_specific = !(reform_info[[n]]$id_cp_interaction %in% reform_info[[other_cond[1]]]$id_cp_interaction | reform_info[[n]]$id_cp_interaction %in% reform_info[[other_cond[2]]]$id_cp_interaction)
+}
+
+# how many times does the interaction appear in that condition
+for(n in names(reform_info)){
+  tmp = unique(reform_info[[n]][,1:3])
+  reform_info[[n]] = merge(reform_info[[n]], data.frame(table(tmp$id_cp_interaction)), by = 1)
+  colnames(reform_info[[n]])[colnames(reform_info[[n]])=="Freq"] = "n_interaction_condition"
+}
+
+# add gene names
+complex_ref = unique(rbind(dec_l$healthy[dec_l$healthy$is_complex=="True",c(1,5)], 
+                           dec_l$embolised[dec_l$embolised$is_complex=="True",c(1,5)],
+                           dec_l$regenerating[dec_l$regenerating$is_complex=="True",c(1,5)],
+                           dec_l$healthy_simp[dec_l$healthy_simp$is_complex=="True",c(1,5)],
+                           dec_l$embolised_simp[dec_l$embolised_simp$is_complex=="True",c(1,5)],
+                           dec_l$regenerating_simp[dec_l$regenerating_simp$is_complex=="True",c(1,5)]))
+
+for(n in names(reform_info)){
+  tmp = merge(reform_info[[n]], complex_ref, by.x = 4, by.y = 2, all.x = T)[,c(2,3,4,1,10,5:9)]
+  reform_info[[n]] = merge(tmp, complex_ref, by.x = 6, by.y = 2, all.x = T)[,c(2:6,1,11,7:10)]
+  reform_info[[n]]$gene_name.x[is.na(reform_info[[n]]$gene_name.x)] = reform_info[[n]]$lr1[is.na(reform_info[[n]]$gene_name.x)]
+  reform_info[[n]]$gene_name.y[is.na(reform_info[[n]]$gene_name.y)] = reform_info[[n]]$lr2[is.na(reform_info[[n]]$gene_name.y)]
+  colnames(reform_info[[n]])[c(5,7)] = c("gn1", "gn2")
+}
+
+# AB availability and is contact interaction
+for(n in names(reform_info)){
+  reform_info[[n]]$AB_gn1 = reform_info[[n]]$gn1 %in% abtab$TARGET
+  reform_info[[n]]$AB_gn2 = reform_info[[n]]$gn2 %in% abtab$TARGET
+  reform_info[[n]]$isContact = reform_info[[n]]$gn1 %in% notsec_genes &
+    reform_info[[n]]$gn2 %in% notsec_genes
+}
+
+# number of interactions by that cell type pair in that condition (non-directional)
+## total
+## contact only
+for(n in names(reform_info)){
+  tmp = unique(reform_info[[n]][,1:3])
+  tabct = table(tmp$ct1, tmp$ct2)
+  tmp = unique(reform_info[[n]][reform_info[[n]]$isContact,1:3])
+  tabcon = table(tmp$ct1, tmp$ct2)
+  
+  n_interact = c()
+  n_contact = c()
+  ctpair = c()
+  for(i in 1:nrow(reform_info[[n]])){
+    ct1 = reform_info[[n]]$ct1[i]
+    ct2 = reform_info[[n]]$ct2[i]
+    nint = tabct[ct1,ct2]+tabct[ct2,ct1]
+    n_interact = c(n_interact, nint)
+    ncon = tabcon[ct1,ct2]+tabcon[ct2,ct1]
+    n_contact = c(n_contact, ncon)
+    ctpair = c(ctpair, paste(sort(c(ct1, ct2)), collapse = ".."))
+  }
+  reform_info[[n]]$ctpair = ctpair
+  reform_info[[n]]$n_interact = n_interact
+  reform_info[[n]]$n_contact = n_contact
+}
+
+interactions_info_df = Reduce(rbind, reform_info)
+
+write.csv(interactions_info_df, 
+          file = "results/cond_effect_v2/info_all_interactions.csv", row.names = F, quote = F)
+```
+
+Difference in number of interactions
+
+```{r}
+ninterdf = unique(interactions_info_df[,c(9,15:17)])
+ninterdf = ninterdf[order(ninterdf$ctpair),]
+ninterdf$ct1 = unlist(lapply(strsplit(ninterdf$ctpair, "..", fixed = T), function(x) x[1]))
+ninterdf$ct2 = unlist(lapply(strsplit(ninterdf$ctpair, "..", fixed = T), function(x) x[2]))
+
+# pairs of cell types with increased contacts in any condition
+ninterdf_diffs = ninterdf[ninterdf$condition=="healthy",c(2,5:6)]
+
+## calculate difference in interactions
+ninterdf_diffs$hr_inter = ninterdf[ninterdf$condition=="regenerating",3]-ninterdf[ninterdf$condition=="healthy",3]
+ninterdf_diffs$he_inter = ninterdf[ninterdf$condition=="embolised",3]-ninterdf[ninterdf$condition=="healthy",3]
+
+## calculate difference in contacts
+ninterdf_diffs$hr_contact = ninterdf[ninterdf$condition=="regenerating",4]-ninterdf[ninterdf$condition=="healthy",4]
+ninterdf_diffs$he_contact = ninterdf[ninterdf$condition=="embolised",4]-ninterdf[ninterdf$condition=="healthy",4]
+
+write.csv(ninterdf, 
+          file = "results/cond_effect_v2/number_interactions_and_contacts.csv", 
+          row.names = F, quote = F)
+write.csv(ninterdf_diffs, 
+          file = "results/cond_effect_v2/difference_in_interactions_and_contacts.csv", 
+          row.names = F, quote = F)
+```
+
+HVI
+
+```{r}
+int_mat_vals = list()
+mat_l = list()
+for(n in names(reform_list)[1:3]){
+  tmp = unique(reform_list[[n]][,c(2:6)])
+  tmp = tmp[tmp$ct1!=tmp$ct2,]
+  tmp$ctpair = paste0(tmp$ct1, "..", tmp$ct2)
+  tmp$lrpair = paste0(tmp$lr1, "..", tmp$lr2)
+  
+  mat = reshape2::dcast(tmp, ctpair~lrpair, value.var = "value")
+  mat_l[[n]] = mat
+  mat_l[[n]][,1] = paste0(mat_l[[n]][,1] , ";", n)
+  rownames(mat_l[[n]]) = mat_l[[n]][,1]
+  mat_l[[n]] = mat_l[[n]][,-1]
+  mat_l[[n]] = t(mat_l[[n]])
+  
+  rownames(mat) = mat$ctpair
+  mat = mat[,-1]
+  mat[is.na(mat)] = 0
+  varfeat = Seurat:::FindVariableFeatures.default(t(mat))
+  varfeat$pair_perc = apply(mat, 2, function(x) sum(x>0)/length(x))
+  varfeat$pair_n = apply(mat, 2, function(x) sum(x>0))
+  varfeat$lrpair = colnames(mat)
+  
+  int_mat_vals[[n]] = varfeat
+}
+mat_all = merge(mat_l$healthy, mat_l$embolised, by = 0, all = T)
+mat_all = merge(mat_all, mat_l$regenerating, by.x = 1, by.y = 0, all = T)
+rownames(mat_all) = mat_all[,1]
+mat_all = mat_all[,-1]
+mat_all[is.na(mat_all)] = 0
+
+varfeat = Seurat:::FindVariableFeatures.default(mat_all)
+varfeat$pair_perc = apply(mat_all, 1, function(x) sum(x>0)/length(x))
+varfeat$pair_n = apply(mat_all, 1, function(x) sum(x>0))
+varfeat$lrpair = rownames(mat_all)
+
+toy = RVenn::Venn(lapply(int_mat_vals, function(x) x$lrpair))
+
+uniqueint = c(RVenn::discern(toy, 1), RVenn::discern(toy, 2), RVenn::discern(toy, 3))
+pairs_unique = lapply(uniqueint, function(x) colnames(mat_all)[mat_all[x,]>0])
+names(pairs_unique) = uniqueint
+unique_interactions = merge(reshape2::melt(pairs_unique),
+                            data.frame(table(reshape2::melt(pairs_unique)[,2])), 
+                            by.x = 2, by.y = 1)
+write.csv(unique_interactions, 
+          file = "results/cond_effect_v2/unique_interactions.csv", 
+          row.names = F, quote = F)
+
+sharedint = RVenn::overlap(toy)
+notsharedint = rownames(mat_all)[!(rownames(mat_all) %in% sharedint)]
+pairs_notshared = lapply(notsharedint, function(x) colnames(mat_all)[mat_all[x,]>0])
+names(pairs_notshared) = notsharedint
+notshared_interactions = merge(reshape2::melt(pairs_notshared),
+                               data.frame(table(reshape2::melt(pairs_notshared)[,2])), 
+                               by.x = 2, by.y = 1)
+conds = tapply(notshared_interactions$value, notshared_interactions$L1, 
+               function(x) paste0(unique(unlist(lapply(strsplit(x,";"), 
+                                                       function(y) y[length(y)]))), collapse = ", "))
+notshared_interactions = merge(notshared_interactions, data.frame(conds), by.x = 1, by.y = 0, all = T)
+write.csv(notshared_interactions, 
+          file = "results/cond_effect_v2/notshared_interactions.csv", 
+          row.names = F, quote = F)
+
+xxx = lapply(int_mat_vals, function(x) x$lrpair[x$pair_n<=2])
+ints = unique(unlist(xxx))
+yyy = varfeat$lrpair[varfeat$pair_n<=5]
+ints = intersect(ints, yyy)
+dat = mat_all[(rownames(mat_all) %in% uniqueint),apply(mat_all[(rownames(mat_all) %in% uniqueint),], 2, function(x) any(x>0))]
+pheatmap::pheatmap(log2(dat+0.01), show_rownames = T, clustering_method = "ward.D", fontsize_row = 7.5, fontsize_col = 7.5)
+```
+
+
+
+
+
+
+
+
+
+```{r}
+vals_hr = sort(unique(ninterdf_diffs$hr_contact))
+vals_hr = vals_hr[c(1:4, (length(vals_hr)-3):(length(vals_hr)))]
+
+ct_target = unique(c(ninterdf_diffs$ct1[ninterdf_diffs$hr_contact %in% vals_hr],
+                     ninterdf_diffs$ct2[ninterdf_diffs$hr_contact %in% vals_hr]))
+
+interactions_info_df[interactions_info_df$ct1 %in% ct_target & 
+                       interactions_info_df$ct2 %in% ct_target &
+                       interactions_info_df$ct1!=interactions_info_df$ct2,]
+```
+
+
+
+
+```{r}
+# pairs of cell types with increased contacts in any condition
+ninterdf_diffs = ninterdf[ninterdf$condition=="healthy",c(2,5:6)]
+
+## calculate difference in interactions
+ninterdf_diffs$hr_inter = ninterdf[ninterdf$condition=="regenerating",3]-ninterdf[ninterdf$condition=="healthy",3]
+ninterdf_diffs$he_inter = ninterdf[ninterdf$condition=="embolised",3]-ninterdf[ninterdf$condition=="healthy",3]
+
+## calculate difference in contacts
+ninterdf_diffs$hr_contact = ninterdf[ninterdf$condition=="regenerating",4]-ninterdf[ninterdf$condition=="healthy",4]
+ninterdf_diffs$he_contact = ninterdf[ninterdf$condition=="embolised",4]-ninterdf[ninterdf$condition=="healthy",4]
+
+## calculate difference in contacts
+ninterdf_diffs$hr_other = (ninterdf[ninterdf$condition=="regenerating",3]-ninterdf[ninterdf$condition=="regenerating",4])-(ninterdf[ninterdf$condition=="healthy",3]-ninterdf[ninterdf$condition=="healthy",4])
+ninterdf_diffs$he_other = (ninterdf[ninterdf$condition=="embolised",3]-ninterdf[ninterdf$condition=="embolised",4])-(ninterdf[ninterdf$condition=="healthy",3]-ninterdf[ninterdf$condition=="healthy",4])
+
+ninterdf_diffs$r_other = (ninterdf[ninterdf$condition=="regenerating",4]-(ninterdf[ninterdf$condition=="regenerating",3]-ninterdf[ninterdf$condition=="regenerating",4]))/ninterdf[ninterdf$condition=="regenerating",3]
+
+
+## calculate proportion of contacts in interactions
+ninterdf_diffs$p_h = ninterdf[ninterdf$condition=="healthy",4]/ninterdf[ninterdf$condition=="healthy",3]
+ninterdf_diffs$p_r = ninterdf[ninterdf$condition=="regenerating",4]/ninterdf[ninterdf$condition=="regenerating",3]
+ninterdf_diffs$p_e = ninterdf[ninterdf$condition=="embolised",4]/ninterdf[ninterdf$condition=="embolised",3]
+
+## number of interactions per condition
+ninterdf_diffs$n_h = ninterdf[ninterdf$condition=="healthy",3]
+ninterdf_diffs$n_r = ninterdf[ninterdf$condition=="regenerating",3]
+ninterdf_diffs$n_e = ninterdf[ninterdf$condition=="embolised",3]
+
+## % of diff contacts from diff interactions
+ninterdf_diffs$hr_p = ninterdf_diffs$p_r-ninterdf_diffs$p_h
+ninterdf_diffs$he_p = ninterdf_diffs$p_e-ninterdf_diffs$p_h
+
+
+```
+
+
+
+
+
+
+
+
+
+
+```{r}
+reform_list_int = list()
+for(n in names(reform_list)[1:3]){
+  reform_list_int[[n]] = reform_list[[n]]
+  reform_list_int[[n]] = reform_list_int[[n]][!duplicated(reform_list_int[[n]][,1:3]),1:3]
+}
+
+# count interactions
+infer_df = data.frame(expand.grid(unique(reform_list_int$healthy$ct1), 
+                                  unique(reform_list_int$healthy$ct1)))
+nr = nrow(infer_df)
+infer_df = rbind(infer_df, infer_df, infer_df)
+infer_df$count = 0
+infer_df$cond = rep(names(reform_list)[1:3], each = nr)
+colnames(infer_df)[1:2] = c("SOURCE", "TARGET")
+for(i in 1:nrow(infer_df)){
+  tmp = reform_list_int[[infer_df[i,4]]]
+  infer_df[i,3] = dim(tmp[(tmp$ct1==infer_df[i,1] & tmp$ct2==infer_df[i,2]) |
+                            (tmp$ct2==infer_df[i,1] & tmp$ct1==infer_df[i,2]),])[1]
+}
+## make one to count over all
+infer_all = data.frame(expand.grid(unique(reform_list_int$healthy$ct1), 
+                                   unique(reform_list_int$healthy$ct1)))
+infer_all$count = 0
+colnames(infer_all)[1:2] = c("SOURCE", "TARGET")
+reform_all_int = unique(Reduce(rbind, reform_list_int))
+for(i in 1:nrow(infer_all)){
+  infer_all[i,3] = infer_all[i,3]+dim(tmp[(reform_all_int$ct1==infer_all[i,1] & reform_all_int$ct2==infer_all[i,2]) |
+                                            (reform_all_int$ct2==infer_all[i,1] & reform_all_int$ct1==infer_all[i,2]),])[1]
+}
+
+infer_df_list = list(healthy = infer_df[infer_df$cond=="healthy",],
+                     embolised = infer_df[infer_df$cond=="embolised",],
+                     regenerating = infer_df[infer_df$cond=="regenerating",],
+                     all = infer_all)
+
+net_names_all = t(Reduce(rbind, lapply(infer_df_list[1:3], function(x) tapply(x$count, x$SOURCE, sum))))
+colnames(net_names_all) = names(net_names_l)[1:3]
+net_names_all = reshape2::melt(net_names_all)
+net_names_all$Var1 = factor(net_names_all$Var1, 
+                            levels = net_names_all[net_names_all$Var2=="healthy","Var1"][order(net_names_all[net_names_all$Var2=="healthy","value"], decreasing = F)])
+
+total_unique = data.frame(t(t(Reduce(rbind, lapply(infer_df_list[4], 
+                                                   function(x) tapply(x$count, x$SOURCE, sum))))))
+total_unique$Var1 = rownames(total_unique)
+colnames(total_unique)[1] = "value"
+total_unique$Var2 = "total unique"
+
+net_names_all$Var1 = factor(net_names_all$Var1, levels = total_unique$Var1[order(total_unique$value, decreasing = F)])
+plt_counts = ggplot(net_names_all, aes(x = Var1, y = value))+
+  geom_point(mapping = aes(colour = Var2), size = 1.6)+
+  geom_point(data = total_unique, mapping = aes(shape = Var2), size = 1.6)+
+  coord_flip()+
+  scale_colour_manual(values = colcond)+
+  scale_shape_manual(values = c(4))+
+  scale_y_continuous(expand = c(0,0), limits = c(0,6680))+
+  labs(y = "Total interactions", x = "Cell Type", colour = "Condition")+
+  guides(colour = guide_legend(order = 1), shape = guide_legend(order = 2, title = NULL))+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1),
+        axis.text = element_text(colour = "black"),
+        axis.title.x = element_text(size = 8),
+        legend.margin = margin(1, 1, 1, 1),
+        legend.spacing.x = unit(0.05, "cm"),
+        legend.direction = "horizontal",legend.box = "horizontal")
+leg = cowplot::get_legend(plt_counts)
+
+perc_df = data.frame("Var1" = net_names_all$Var1,
+                     "Var2" = net_names_all$Var2,
+                     "perc" = c(rep(0, length(unique(net_names_all$Var1))),
+                                (net_names_all$value[net_names_all$Var2=="embolised"]-net_names_all$value[net_names_all$Var2=="healthy"])/net_names_all$value[net_names_all$Var2=="healthy"],
+                                (net_names_all$value[net_names_all$Var2=="regenerating"]-net_names_all$value[net_names_all$Var2=="healthy"])/net_names_all$value[net_names_all$Var2=="healthy"])*100)
+perc_df$col = ifelse(perc_df$perc>0, "green", "red")
+perc_df = perc_df[perc_df$Var2!="healthy",]
+
+perc_plt_emb = ggplot(perc_df[perc_df$Var2=="embolised",], aes(x = Var1, y = perc, fill = col))+
+  geom_col()+
+  scale_fill_manual(values = c("deepskyblue1", "red1"))+
+  scale_y_continuous(expand = c(0,0), limits = c(min(perc_df[,"perc"])-3,
+                                                 max(perc_df[,"perc"])+3))+
+  coord_flip()+
+  labs(y = "% change\nembolised vs healthy", x = "Cell Type")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1, colour = "black"),
+        axis.text.y = element_blank(),
+        axis.title.x = element_text(size = 8),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "none")
+perc_plt_reg = ggplot(perc_df[perc_df$Var2=="regenerating",], aes(x = Var1, y = perc, fill = col))+
+  geom_col()+
+  scale_fill_manual(values = c("deepskyblue1", "red1"))+
+  scale_y_continuous(expand = c(0,0), limits = c(min(perc_df[,"perc"])-3,
+                                                 max(perc_df[,"perc"])+3))+
+  coord_flip()+
+  labs(y = "% change\nregenerating vs healthy", x = "Cell Type")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1, colour = "black"),
+        axis.text.y = element_blank(),
+        axis.title.x = element_text(size = 8),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "none")
+
+cowplot::plot_grid(cowplot::plot_grid(plt_counts+theme(legend.position = "none"), 
+                                      perc_plt_emb, perc_plt_reg, 
+                                      ncol = 3, align = "h", axis = "r", rel_widths = c(1,0.5,0.5)),
+                   leg, nrow = 2, rel_heights = c(1, 0.1))
+
+cowplot::plot_grid(cowplot::plot_grid(plt_counts+theme(legend.position = "none"), 
+                                      perc_plt_reg, perc_plt_emb, 
+                                      ncol = 3, align = "h", axis = "r", rel_widths = c(1,0.4,0.4)),
+                   leg, nrow = 2, rel_heights = c(1, 0.1))
+```
+
+
+
+```{r}
+allct = unique(reform_list$regenerating$ct1)
+immct = allct[!(grepl("LSEC", allct) | grepl("Hepa",allct) |
+                grepl("Stella", allct) | grepl("Cholan", allct) | 
+                grepl("endoth", allct) | grepl("EC", allct))]
+nonimmct = allct[grepl("LSEC", allct) | grepl("Hepa", allct) |
+                grepl("Stella", allct) | grepl("Cholan", allct) | 
+                grepl("endoth", allct) | grepl("EC", allct)]
+
+reform_list_int = list()
+for(n in names(reform_list)[1:3]){
+  cond = (reform_list[[n]]$ct1 %in% immct & reform_list[[n]]$ct2 %in% nonimmct) | 
+    (reform_list[[n]]$ct1 %in% nonimmct & reform_list[[n]]$ct2 %in% immct)
+  reform_list_int[[n]] = reform_list[[n]][cond,]
+  reform_list_int[[n]] = reform_list_int[[n]][reform_list_int[[n]]$lr1 %in% notsec_genes &
+                                                reform_list_int[[n]]$lr2 %in% notsec_genes,]
+  reform_list_int[[n]] = reform_list_int[[n]][!duplicated(reform_list_int[[n]][,1:3]),1:3]
+}
+
+# count interactions
+infer_df = data.frame(expand.grid(unique(reform_list_int$healthy$ct1), 
+                                  unique(reform_list_int$healthy$ct1)))
+nr = nrow(infer_df)
+infer_df = rbind(infer_df, infer_df, infer_df)
+infer_df$count = 0
+infer_df$cond = rep(names(reform_list)[1:3], each = nr)
+colnames(infer_df)[1:2] = c("SOURCE", "TARGET")
+for(i in 1:nrow(infer_df)){
+  tmp = reform_list_int[[infer_df[i,4]]]
+  infer_df[i,3] = dim(tmp[(tmp$ct1==infer_df[i,1] & tmp$ct2==infer_df[i,2]) |
+                            (tmp$ct2==infer_df[i,1] & tmp$ct1==infer_df[i,2]),])[1]
+}
+
+#infer_df = infer_df[infer_df$count>0,]
+for(i in 1:nrow(infer_df)){
+  if(infer_df[i,1] %in% immct){
+    tmp = infer_df[i,2]
+    infer_df[i,2] = infer_df[i,1]
+    infer_df[i,1] = tmp
+  }
+}
+infer_df = infer_df[!duplicated(infer_df),]
+infer_df = infer_df[infer_df$SOURCE %in% nonimmct & infer_df$TARGET %in% immct,]
+
+hmat = reshape2::dcast(infer_df[infer_df$cond=="healthy",1:3], formula = SOURCE~TARGET, 
+                       value.var = "count")
+rownames(hmat) = hmat[,1]
+hmat = hmat[,-1]
+emat = reshape2::dcast(infer_df[infer_df$cond=="embolised",1:3], formula = SOURCE~TARGET, 
+                       value.var = "count")
+rownames(emat) = emat[,1]
+emat = emat[,-1]
+rmat = reshape2::dcast(infer_df[infer_df$cond=="regenerating",1:3], formula = SOURCE~TARGET, 
+                       value.var = "count")
+rownames(rmat) = rmat[,1]
+rmat = rmat[,-1]
+
+pheatmap::pheatmap(rmat-hmat)
+
+
+```
+
+
+
+```{r}
+grid_cts = data.frame(expand.grid(unique(reform_list_int$healthy$ct1), 
+                                  unique(reform_list_int$healthy$ct1)))
+
+pair_df_list = list()
+for(i in 1:nrow(grid_cts)){
+  ct_pairs = grid_cts[i,]
+  list_pairs = list()
+  for(n in names(reform_list[1:3])){
+    cond = reform_list[[n]]$ct1==ct_pairs[1] & reform_list[[n]]$ct2==ct_pairs[2]
+    if(sum(cond)>0){
+      list_pairs[[n]] = reform_list[[n]][cond,-7]
+      list_pairs[[n]]$cond = n
+      list_pairs[[n]]$contact_interaction = list_pairs[[n]]$lr1 %in% notsec_genes & 
+        list_pairs[[n]]$lr2 %in% notsec_genes
+    }
+  }
+  pair_df = Reduce(rbind, list_pairs)
+  intcond = table(pair_df$id_cp_interaction, pair_df$cond)
+  useint = rownames(intcond)[rowSums(intcond)==1]
+  pair_df$unique_cond = pair_df$id_cp_interaction %in% useint
+  pair_df_list[[i]] = pair_df
+}
+inter_info_df = Reduce(rbind, pair_df_list)
+
+
+
+cond_l = list()
+for(n in names(reform_list[1:3])){
+  u_int = table(reform_list[[n]]$id_cp_interaction)
+  u_int = names(u_int)[u_int==1]
+  cond_l[[n]] = reform_list[[n]][,-7]
+  cond_l[[n]]$condition = n
+  cond_l[[n]]$contact_interaction = cond_l[[n]]$lr1 %in% notsec_genes & 
+    cond_l[[n]]$lr2 %in% notsec_genes
+  cond_l[[n]]$unique_ct = cond_l[[n]]$id_cp_interaction %in% u_int
+}
+inter_info_df = Reduce(rbind, cond_l)
+intcond = table(inter_info_df$id_cp_interaction, inter_info_df$condition)
+inter_info_df$unique_cond = inter_info_df$id_cp_interaction %in% rownames(intcond)[rowSums(intcond)==1]
+```
+
+
+
+```{r}
+# select cell type pairs
+# for each, get LR pairs that are unique to that condition
+ct_pairs = list(c("gd-T cells", "Stellate cells"), c("cDC2", "Stellate cells"), 
+                c("Dividing endothelial cells", "Kupffer cells"), c("cDC2", "Hepatocytes_Z2"),
+                c("Periportal LSEC", "pDCs"), c("EC non-LSEC", "Kupffer cells"),
+                c("pDCs", "LSEC (interferon)"))
+
+pair_df_list = list()
+for(i in 1:length(ct_pairs)){
+  list_pairs = list()
+  for(n in names(reform_list[1:3])){
+    cond = reform_list[[n]]$ct1==ct_pairs[[i]][1] & reform_list[[n]]$ct2==ct_pairs[[i]][2] |
+      reform_list[[n]]$ct2==ct_pairs[[i]][1] & reform_list[[n]]$ct1==ct_pairs[[i]][2]
+    list_pairs[[n]] = reform_list[[n]][cond,]
+    list_pairs[[n]]$cond = n
+  }
+  pair_df = Reduce(rbind, list_pairs)
+  intcond = table(pair_df$id_cp_interaction, pair_df$cond)
+  useint = rownames(intcond)[rowSums(intcond)==1]
+  pair_df = pair_df[pair_df$id_cp_interaction %in% useint,]
+  pair_df_list[[i]] = pair_df
+}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

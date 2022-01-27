@@ -267,7 +267,7 @@ for(n in names(meta_l)){
   simp_reform$ct2 = NA
   donest = rep(NA, length(simp_reform$ct1))
   doneen = rep(NA, length(simp_reform$ct2))
-  for(ct in sort(unique(meta_l[[n]]$cell_type))){
+  for(ct in sort(unique(meta_l[[n]]$cell_type), decreasing = T)){
     ct_mod = gsub("-", " ", ct, fixed = T)
     ct_mod = gsub("+", " ", ct_mod, fixed = T)
     ct_mod = gsub("/", " ", ct_mod, fixed = T)

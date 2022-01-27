@@ -34,10 +34,34 @@ library(dplyr)
 library(RColorBrewer)
 ```
 
+Other functions
+
+```{r}
+# downsample taking the minimum median of UMI counts as a reference
+dsSeurat = function(srat, variable, assay = "SCT", numis = "nCount_SCT", seed = 1){
+  # input Seurat object and variable to do the downsample based on
+  # return Seurat object
+  
+  set.seed(seed)
+  
+  # downsample taking the minimum median of UMI counts as a reference
+  fact = srat@meta.data[,numis]/min(tapply(srat@meta.data[,numis], srat@meta.data[,variable], median))
+  fact = ifelse(fact<=1, 0, log2(fact))
+  thinned_counts = seqgendiff::thin_lib(as.matrix(srat@assays[[assay]]@counts), 
+                                        thinlog2 = fact, relative = T)
+  rownames(thinned_counts$mat) = rownames(srat@assays[[assay]]@data)
+  colnames(thinned_counts$mat) = colnames(srat@assays[[assay]]@data)
+  srat@assays$SCT@counts = Matrix::Matrix(thinned_counts$mat, sparse = T)
+  srat@assays$SCT@data = log1p(srat@assays[[assay]]@counts)
+  
+  return(srat)
+}
+```
 
 
-# Load data
-Load immune cell data
+
+# Load data and get markers
+Load data
 
 ```{r}
 allcells_css = readRDS(file = "data/processed/allcells_css.RDS")
@@ -70,9 +94,23 @@ allcells_css$subpops[allcells_css$subpops=="Hepatocyte-Monocyte interaction"] = 
 ## the first two are cells that didn't pass the hep and end analysis
 sub_allcells_css = allcells_css[,!(allcells_css$subpops %in% c("Hepatocytes", "Endothelial cells",
                                                                "Doublets"))]
+allcells_css$subpops[allcells_css$subpops %in% c("Hepatocytes", "Endothelial cells","Doublets")] = "Not annotated"
 
 sub_allcells_css$anno_cond = paste0(sub_allcells_css$subpops, "_", sub_allcells_css$Condition)
 saveRDS(sub_allcells_css, file = "results/cirrhosis/sub_allcells_css.RDS")
+```
+
+Get downsampled hepatocytes
+
+```{r}
+ds_hep_srat = dsSeurat(sub_allcells_css[,grepl("Hepatoc", sub_allcells_css$subpops)], "Condition")
+saveRDS(ds_hep_srat, file = "results/cirrhosis/ds_hep_srat.RDS")
+```
+
+Get cell type markers
+
+```{r}
+cell_type_mk = readRDS(file = "results/cond_effect_v2/cell_type_mk_more.RDS")
 ```
 
 Load Ramachandran data
@@ -118,6 +156,10 @@ for(ct in rownames(condct)){
                                  group.by = "condition", pseudocount.use = 0.1, subset.ident = ct)
 }
 saveRDS(mk_li_list, file = "results/cirrhosis/mk_li_CvsH.RDS")
+
+mk_cond = FindMarkers(cirr_data, ident.1 = "Cirrhotic", ident.2 = "Uninjured", assay = "SCT",
+                      group.by = "condition", pseudocount.use = 0.1)
+saveRDS(mk_cond, file = "results/cirrhosis/mk_cond.RDS")
 ```
 
 Markers for each MPs cell population
@@ -128,145 +170,492 @@ mk_cirr_mps = FindAllMarkers(cirr_data[,grepl("MPs", cirr_data$annotation_indept
                              assay = "SCT", pseudocount.use = 0.1, only.pos = T, logfc.threshold = 0.15)
 mk_cirr_mps = mk_cirr_mps[mk_cirr_mps$p_val_adj<=0.05,]
 mk_cirr_mps = mk_cirr_mps[order(mk_cirr_mps$avg_log2FC, decreasing = T),]
+
+saveRDS(mk_cirr_mps, file = "results/cirrhosis/mk_cirr_mps.RDS")
 ```
+
+Markers for each cell population (overall and within compartment)
+
+```{r}
+#mk_ct_all = list()
+for(comp in c("annotation_lineage", "annotation_indepth")){
+  cirr_data = SetIdent(cirr_data, value = comp)
+  #mk_ct = FindAllMarkers(cirr_data, assay = "SCT", pseudocount.use = 0.1, only.pos = T, 
+  #                       logfc.threshold = 0.15)
+  #mk_ct = mk_ct[mk_ct$p_val_adj<=0.05,]
+  #mk_ct = mk_ct[order(mk_ct$avg_log2FC, decreasing = T),]
+  #mk_ct_all[[comp]] = mk_ct
+  
+  if(comp=="annotation_indepth"){
+    l_sub = list()
+    for(lin in unique(cirr_data$annotation_lineage)){
+      print(lin)
+      nct = sum(table(cirr_data$annotation_indepth[cirr_data$annotation_lineage==lin])>0)
+      if(nct>1){
+        mk_sub = FindAllMarkers(cirr_data[,cirr_data$annotation_lineage==lin], only.pos = T, 
+                                assay = "SCT", pseudocount.use = 0.1, logfc.threshold = 0.3)
+        mk_sub = mk_sub[mk_sub$p_val_adj<=0.05,]
+        mk_sub = mk_sub[order(mk_sub$avg_log2FC, decreasing = T),]
+        l_sub[[lin]] = mk_sub
+      }
+    }
+    mk_ct_all[["perlineage"]] = Reduce(rbind, l_sub)
+  }
+}
+
+saveRDS(mk_ct_all, file = "results/cirrhosis/mk_ct_all.RDS")
+```
+
+
+
+# Load processed data
+Load data
+
+```{r}
+sub_allcells_css = readRDS(file = "results/cirrhosis/sub_allcells_css.RDS")
+cirr_data = readRDS(file = "results/cirrhosis/cirr_data_renorm.RDS")
+ds_hep_srat = readRDS(file = "results/cirrhosis/ds_hep_srat.RDS")
+```
+
+Load markers
+
+```{r}
+mk_ct_list = readRDS(file = "results/cirrhosis/mk_ct_CvsH.RDS")
+mk_li_list = readRDS(file = "results/cirrhosis/mk_li_CvsH.RDS")
+mk_cirr_mps = readRDS(file = "results/cirrhosis/mk_cirr_mps.RDS")
+mk_ct_all = readRDS("results/cirrhosis/mk_ct_all.RDS")
+mk_cond = readRDS("results/cirrhosis/mk_cond.RDS")
+```
+
+
+
+# Scoring cirrhotic signatures
+## Global cirrhotic signature
+Scoring global signature
+
+```{r, fig.width=9}
+cir_sig_all = list("cirrhotic_all" = rownames(mk_cond)[mk_cond$avg_log2FC>=0.3 & mk_cond$pct.1>0.2 &
+                                                         mk_cond$pct.1-mk_cond$pct.2>0.1])
+
+sub_allcells_css = AddModuleScore(sub_allcells_css, features = cir_sig_all, nbin = 20, seed = 1, 
+                                  ctrl = 500, name = "cirrhotic_all")
+
+for(lin in unique(sub_allcells_css$allcells_major)){
+  ids = unique(sub_allcells_css@active.ident[sub_allcells_css$allcells_major==lin])
+  plt = VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
+                features = "cirrhotic_all1", idents = ids, ncol = 1)+theme(legend.position = "bottom")
+  print(plt)
+}
+```
+
+
+## Lineage/cell type cirrhotic signature
+Scoring by signature determined within lineage (downsamples data to match conditions)
+
+```{r, fig.width=9}
+maxgenes = 100
+# get signature for each lineage
+cir_sigslin = lapply(mk_li_list, function(x){
+  x = x[order(x$avg_log2FC, decreasing = T),]
+  return(rownames(x)[x$avg_log2FC>=0.3 & x$pct.1>0.2 & x$pct.1-x$pct.2>0.1][1:maxgenes])})
+cir_sigslin = lapply(cir_sigslin, function(x) x[!is.na(x)])
+
+# add markers for cond DE (it will be filtered by cell type)
+cir_sigslin$overall_filt = rownames(mk_cond)[mk_cond$avg_log2FC>=0.3 & mk_cond$pct.1>0.2 &
+                                          mk_cond$pct.1-mk_cond$pct.2>0.1]
+
+# add markers for all lineages (it will be filtered by cell type)
+cir_sigslin$all_lin_filt = unique(unlist(cir_sigslin[1:11]))
+
+# get signature for each cell type
+cir_sigsct = lapply(mk_ct_list, function(x){
+  x = x[order(x$avg_log2FC, decreasing = T),]
+  return(rownames(x)[x$avg_log2FC>=0.3 & x$pct.1>0.2 & x$pct.1-x$pct.2>0.1][1:maxgenes])})
+cir_sigsct = lapply(cir_sigsct, function(x) x[!is.na(x)])
+
+# add markers for all cell types (it will be filtered by cell type)
+cir_sigsct$all_ct_filt = unique(unlist(cir_sigsct[1:41]))
+
+cir_sigsall = c(cir_sigslin, cir_sigsct)
+cir_sigsall = cir_sigsall[!duplicated(names(cir_sigsall))]
+
+# add markers for all lineafes and cell types, filtered
+cir_sigsall$all_filt = unique(c(unlist(cir_sigsct[1:41]), unlist(cir_sigslin[1:11])))
+
+# get top markers for cell types
+cttop = list()
+topn = 30
+for(i in unique(mk_ct_all$perlineage$cluster)){
+  subdf = mk_ct_all$perlineage[mk_ct_all$perlineage$cluster==i & mk_ct_all$perlineage$p_val_adj<=0.05,]
+  cttop[[i]] = subdf[order(subdf$avg_log2FC, decreasing = T),"gene"][1:topn]
+  cttop = lapply(cttop, function(x) x[!is.na(x)])
+}
+for(i in unique(mk_ct_all$annotation_indepth$cluster)){
+  if(!(i %in% names(cttop))){
+    subdf = mk_ct_all$annotation_indepth[mk_ct_all$annotation_indepth$cluster==i &
+                                           mk_ct_all$annotation_indepth$p_val_adj<=0.05,]
+    cttop[[i]] = subdf[order(subdf$avg_log2FC, decreasing = T),"gene"][1:topn]
+    cttop = lapply(cttop, function(x) x[!is.na(x)])
+  }
+}
+# filter out marker genes for individual cell types
+for(n in names(cir_sigsall)){
+  cir_sigsall[[n]] = cir_sigsall[[n]][!(cir_sigsall[[n]] %in% unlist(cttop))]
+}
+
+# add overall signature (unfiltered)
+cir_sigsall$overall = rownames(mk_cond)[mk_cond$avg_log2FC>=0.3 & mk_cond$pct.1>0.2 & mk_cond$pct.1-mk_cond$pct.2>0.1]
+
+# add markers for all lineages and/or cell types (unfiltered)
+cir_sigsall$all_ct = unique(unlist(cir_sigsct[1:41]))
+cir_sigsall$all_lin = unique(unlist(cir_sigslin[1:11]))
+cir_sigsall$all = unique(c(unlist(cir_sigsct[1:41]), unlist(cir_sigslin[1:11])))
+
+# add downsampled Hepatocytes to data
+sub_allcells_dshep = sub_allcells_css[,!(colnames(sub_allcells_css) %in% colnames(ds_hep_srat))]
+sub_allcells_dshep = merge(sub_allcells_dshep, ds_hep_srat)
+sub_allcells_dshep = SetIdent(sub_allcells_dshep, value = "subpops")
+
+# get signatures
+sub_allcells_dshep = AddModuleScore(sub_allcells_dshep, features = cir_sigsall, nbin = 15, 
+                                    seed = 1, ctrl = 500, name = "Cirr_li_")
+col_sigs = grepl("Cirr_li_", colnames(sub_allcells_dshep@meta.data))
+colnames(sub_allcells_dshep@meta.data)[col_sigs] = paste0("Cirr_li_", names(cir_sigsall))
+```
+
+List, for each cell type, which signatures could make sense
+
+```{r}
+feats = colnames(sub_allcells_dshep@meta.data)[col_sigs]
+sig_ass_list = lapply(unique(sub_allcells_dshep@meta.data$subpops), function(x) c())
+names(sig_ass_list) = unique(sub_allcells_dshep@meta.data$subpops)
+for(ct in names(sig_ass_list)){
+  sig_ass_list[[ct]] = c(sig_ass_list[[ct]], "Cirr_li_all")
+  if(grepl("NK ", ct) | grepl("Treg", ct) | grepl("ILC", ct) | 
+     grepl("T cell", ct) | grepl("MAIT", ct) | grepl("TRM", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], feats[grepl("ILCs", feats) | grepl("Tcells", feats)])
+  } else if(grepl("DC", ct) | grepl("Kupffer", ct) | grepl("Monocyte", ct) | grepl("Macrophage", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], feats[grepl("MPs", feats) | grepl("DC", feats)])
+  } else if(grepl("Hepato", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], "Cirr_li_Hepatocytes")
+  } else if(grepl("Cholangiocytes", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], feats[grepl("Cholangiocytes", feats) ])
+  } else if(grepl("B cell", ct) | grepl("Plasma", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], feats[grepl("Bcells", feats)])
+  } else if(grepl("Stellate", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], feats[grepl("Mesenchyme", feats) | grepl("Myofibroblast", feats)])
+  } else if(grepl("EC", ct) | grepl("endothelial", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], feats[grepl("Endothelia", feats)])
+  }
+}
+```
+
+Testing for significance and individual plotting
+
+```{r}
+cond_mat = combn(unique(sub_allcells_dshep$Condition), 2)
+pval_list = list()
+diff_list = list()
+plots_list = list()
+for(s in names(sig_ass_list)){
+  pval_list[[s]] = list()
+  diff_list[[s]] = list()
+  plots_list[[s]] = list()
+  for(f in sig_ass_list[[s]]){
+    pval_list[[s]][[f]] = list()
+    diff_list[[s]][[f]] = list()
+    plots_list[[s]][[f]] = VlnPlot(sub_allcells_dshep, group.by = "subpops", idents = s, features = f, 
+                                     split.by = "Condition", ncol = 1)+theme(legend.position = "bottom")
+    # rescaling (not for plotting only testing)
+    if(!(paste0(f, "_resc") %in% colnames(sub_allcells_dshep@meta.data))){
+      sub_allcells_dshep@meta.data[,paste0(f, "_resc")] = scales::rescale(sub_allcells_dshep@meta.data[,f], 
+                                                                          to = c(0, max(scales::rescale(sub_allcells_dshep@meta.data[,f]))))
+    }
+    for(i in 1:ncol(cond_mat)){
+      test = wilcox.test(sub_allcells_dshep@meta.data[sub_allcells_dshep$subpops==s & 
+                                                        sub_allcells_dshep$Condition==cond_mat[1,i],paste0(f, "_resc")],
+                         sub_allcells_dshep@meta.data[sub_allcells_dshep$subpops==s & 
+                                                        sub_allcells_dshep$Condition==cond_mat[2,i],paste0(f, "_resc")], 
+                  exact = F)
+      id = paste0(cond_mat[1,i], "_v_", cond_mat[2,i])
+      pval_list[[s]][[f]][[id]] = test$p.value
+      d = mean(sub_allcells_dshep@meta.data[sub_allcells_dshep$subpops==s & 
+                                                        sub_allcells_dshep$Condition==cond_mat[1,i],paste0(f, "_resc")])/mean(sub_allcells_dshep@meta.data[sub_allcells_dshep$subpops==s & 
+                                                        sub_allcells_dshep$Condition==cond_mat[2,i],paste0(f, "_resc")])
+      diff_list[[s]][[f]][[id]] = log2(d)
+    }
+  }
+}
+
+pvaldf = reshape2::melt(pval_list)[,4:1]
+pvaldf$fdr = p.adjust(pvaldf$value, method = "fdr")
+diffdf = reshape2::melt(diff_list)[,4:1]
+pvaldf$fc = diffdf$value
+```
+
+Check top hits
+
+```{r}
+pvaldf_filt = pvaldf[pvaldf$fdr<=0.05,]
+sigfc_plts = list()
+for(cc in c("healthy_v_embolised", "healthy_v_regenerating")){
+  subdf = pvaldf_filt[pvaldf_filt$L3==cc,]
+  sigfc_plts[[cc]] = list()
+  for(ct in unique(pvaldf_filt$L1)){
+    subsubdf = subdf[subdf$L1==ct,]
+    subsubdf = subsubdf[order(subsubdf$fc, decreasing = F),]
+    subsubdf$L2 = factor(subsubdf$L2, levels = unique(subsubdf$L2))
+    
+    sigfc_plts[[cc]][[ct]] = ggplot(subsubdf, aes(x = L2, y = fc))+
+      geom_col()+
+      geom_hline(yintercept = c(-.2, .2), linetype = "dashed")+
+      theme_classic()+
+      theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+  }
+}
+```
+
+
+## Cell type signature
+Calculate signatures for each cell type
+
+```{r}
+sub_allcells_dshep@meta.data = sub_allcells_dshep@meta.data[,1:118]
+
+# get top markers for cell types
+cttop = list()
+topn = 50
+for(i in unique(mk_ct_all$perlineage$cluster)){
+  subdf = mk_ct_all$perlineage[mk_ct_all$perlineage$cluster==i & mk_ct_all$perlineage$p_val_adj<=0.05,]
+  cttop[[i]] = subdf[order(subdf$avg_log2FC, decreasing = T),"gene"][1:topn]
+  cttop = lapply(cttop, function(x) x[!is.na(x)])
+}
+
+# get signatures
+sub_allcells_dshep = AddModuleScore(sub_allcells_dshep, features = cttop, nbin = 15, 
+                                    seed = 1, ctrl = 500, name = "ct_sig_")
+col_sigs = grepl("ct_sig_", colnames(sub_allcells_dshep@meta.data))
+colnames(sub_allcells_dshep@meta.data)[col_sigs] = paste0("ct_sig_", names(cttop))
+```
+
+List, for each cell type, which signatures could make sense
+
+```{r}
+feats = colnames(sub_allcells_dshep@meta.data)[startsWith(colnames(sub_allcells_dshep@meta.data), "ct_sig_")]
+sig_ass_list = lapply(unique(sub_allcells_dshep@meta.data$subpops), function(x) c())
+names(sig_ass_list) = unique(sub_allcells_dshep@meta.data$subpops)
+for(ct in names(sig_ass_list)){
+  if(grepl("NK ", ct) | grepl("Treg", ct) | grepl("ILC", ct) | 
+     grepl("T cell", ct) | grepl("MAIT", ct) | grepl("TRM", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], feats[grepl("ILCs", feats) | grepl("Tcells", feats)])
+  } else if(grepl("DC", ct) | grepl("Kupffer", ct) | grepl("Monocyte", ct) | grepl("Macrophage", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], feats[grepl("MPs", feats) | grepl("DC", feats)])
+  } else if(grepl("Hepato", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], "Cirr_li_Hepatocytes")
+  } else if(grepl("Cholangiocytes", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], feats[grepl("Cholangiocytes", feats) ])
+  } else if(grepl("B cell", ct) | grepl("Plasma", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], feats[grepl("Bcells", feats)])
+  } else if(grepl("Stellate", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], feats[grepl("Mesenchyme", feats) | grepl("Myofibroblast", feats)])
+  } else if(grepl("EC", ct) | grepl("endothelial", ct)){
+    sig_ass_list[[ct]] = c(sig_ass_list[[ct]], feats[grepl("Endothelia", feats)])
+  }
+}
+```
+
+Plot signatures for groups of cell types
+
+```{r}
+ct_vars = grepl("ct_sig_", colnames(sub_allcells_dshep@meta.data))
+plot_df = sub_allcells_dshep@meta.data[,c("subpops", "Condition",
+                                          colnames(sub_allcells_dshep@meta.data)[ct_vars])]
+plot_df = reshape2::melt(plot_df)
+
+plot_ct_sigs = list()
+for(gr in c("Kupffer cells", "CD8 ab-T cells 1", "EC non-LSEC", "Cholangiocytes")){
+  ct_use = names(sig_ass_list)[unlist(lapply(sig_ass_list, 
+                                    function(x) length(intersect(x,sig_ass_list[[gr]]))==length(x)))]
+  sub_plot_df = plot_df[plot_df$subpops %in% ct_use & plot_df$variable %in% sig_ass_list[[gr]],]
+  sub_plot_df$variable = substr(sub_plot_df$variable , 8, 200)
+  
+  mean_df = reshape2::melt(tapply(sub_plot_df$value, sub_plot_df$variable, mean))
+  colnames(mean_df)[1] = "variable"
+  
+  plot_ct_sigs[[gr]] = ggplot(sub_plot_df, aes(x = value, y = subpops, fill = subpops))+
+    facet_wrap(~variable, ncol = length(mean_df$variable), scales = "free_x")+
+    geom_violin(size = 0.2)+
+    geom_vline(mapping = aes(xintercept = value), data = mean_df, linetype = "dashed", size = 0.4)+
+    labs(x = "Signature score", y = "Subpopulation")+
+    theme_classic()+
+    theme(legend.position = "none",
+          axis.title = element_text(size = 8),
+          axis.text.y = element_text(size = 7, colour = "black"),
+          strip.text = element_text(size = 7, colour = "black"),
+          axis.text.x = element_text(size = 6.6, colour = "black"))
+}
+```
+
+Testing for significance and individual plotting
+
+```{r}
+cond_mat = combn(unique(sub_allcells_dshep$Condition), 2)
+pval_list = list()
+diff_list = list()
+plots_list = list()
+for(s in names(sig_ass_list)){
+  pval_list[[s]] = list()
+  diff_list[[s]] = list()
+  plots_list[[s]] = list()
+  for(f in sig_ass_list[[s]]){
+    pval_list[[s]][[f]] = list()
+    diff_list[[s]][[f]] = list()
+    plots_list[[s]][[f]] = VlnPlot(sub_allcells_dshep, group.by = "subpops", idents = s, features = f, 
+                                     split.by = "Condition", ncol = 1)+theme(legend.position = "bottom")
+    # rescaling (not for plotting only testing)
+    if(!(paste0(f, "_resc") %in% colnames(sub_allcells_dshep@meta.data))){
+      sub_allcells_dshep@meta.data[,paste0(f, "_resc")] = scales::rescale(sub_allcells_dshep@meta.data[,f], 
+                                                                          to = c(0, max(scales::rescale(sub_allcells_dshep@meta.data[,f]))))
+    }
+    for(i in 1:ncol(cond_mat)){
+      test = wilcox.test(sub_allcells_dshep@meta.data[sub_allcells_dshep$subpops==s & 
+                                                        sub_allcells_dshep$Condition==cond_mat[1,i],paste0(f, "_resc")],
+                         sub_allcells_dshep@meta.data[sub_allcells_dshep$subpops==s & 
+                                                        sub_allcells_dshep$Condition==cond_mat[2,i],paste0(f, "_resc")], 
+                  exact = F)
+      id = paste0(cond_mat[1,i], "_v_", cond_mat[2,i])
+      pval_list[[s]][[f]][[id]] = test$p.value
+      d = mean(sub_allcells_dshep@meta.data[sub_allcells_dshep$subpops==s & 
+                                                        sub_allcells_dshep$Condition==cond_mat[1,i],paste0(f, "_resc")])/mean(sub_allcells_dshep@meta.data[sub_allcells_dshep$subpops==s & 
+                                                        sub_allcells_dshep$Condition==cond_mat[2,i],paste0(f, "_resc")])
+      diff_list[[s]][[f]][[id]] = log2(d)
+    }
+  }
+}
+
+pvaldf_ct = reshape2::melt(pval_list)[,4:1]
+pvaldf_ct$fdr = p.adjust(pvaldf_ct$value, method = "fdr")
+diffdf_ct = reshape2::melt(diff_list)[,4:1]
+pvaldf_ct$fc = diffdf_ct$value
+```
+
+
+
+# Checking cell type proportions
+Get counts and proportions for cell types
+ 
+```{r}
+#number of cells per condition
+don_cond_df = unique(sub_allcells_css@meta.data[,c("Name", "Donor", "Condition")])
+tab_ctCond = table(sub_allcells_css$subpops, sub_allcells_css$Name)
+
+cond_majorct = list("Immune" = !(grepl("Hepa", rownames(tab_ctCond)) | 
+                                   grepl("Stella", rownames(tab_ctCond)) | 
+                                   grepl("Cholan", rownames(tab_ctCond)) | 
+                                   grepl("endoth", rownames(tab_ctCond)) | 
+                                   grepl("EC", rownames(tab_ctCond))),
+                    "Endothelial" = (grepl("endoth", rownames(tab_ctCond)) | 
+                                       grepl("EC", rownames(tab_ctCond))),
+                    "Hepatocytes" = grepl("Hepa", rownames(tab_ctCond)),
+                    "Cholangiocytes" = !grepl("Hepa", rownames(tab_ctCond)),
+                    "Mesenchymal" = !grepl("Hepa", rownames(tab_ctCond)))
+
+perctab_l = list()
+cntstab_l = list()
+for(n in names(cond_majorct)){
+  subtab = tab_ctCond[cond_majorct[[n]],]
+  cntstab_l[[n]] = merge(data.frame(subtab), don_cond_df, by.x = 2, by.y = 1)
+  cntstab_l[[n]] = merge(cntstab_l[[n]], data.frame(colSums(subtab)), by.x = 1, by.y = 0)
+  colnames(cntstab_l[[n]]) = c("Name", "cell_type", "n", "Donor", "Condition", "total")
+  cntstab_l[[n]]$Condition = factor(cntstab_l[[n]]$Condition, 
+                                    levels = rev(c("healthy", "embolised", "regenerating")))
+  perctab = t(t(subtab)/colSums(subtab))*100
+  perctab = merge(data.frame(perctab), don_cond_df, by.x = 2, by.y = 1)
+  perctab_l[[n]] = perctab
+  
+  plt = ggplot(perctab, aes(x = Condition, y = Freq, group = Condition, colour = Condition))+
+    facet_wrap(~Var1, scales = "free")+
+    geom_jitter(position = position_jitterdodge(jitter.width = 0.3, dodge.width = 1))+
+    stat_summary(fun.data = mean_se, position = position_dodge(width = 1), 
+                 alpha = 0.35, colour = "black")+
+    theme(legend.position = "none")
+  
+  print(plt)
+}
+```
+
+Test proportion differences (accounting for sample size)
+
+```{r}
+ct_to_test = list("Immune" = unique(cntstab_l$Immune$cell_type),
+                  "Endothelial" = unique(cntstab_l$Endothelial$cell_type),
+                  "Hepatocytes" = unique(cntstab_l$Hepatocytes$cell_type),
+                  "Cholangiocytes" = "Cholangiocytes",
+                  "Mesenchymal" = "Stellate cells")
+
+cond_mat = combn(c("healthy", "embolised", "regenerating"), 2)
+
+prop_diff_l = list()
+for(n in names(ct_to_test)){
+  prop_diff_l[[n]] = list()
+  for(ct in ct_to_test[[n]]){
+    prop_diff_l[[n]][[ct]] = list()
+    for(i in 1:ncol(cond_mat)){
+      comp = paste0(cond_mat[,i], collapse = "_v_")
+      prop_diff_l[[n]][[ct]][[comp]] = list()
+      mod = glm(data = cntstab_l[[n]][cntstab_l[[n]]$cell_type==ct &
+                                        cntstab_l[[n]]$Condition %in% cond_mat[,i],], 
+                formula = n ~ Condition + total, family = "poisson")
+      mod2 = glm(data = cntstab_l[[n]][cntstab_l[[n]]$cell_type==ct &
+                                         cntstab_l[[n]]$Condition %in% cond_mat[,i],], 
+                 formula = n ~ total, family = "poisson")
+      waldt = lmtest::waldtest(mod, mod2)
+      
+      prop_diff_l[[n]][[ct]][[comp]][["coef"]] = mod$coefficients[2]
+      prop_diff_l[[n]][[ct]][[comp]][["pval"]] = waldt$`Pr(>F)`[2]
+    }
+  }
+}
+prop_diff = reshape2::melt(prop_diff_l)[,5:1]
+prop_diff = reshape2::dcast(prop_diff, L1+L2+L3 ~ L4, value.var = "value")
+prop_diff$fdr = p.adjust(prop_diff$pval, method = "fdr")
+colnames(prop_diff)[1:3] = c("major_group", "cell_type", "comparison")[1:3]
+
+# individual test code
+mod = glm(data = cntstab_l$Immune[cntstab_l$Immune$cell_type=="Monocytes (TREM2+ CD9+)" &
+                                   cntstab_l$Immune$Condition!="regenerating",], 
+    formula = n ~ Condition + total, family = "poisson")
+mod2 = glm(data = cntstab_l$Immune[cntstab_l$Immune$cell_type=="Monocytes (TREM2+ CD9+)" &
+                                   cntstab_l$Immune$Condition!="regenerating",], 
+    formula = n ~ total, family = "poisson")
+summary(mod)
+summary(mod2)
+lmtest::waldtest(mod, mod2)
+```
+
 
 
 
 ```{r}
-top50_g = lapply(unique(mk_cirr_mps$cluster), 
-                 function(x) mk_cirr_mps[mk_cirr_mps$cluster==x, "gene"][1:50])
-names(top50_g) = unique(mk_cirr_mps$cluster)
+plot_df_umap = data.frame(allcells_css@reductions$umap_css@cell.embeddings)
+plot_df_umap$subpops = allcells_css$subpops
+plot_df_umap$subpops = factor(plot_df_umap$subpops, 
+                              levels = c("Not annotated", unique(plot_df_umap$subpops)[-5]))
+plot_df_umap = plot_df_umap[order(plot_df_umap$subpops), ]
+subdf = plot_df_umap[plot_df_umap$subpops!="Not annotated",]
+subdf = subdf[sample(1:nrow(subdf), nrow(subdf), replace = F),]
+plot_df_umap = rbind(plot_df_umap[plot_df_umap$subpops=="Not annotated",], subdf)
 
-sub_allcells_css = AddModuleScore(sub_allcells_css, features = top50_g, nbin = 30, seed = 1)
-colnames(sub_allcells_css@meta.data)[grepl("Cluster", 
-                                           colnames(sub_allcells_css@meta.data))] = names(top50_g)
-
-mp_cells = c("Macrophages (HES4+)","Dividing cDCs","activated DCs","cDC1","cDC2","Kupffer cells",
-             "Monocytes (IGSF21+ GPR34+)","Macrophages", "Monocytes (TREM2+ CD9+)",
-             "Monocytes (secretory)","Kupffer cells (SUCNR1+)")
-feat = colnames(sub_allcells_css@meta.data)[grepl("MPs",colnames(sub_allcells_css@meta.data))]
-feat = sort(feat)
-sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat[1:4], idents = mp_cells, ncol = 2)+NoLegend()
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat[5:8], idents = mp_cells, ncol = 2)+NoLegend()
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat[9:13], idents = mp_cells, ncol = 3)+NoLegend()
+ggplot(plot_df_umap, aes(x = UMAPCSS_1, y = UMAPCSS_2, colour = subpops))+
+  geom_point(size = 0.3)+
+  scale_colour_manual(values = c("Not annotated" = "grey90", sample(rainbow(48), size = 48, replace = F)))+
+  guides(colour = guide_legend(ncol = 2, override.aes = list(size = 2.5)))+
+  theme_classic()+
+  theme(aspect.ratio = 1)
 ```
 
 
 
-```{r}
-cir_sigs50 = lapply(mk_ct_list, function(x) rownames(x[order(x$avg_log2FC, decreasing = T),])[1:50])
-
-sub_allcells_css = AddModuleScore(sub_allcells_css, features = cir_sigs50, nbin = 30, seed = 1, 
-                                  name = "Cirr")
-colnames(sub_allcells_css@meta.data)[grepl("Cirr", 
-                                           colnames(sub_allcells_css@meta.data))] = paste0("Cirr_",names(cir_sigs50))
-
-mp_cells = c("Macrophages (HES4+)","Dividing cDCs","activated DCs","cDC1","cDC2","Kupffer cells",
-             "Monocytes (IGSF21+ GPR34+)","Macrophages", "Monocytes (TREM2+ CD9+)",
-             "Monocytes (secretory)","Kupffer cells (SUCNR1+)")
-feat = colnames(sub_allcells_css@meta.data)[grepl("Cirr_",colnames(sub_allcells_css@meta.data)) &
-                                              grepl("MPs",colnames(sub_allcells_css@meta.data))]
-feat = sort(feat)
-sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat[1:4], idents = mp_cells, ncol = 2)+NoLegend()
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat[5:8], idents = mp_cells, ncol = 2)+NoLegend()
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat[9:11], idents = mp_cells, ncol = 2)+NoLegend()
-```
-
-
-
-```{r}
-mp_cells = c("Hepatocytes_Z1", "Hepatocytes_Z2", "Hepatocytes_Z3", "Cholangiocytes")
-feat = c("Cirr_Cholangiocytes (1)", "Cirr_Cholangiocytes (2)", 
-         "Cirr_Cholangiocytes (3)", "Cirr_Hepatocytes")
-sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat, idents = mp_cells, ncol = 2)
-```
-
-
-
-```{r}
-mp_cells = c(unique(sub_allcells_css$subpops)[grepl("EC", unique(sub_allcells_css$subpops))], 
-             "Stellate cells")
-feat = c(colnames(sub_allcells_css@meta.data)[grepl("Cirr_",colnames(sub_allcells_css@meta.data)) &
-                                              grepl("Endothe",colnames(sub_allcells_css@meta.data))],
-         "Cirr_Mesenchyme (1)", "Cirr_Mesenchyme (2)", "Cirr_Myofibroblasts")
-sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat[1:6], idents = mp_cells, ncol = 3)
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat[7:9], idents = mp_cells, ncol = 3)
-```
-
-
-
-```{r}
-mp_cells = c(unique(sub_allcells_css$subpops)[grepl("NK", unique(sub_allcells_css$subpops))], 
-             "ILC3")
-feat = c(colnames(sub_allcells_css@meta.data)[grepl("Cirr_",colnames(sub_allcells_css@meta.data)) &
-                                              grepl("ILCs ",colnames(sub_allcells_css@meta.data))])
-sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat, idents = mp_cells, ncol = 3)
-```
-
-
-
-```{r}
-mp_cells = c(unique(sub_allcells_css$subpops)[grepl("T ce", unique(sub_allcells_css$subpops))], 
-             "Treg", "TRM cells")
-feat = c(colnames(sub_allcells_css@meta.data)[grepl("Cirr_",colnames(sub_allcells_css@meta.data)) &
-                                              grepl("Tcells",colnames(sub_allcells_css@meta.data))])
-feat = sort(feat[-7])
-sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat, idents = mp_cells, ncol = 3)
-```
-
-
-
-```{r}
-cir_sigs50 = lapply(mk_li_list, function(x) rownames(x[order(x$avg_log2FC, decreasing = T),])[1:50])
-
-sub_allcells_css = AddModuleScore(sub_allcells_css, features = cir_sigs50, nbin = 20, seed = 1, 
-                                  #pool = unique(lapply(mk_li_list, function(x) rownames(x))),
-                                  ctrl = 500, name = "Cirr_li_")
-colnames(sub_allcells_css@meta.data)[grepl("Cirr_li_", 
-                                           colnames(sub_allcells_css@meta.data))] = paste0("Cirr_li_",names(cir_sigs50))
-
-mp_cells = c("Macrophages (HES4+)","Dividing cDCs","activated DCs","cDC1","cDC2","Kupffer cells",
-             "Monocytes (IGSF21+ GPR34+)","Macrophages", "Monocytes (TREM2+ CD9+)",
-             "Monocytes (secretory)","Kupffer cells (SUCNR1+)")
-feat = colnames(sub_allcells_css@meta.data)[grepl("Cirr_li_",colnames(sub_allcells_css@meta.data))]
-feat = sort(feat)
-sub_allcells_css = SetIdent(sub_allcells_css, value = "subpops")
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat[1:4], idents = mp_cells, ncol = 2)+NoLegend()
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat[5:8], idents = mp_cells, ncol = 2)+NoLegend()
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat[9:11], idents = mp_cells, ncol = 2)+NoLegend()
-
-
-mp_cells = c("Hepatocytes_Z1", "Hepatocytes_Z2", "Hepatocytes_Z3", "Cholangiocytes")
-VlnPlot(sub_allcells_css, group.by = "subpops", split.by = "Condition", 
-        features = feat[c(2,4)], idents = mp_cells, ncol = 2)+NoLegend()
-```
-
-
-
-
-
- - get population signatures
- - direct comparison of cell populations
 
 
 
