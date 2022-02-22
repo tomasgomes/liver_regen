@@ -723,9 +723,127 @@ saveRDS(only_end_cells, file = "results/endothelial/only_end_cells_zon.RDS")
 
 
 
+# Comparison with fibrosis data
+Load endothelial data
+
+```{r}
+only_end_cells = readRDS("results/endothelial/only_end_cells_zon.RDS")
+```
+
+Load Ramachandran data
+
+```{r}
+f = "results/cirrhosis/cirr_data_renorm.RDS"
+if(!file.exists(f)){
+  load("../../data/published/Ramachandran_liver/tissue.rdata")
+  
+  cirr_data = CreateSeuratObject(counts = tissue@raw.data, meta.data = tissue@meta.data)
+  
+  # Renormalise, since the original data doesn't look ok
+  cirr_data = suppressWarnings(SCTransform(cirr_data, do.correct.umi = T, verbose = F, 
+                                           vars.to.regress=c("dataset", "nCount_RNA"),
+                                           variable.features.rv.th = 1, seed.use = 1,
+                                           return.only.var.genes = F, 
+                                           variable.features.n = NULL))
+  
+  
+  cirr_data$anno_cond = paste0(cirr_data$annotation_indepth, "_", cirr_data$condition)
+  saveRDS(cirr_data, file = f)
+} else{
+  cirr_data = readRDS(f)
+}
+```
+
+Subset data to get endothelial
+
+```{r}
+f = "results/cirrhosis/cirr_data_endot_renorm.RDS"
+if(!file.exists(f)){
+  cirr_end_data = cirr_data[,cirr_data$annotation_lineage %in% c("Endothelia")]
+  cirr_end_data = suppressWarnings(SCTransform(cirr_end_data, do.correct.umi = T, verbose = F, 
+                         vars.to.regress=c("dataset", "nCount_RNA"),
+                         variable.features.rv.th = 1, seed.use = 1,
+                         return.only.var.genes = F, variable.features.n = NULL))
+  saveRDS(cirr_end_data, file = f)
+} else{
+  cirr_end_data = readRDS(f)
+}
+```
+
+Correlation with Ramachandran data
+
+```{r}
+cir_dat_l = list("endo" = cirr_end_data)
+liv_dat_l = list("endo" = only_end_cells)
+plt_cor_l = list()
+for(n in names(cir_dat_l)){
+  feat_use = intersect(cir_dat_l[[n]]@assays$SCT@var.features,
+                       liv_dat_l[[n]]@assays$SCT@var.features)
+  
+  lab = "endo_simp"
+  avg_liv = AverageExpression(liv_dat_l[[n]], features = feat_use, group.by = lab)$SCT
+  avg_cir = AverageExpression(cir_dat_l[[n]], features = feat_use, 
+                              group.by = "annotation_indepth")$SCT
+  
+  # normalise rows
+  avg_liv = t(apply(avg_liv, 1, function(x) x/mean(x)))
+  avg_cir = t(apply(avg_cir, 1, function(x) x/mean(x)))
+  
+  cor_ds = psych::corr.test(avg_liv, avg_cir, method = "sp")
+  cor_ds$maxrow = apply(cor_ds$r, 1, which.max)
+  cor_ds$maxcol = apply(cor_ds$r, 2, which.max)
+  
+  plt_cor_l[[n]] = plotCorr(cor_ds, "This study", "Ramachandran et al.")
+}
+```
+
+Changes in proportions between conditions
+
+```{r}
+don_cond_df = unique(only_end_cells@meta.data[,c("Name", "Donor", "Condition")])
+tab_ctCond = table(only_end_cells$endo_simp, only_end_cells$Name)
+tab_ctCond = tab_ctCond[!grepl("stress", rownames(tab_ctCond)) & 
+                          !grepl("intera", rownames(tab_ctCond)),]
+end_props = t(t(tab_ctCond)/colSums(tab_ctCond))*100
+end_props = merge(data.frame(end_props), don_cond_df, by.x = 2, by.y = 1)
+
+ggplot(end_props, aes(x = Condition, y = Freq, group = Condition, colour = Condition))+
+  facet_wrap(~Var1, scales = "free")+
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.3, dodge.width = 1))+
+  stat_summary(fun.data = mean_se, position = position_dodge(width = 1), 
+               alpha = 0.35, colour = "black")+
+  theme_bw()+
+  theme(legend.position = "none")
 
 
+tab_ctCond = table(only_end_cells$endo_simp, only_end_cells$Name)
+tab_ctCond = tab_ctCond[!grepl("stress", rownames(tab_ctCond)) & 
+                          !grepl("intera", rownames(tab_ctCond)),]
+end_cnts = tab_ctCond
+end_cnts = merge(data.frame(end_cnts), don_cond_df, by.x = 2, by.y = 1)
+pvals_l = list()
+for(ct in unique(end_cnts$Var1)){
+  dfct = end_cnts[end_cnts$Var1==ct,]
+  dfct$not = tapply(end_cnts$Freq, end_cnts$Var2, sum)-dfct$Freq
+  dfct$tot = tapply(end_cnts$Freq, end_cnts$Var2, sum)
+  dfct$Condition = factor(dfct$Condition, levels = c("healthy", "embolised", "regenerating"))
+  mod = glm(cbind(Freq, not) ~ Condition + Donor + tot, data = dfct, family = "binomial")
+  pvals_l[[ct]] = summary(mod)$coefficients[c("Conditionembolised", "Conditionregenerating"),
+                                            "Pr(>|z|)"]
+}
+pvals_df = data.frame(t(data.frame(pvals_l)))
+rownames(pvals_df) = names(pvals_l)
+colnames(pvals_df) = gsub("Condition", "", colnames(pvals_df))
+pvals_df$embolised = p.adjust(pvals_df$embolised, method = "fdr")
+pvals_df$regenerating = p.adjust(pvals_df$regenerating, method = "fdr")
+```
 
+Save proportions data
+
+```{r}
+saveRDS(end_props, file = "results/cirrhosis/end_props_dat.RDS")
+saveRDS(pvals_df, file = "results/cirrhosis/end_props_pval.RDS")
+```
 
 
 

@@ -29,6 +29,7 @@ Load libraries
 ```{r}
 library(Seurat)
 library(ggplot2)
+library(ggrepel)
 library(destiny)
 library(plyr)
 library(dplyr)
@@ -39,6 +40,64 @@ Load data (from all cells)
 
 ```{r}
 allcells_css = readRDS(file = "data/processed/allcells_css.RDS")
+```
+
+Other functions
+
+```{r}
+# Plot correlations
+plotCorr = function(cort, sp1, sp2){
+  # cluster and order labels
+  hcr = hclust(dist(cort$r), method = "ward.D2")
+  hcc = hclust(dist(t(cort$r)), method = "ward.D2")
+  hcr = hcr$labels[hcr$order]
+  hcc = hcc$labels[hcc$order]
+
+  # reshaping the correlations
+  plot_df = reshape2::melt(cort$r)
+  plot_df$Var1 = factor(plot_df$Var1, levels = rev(hcr))
+  plot_df$Var2 = factor(plot_df$Var2, levels = hcc)
+
+  # add pvalue and max cor infor
+  plot_df$padj = -log10(reshape2::melt(cort$p.adj+min(cort$p.adj[cort$p.adj>0])/10)$value)
+  plot_df$rowmax = apply(Reduce(cbind, lapply(names(cort$maxrow),
+                                              function(n) plot_df$Var1==n &
+                                                plot_df$Var2==colnames(cort$r)[cort$maxrow[n]])),
+                         1, any)
+  plot_df$colmax = apply(Reduce(cbind, lapply(names(cort$maxcol),
+                                              function(n) plot_df$Var2==n &
+                                                plot_df$Var1==rownames(cort$r)[cort$maxcol[n]])),
+                         1, any)
+  plot_df$markcol = plot_df$value>quantile(plot_df$value, 0.98)
+
+  # getting a colourscale where 0 is white in the middle, and intensity leveled by max(abs(value))
+  cols = colorRampPalette(c(rev(RColorBrewer::brewer.pal(9, "Blues")),
+                            RColorBrewer::brewer.pal(9, "Reds")))(101)
+  br = seq(-max(abs(cort$r)), max(abs(cort$r)), length.out = 101)
+  cols = cols[!(br>max(cort$r) | br<min(cort$r))]
+
+  corplot = ggplot()+
+    geom_point(data = plot_df, mapping = aes(x = Var2, y = Var1, fill = value, size = padj),
+               shape = 21)+
+    geom_point(data = plot_df[plot_df$rowmax,], mapping = aes(x = Var2, y = Var1, size = padj),
+               shape = "—", show.legend = F, colour = "grey10")+
+    geom_point(data = plot_df[plot_df$colmax,], mapping = aes(x = Var2, y = Var1, size = padj),
+               shape = "|", show.legend = F, colour = "grey10")+
+    scale_x_discrete(expand = c(0,0.7))+
+    scale_y_discrete(expand = c(0,0.7))+
+    scale_fill_gradientn(breaks = signif(c(min(cort$r)+0.005, 0, max(cort$r)-0.005),2),
+                         values = scales::rescale(c(min(br), 0, max(br))),
+                         colours = cols)+
+    labs(x = sp2, y = sp1, fill = "Spearman's\nrho", size = "-log10\nadj. p-value")+
+    theme_classic()+
+    theme(axis.title = element_text(colour = "black", face = "bold"),
+          axis.text = element_text(colour = "black"),
+          axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+          legend.title = element_text(size = 9),
+          legend.text = element_text(size = 8))
+
+  return(corplot)
+}
 ```
 
 
@@ -178,7 +237,7 @@ mk813 = FindMarkers(all_t_cells, ident.1 = "8", ident.2 = "13",
                    logfc.threshold = 0.2, pseudocount.use = 0.1)
 ```
 
-
+Annotate
 
 ```{r}
 # https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5007630/
@@ -187,13 +246,13 @@ new_t_labs = c("0" = "NK cells 1",
                "2" = "MAIT cells 2", # CXCR6, CCR6, CCR5, some RORC (not DE with the ILC3), some ZBTB16
                "3" = "NK cells 2",
                "4" = "NK cells 3",
-               "5" = "CD8 ab-T cells 2",
+               "5" = "CD8 ab-T cells 1",
                "6" = "MAIT cells 1", # hard to be sure, but has many hallmarks, even higher CD8A
                "7" = "Infiltrating NK cells",
                "8" = "Naive CD4+ T cells", 
                "9" = "gd-T cells", # CD3+ vs cl7, TRDC/TRG
-               "10" = "CD8 ab-T cells 3",
-               "11" = "CD8 ab-T cells 1",
+               "10" = "CD8 ab-T cells 2",
+               "11" = "CD8 ab-T cells (stress)",
                "12" = "Treg",
                "13" = "ILC3") # KIT, AHR, RORC, no CD3/CD8/CD4
 
@@ -394,8 +453,387 @@ saveRDS(all_imm_cells, file = "results/immune/all_imm_cells.RDS")
 
 
 
+# Analysis of immune cell types
+Load data
+
+```{r}
+all_l_cells = readRDS(file = "results/immune/all_l_cells.RDS")
+all_t_cells = readRDS(file = "results/immune/all_t_cells.RDS")
+all_m_cells = readRDS(file = "results/immune/all_m_cells.RDS")
+all_mon_cells = readRDS(file = "results/immune/all_mon_cells.RDS")
+all_imm_cells = readRDS(file = "results/immune/all_imm_cells.RDS")
+```
+
+Markers
+
+```{r}
+mk_lcells = read.csv("results/immune/markers_lymphoid_subpop_all.csv", 
+                     row.names = 1, header = T)
+new_l_labs = c("0" = "ab-T cells 1",
+               "1" = "NK/gd-T cells",
+               "2" = "ab-T cells 2",
+               "3" = "Infiltrating NK cells", # PTGDS,CX3CR1 (infilt)
+               "4" = "IgA+ Plasma cells",
+               "5" = "B cells",
+               "6" = "IgG+ Plasma cells",
+               "7" = "Dividing NK cells",
+               "8" = "ab-T cells (stress)")
+mk_lcells$annot = new_l_labs[as.character(mk_lcells$cluster)]
+
+mk_tcells = read.csv("results/immune/markers_t_subpop_all.csv", 
+                     row.names = 1, header = T)
+new_t_labs = c("0" = "NK cells 1",
+               "1" = "TRM cells", # may have CD4 and CD8; ITGA1
+               "2" = "MAIT cells 2", # CXCR6, CCR6, CCR5, some RORC (not DE with the ILC3), some ZBTB16
+               "3" = "NK cells 2",
+               "4" = "NK cells 3",
+               "5" = "CD8 ab-T cells 1",
+               "6" = "MAIT cells 1", # hard to be sure, but has many hallmarks, even higher CD8A
+               "7" = "Infiltrating NK cells",
+               "8" = "Naive CD4+ T cells", 
+               "9" = "gd-T cells", # CD3+ vs cl7, TRDC/TRG
+               "10" = "CD8 ab-T cells 2",
+               "11" = "CD8 ab-T cells (stress)",
+               "12" = "Treg",
+               "13" = "ILC3") # KIT, AHR, RORC, no CD3/CD8/CD4
+mk_tcells$annot = new_t_labs[as.character(mk_tcells$cluster)]
+
+mk_mcells = read.csv("results/immune/markers_m_subpop_all.csv", 
+                     row.names = 1, header = T)
+new_m_labs = c("0" = "Kupffer cells",
+               "1" = "Monocytes/cDCs",
+               "2" = "Macrophages",
+               "3" = "Monocytes/cDCs",
+               "4" = "Kupffer cells",
+               "5" = "Monocytes/cDCs",
+               "6" = "Monocytes/cDCs",
+               "7" = "Macrophages",
+               "8" = "Monocytes/cDCs",
+               "9" = "cDC1",
+               "10" = "pDCs",
+               "11" = "pDCs",
+               "12" = "Dividing cDCs",
+               "13" = "Kupffer cells",
+               "14" = "Hepatocytes")
+mk_mcells$annot = new_m_labs[as.character(mk_mcells$cluster)]
+
+mk_monocells = read.csv("results/immune/markers_mon_subpop_all.csv", 
+                        row.names = 1, header = T)
+new_m_labs = c("0" = "Kupffer cells",
+               "1" = "cDC2",
+               "2" = "Monocytes (IGSF21+ GPR34+)", # similar to those identified here https://www.nature.com/articles/s41586-020-2922-4 
+               "3" = "Macrophages (HES4+)", # very similar to 5, HES4 is one of its most unique markers
+               "4" = "Kupffer cells (SUCNR1+)", # disproves https://www.ncbi.nlm.nih.gov/pmc/articles/PMC1986575/; these KC are inflammatory/antiviral
+               "5" = "Macrophages",
+               "6" = "Monocytes (TREM2+ CD9+)", # in ramachandran et al, assoc with fibrotic scars
+               ## in their projection, also close to KC
+               "7" = "cDC2",
+               "8" = "cDC1",
+               "9" = "Monocytes (secretory)", # related to 2 and 6
+               "10" = "activated DCs") # CD80, CD86, CCR7
+mk_monocells$annot = new_m_labs[as.character(mk_monocells$cluster)]
+```
+
+Plot UMAPs
+
+```{r}
+imm_df = data.frame(Embeddings(all_imm_cells, reduction = "umap"))
+imm_df$all_annot = all_imm_cells$immune_annot
+imm_df$simp_annot = imm_df$all_annot
+imm_df$simp_annot[imm_df$simp_annot %in% c("ab-T cells (stress)", 
+                                           "Hepatocyte-Monocyte interaction")] = "Non annotated cells"
+mono = unique(imm_df$all_annot)[c(2,4:9,11:12,31)]
+imm_df$simp_annot[imm_df$simp_annot %in% mono] = "Monocytes/Macrophages/cDCs"
+tnk = unique(imm_df$all_annot)[c(17:20,22:30,32)]
+imm_df$simp_annot[imm_df$simp_annot %in% tnk] = "T cells/ILCs"
+
+cols = MetBrewer::met.brewer("Egypt", length(unique(imm_df$simp_annot)))
+names(cols) = unique(imm_df$simp_annot)
+cols["Non annotated cells"] = "grey80"
+
+imm_df = imm_df[sample(1:nrow(imm_df), nrow(imm_df), replace = F),]
+ggplot()+
+  geom_point(aes(x = UMAP_1, y = UMAP_2, colour = simp_annot), 
+             imm_df, size = 0.35)+
+  guides(colour = guide_legend(override.aes = list(size = 3)))+
+  scale_colour_manual(values = cols[order(names(cols))])+
+  theme_void()+
+  theme(aspect.ratio = 1,
+        legend.text = element_text(size = 6),
+        legend.title = element_blank())
+```
 
 
 
+```{r}
+t_df = data.frame(Embeddings(all_t_cells, reduction = "umap"))
+t_df$all_annot = all_t_cells$t_annot
+
+cols = MetBrewer::met.brewer("Juarez", length(unique(t_df$all_annot)))
+names(cols) = unique(t_df$all_annot)
+
+t_df = t_df[sample(1:nrow(t_df), nrow(t_df), replace = F),]
+ggplot()+
+  geom_point(aes(x = UMAP_1, y = UMAP_2, colour = all_annot), 
+             t_df, size = 0.35)+
+  guides(colour = guide_legend(override.aes = list(size = 3)))+
+  scale_colour_manual(values = cols[order(names(cols))])+
+  theme_void()+
+  theme(aspect.ratio = 1,
+        legend.text = element_text(size = 6),
+        legend.title = element_blank())
+```
+
+
+
+```{r}
+m_df = data.frame(Embeddings(all_mon_cells, reduction = "umap"))
+m_df$all_annot = all_mon_cells$mono_annot
+
+cols = MetBrewer::met.brewer("Klimt", length(unique(m_df$all_annot)))
+names(cols) = unique(m_df$all_annot)
+
+m_df = m_df[sample(1:nrow(m_df), nrow(m_df), replace = F),]
+ggplot()+
+  geom_point(aes(x = UMAP_1, y = UMAP_2, colour = all_annot), 
+             m_df, size = 0.35)+
+  guides(colour = guide_legend(override.aes = list(size = 3)))+
+  scale_colour_manual(values = cols[order(names(cols))])+
+  theme_void()+
+  theme(aspect.ratio = 1,
+        legend.text = element_text(size = 6),
+        legend.title = element_blank())
+```
+
+Save data for UMAPs
+
+```{r}
+saveRDS(m_df, file = "results/cirrhosis/umap_m_df.RDS")
+saveRDS(t_df, file = "results/cirrhosis/umap_t_df.RDS")
+saveRDS(imm_df, file = "results/cirrhosis/umap_imm_df.RDS")
+```
+
+Prepare marker heatmaps
+
+```{r}
+topmk_l = mk_lcells %>%
+  group_by(annot) %>%
+  top_n(n = 100, wt = avg_log2FC)
+topmk_t = mk_tcells %>%
+  group_by(annot) %>%
+  top_n(n = 100, wt = avg_log2FC)
+topmk_m = mk_mcells%>%
+  group_by(annot) %>%
+  top_n(n = 100, wt = avg_log2FC)
+topmk_mono = mk_monocells%>%
+  group_by(annot) %>%
+  top_n(n = 100, wt = avg_log2FC)
+
+mk_use = c("PTGDS","CX3CR1", "KIT", "AHR", "RORC", "CD3E", "CCR7", "MKI67", "CD44", "IL7R",
+           "CD80", "CD86", "TREM2", "CD9", "HES4", "IGSF21", "GPR34", "IGHG1", "CD8A", "CD5L",
+           "CD4", "FOXP3", "CTLA4", "CD79A", "IGHA1", "IGHM", "CXCL10", "LYVE1", "MARCO",
+           "S100A8","LYZ","SELL","IFI27","FCER1A", "ITGA1", "THEMIS","S100B",
+           "TRAC", "TRBC1", "TRDC", "TRGC1", "KLRC2", "CCL19", 
+           "IDO1", "CLEC9A", "IL2RB", "CXCR6", "CCR6", "CCR5", "RORC", "ZBTB16")
+
+mk_m = mk_use[mk_use %in% topmk_mono$gene | mk_use %in% topmk_m$gene]
+mk_l = mk_use[mk_use %in% topmk_l$gene | mk_use %in% topmk_t$gene]
+
+topmk_l = mk_lcells %>%
+  group_by(annot) %>%
+  top_n(n = 3, wt = avg_log2FC)
+topmk_l_l = tapply(topmk_l$gene, topmk_l$annot, function(x) x[1:3])
+topmk_t = mk_tcells %>%
+  group_by(annot) %>%
+  top_n(n = 3, wt = avg_log2FC)
+topmk_t_l = tapply(topmk_t$gene, topmk_t$annot, function(x) x[1:3])
+topmk_m = mk_mcells%>%
+  group_by(annot) %>%
+  top_n(n = 3, wt = avg_log2FC)
+topmk_m_l = tapply(topmk_m$gene, topmk_m$annot, function(x) x[1:3])
+topmk_mono = mk_monocells%>%
+  group_by(annot) %>%
+  top_n(n = 3, wt = avg_log2FC)
+topmk_mono_l = tapply(topmk_mono$gene, topmk_mono$annot, function(x) x[1:3])
+
+rem_ct = c("ab-T cells (stress)", "CD8 ab-T cells (stress)")
+id_m = unique(names(c(topmk_m_l, topmk_mono_l)))
+id_m = id_m[id_m %in% all_imm_cells$immune_annot & !id_m %in% rem_ct]
+feat_m = unique(c(unlist(c(topmk_m_l, topmk_mono_l)[id_m]), mk_m))
+feat_m = feat_m[!grepl(".",feat_m,fixed = T)]
+
+id_l = unique(names(c(topmk_l_l, topmk_t_l)))
+id_l = id_l[id_l %in% all_imm_cells$immune_annot & !id_l %in% rem_ct]
+feat_l = unique(c(unlist(c(topmk_l_l, topmk_t_l)[id_l]), mk_l))
+feat_l = feat_l[!grepl(".",feat_l,fixed = T)]
+
+avg_m = AverageExpression(all_imm_cells, features = feat_m, 
+                          group.by = "immune_annot")$SCT[,id_m]
+avg_l = AverageExpression(all_imm_cells, features = feat_l, 
+                          group.by = "immune_annot")$SCT[,id_l]
+
+mat_m = scale(t(avg_m))
+mat_l = scale(t(avg_l))
+
+cols_pal = colorRampPalette(rev(brewer.pal(n = 9, name = "RdBu")))(100)
+pheatmap::pheatmap(mat_m, clustering_method = "ward.D", color = cols_pal,
+                   treeheight_col = 0, treeheight_row = 20, fontsize = 6.5)
+pheatmap::pheatmap(mat_l, clustering_method = "ward.D", color = cols_pal,
+                   treeheight_col = 0, treeheight_row = 20, fontsize = 6.5)
+```
+
+Save matrices for myeloid and lymphoid markers
+
+```{r}
+saveRDS(mat_m, file = "results/cirrhosis/mat_myeloid_markers.RDS")
+saveRDS(mat_l, file = "results/cirrhosis/mat_lymphoid_markers.RDS")
+```
+
+Changes in proportions between conditions
+
+```{r}
+don_cond_df = unique(all_imm_cells@meta.data[,c("Name", "Donor", "Condition")])
+tab_ctCond = table(all_imm_cells$immune_annot, all_imm_cells$Name)
+tab_ctCond = tab_ctCond[!grepl("stress", rownames(tab_ctCond)) & 
+                          !grepl("intera", rownames(tab_ctCond)),]
+imm_props = t(t(tab_ctCond)/colSums(tab_ctCond))*100
+imm_props = merge(data.frame(imm_props), don_cond_df, by.x = 2, by.y = 1)
+
+ggplot(imm_props, aes(x = Condition, y = Freq, group = Condition, colour = Condition))+
+  facet_wrap(~Var1, scales = "free")+
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.3, dodge.width = 1))+
+  stat_summary(fun.data = mean_se, position = position_dodge(width = 1), 
+               alpha = 0.35, colour = "black")+
+  theme_bw()+
+  theme(legend.position = "none")
+
+
+tab_ctCond = table(all_imm_cells$immune_annot, all_imm_cells$Name)
+tab_ctCond = tab_ctCond[!grepl("stress", rownames(tab_ctCond)) & 
+                          !grepl("intera", rownames(tab_ctCond)),]
+imm_cnts = tab_ctCond
+imm_cnts = merge(data.frame(imm_cnts), don_cond_df, by.x = 2, by.y = 1)
+pvals_l = list()
+for(ct in unique(imm_cnts$Var1)){
+  dfct = imm_cnts[imm_cnts$Var1==ct,]
+  dfct$not = tapply(imm_cnts$Freq, imm_cnts$Var2, sum)-dfct$Freq
+  dfct$tot = tapply(imm_cnts$Freq, imm_cnts$Var2, sum)
+  dfct$Condition = factor(dfct$Condition, levels = c("healthy", "embolised", "regenerating"))
+  mod = glm(cbind(Freq, not) ~ Condition + Donor + tot, data = dfct, family = "binomial")
+  pvals_l[[ct]] = summary(mod)$coefficients[c("Conditionembolised", "Conditionregenerating"),
+                                            "Pr(>|z|)"]
+}
+pvals_df = data.frame(t(data.frame(pvals_l)))
+rownames(pvals_df) = names(pvals_l)
+colnames(pvals_df) = gsub("Condition", "", colnames(pvals_df))
+pvals_df$embolised = p.adjust(pvals_df$embolised, method = "fdr")
+pvals_df$regenerating = p.adjust(pvals_df$regenerating, method = "fdr")
+```
+
+Save proportions data
+
+```{r}
+saveRDS(imm_props, file = "results/cirrhosis/imm_props_dat.RDS")
+saveRDS(pvals_df, file = "results/cirrhosis/imm_props_pval.RDS")
+```
+
+Load Ramachandran data
+
+```{r}
+f = "results/cirrhosis/cirr_data_renorm.RDS"
+if(!file.exists(f)){
+  load("../../data/published/Ramachandran_liver/tissue.rdata")
+  
+  cirr_data = CreateSeuratObject(counts = tissue@raw.data, meta.data = tissue@meta.data)
+  
+  # Renormalise, since the original data doesn't look ok
+  cirr_data = suppressWarnings(SCTransform(cirr_data, do.correct.umi = T, verbose = F, 
+                                           vars.to.regress=c("dataset", "nCount_RNA"),
+                                           variable.features.rv.th = 1, seed.use = 1,
+                                           return.only.var.genes = F, 
+                                           variable.features.n = NULL))
+  
+  
+  cirr_data$anno_cond = paste0(cirr_data$annotation_indepth, "_", cirr_data$condition)
+  saveRDS(cirr_data, file = f)
+} else{
+  cirr_data = readRDS(f)
+}
+```
+
+Subset Ramachandran and get HVG
+
+```{r}
+f = "results/cirrhosis/cirr_data_allimmune_renorm.RDS"
+if(!file.exists(f)){
+  cirr_imm_data = cirr_data[,cirr_data$annotation_lineage %in% c("MPs", "Tcells", "ILCs",
+                                                                 "Bcells", "pDCs", 
+                                                                 "Plasma Bcells", "Mast cells")]
+  cirr_imm_data = suppressWarnings(SCTransform(cirr_imm_data, do.correct.umi = T, verbose = F, 
+                         vars.to.regress=c("dataset", "nCount_RNA"),
+                         variable.features.rv.th = 1, seed.use = 1,
+                         return.only.var.genes = F, variable.features.n = NULL))
+  saveRDS(cirr_imm_data, file = "results/cirrhosis/cirr_data_allimmune_renorm.RDS")
+} else{
+  cirr_imm_data = readRDS(f)
+}
+
+# MPs only
+f = "results/cirrhosis/cirr_data_MPs_renorm.RDS"
+if(!file.exists(f)){
+  cirr_mps_data = cirr_data[,cirr_data$annotation_lineage %in% c("MPs")]
+  cirr_mps_data = suppressWarnings(SCTransform(cirr_mps_data, do.correct.umi = T, verbose = F, 
+                         vars.to.regress=c("dataset", "nCount_RNA"),
+                         variable.features.rv.th = 1, seed.use = 1,
+                         return.only.var.genes = F, variable.features.n = NULL))
+  saveRDS(cirr_mps_data, file = "results/cirrhosis/cirr_data_MPs_renorm.RDS")
+} else{
+  cirr_mps_data = readRDS(f)
+}
+
+# Tcells and ILCs only
+f = "results/cirrhosis/cirr_data_tcells_renorm.RDS"
+if(!file.exists(f)){
+  cirr_tce_data = cirr_data[,cirr_data$annotation_lineage %in% c("Tcells", "ILCs")]
+  cirr_tce_data = suppressWarnings(SCTransform(cirr_tce_data, do.correct.umi = T, verbose = F, 
+                         vars.to.regress=c("dataset", "nCount_RNA"),
+                         variable.features.rv.th = 1, seed.use = 1,
+                         return.only.var.genes = F, variable.features.n = NULL))
+  saveRDS(cirr_tce_data, file = f)
+} else{
+  cirr_tce_data = readRDS(f)
+}
+
+```
+
+Correlation with Ramachandran data
+
+```{r}
+cir_dat_l = list("all" = cirr_imm_data, "tcells" = cirr_tce_data, "mono" = cirr_mps_data)
+imm_dat_l = list("all" = all_imm_cells, 
+                 "tcells" = all_t_cells[,!grepl("stress",all_t_cells$t_annot)], 
+                 "mono" = all_mon_cells)
+plt_cor_l = list()
+for(n in names(cir_dat_l)){
+  feat_use = intersect(cir_dat_l[[n]]@assays$SCT@var.features,
+                       imm_dat_l[[n]]@assays$SCT@var.features)
+  
+  lab = ifelse(n=="all", "immune_annot",ifelse(n=="tcells", "t_annot", "mono_annot"))
+  avg_imm = AverageExpression(imm_dat_l[[n]], features = feat_use, group.by = lab)$SCT
+  avg_cir = AverageExpression(cir_dat_l[[n]], features = feat_use, 
+                              group.by = "annotation_indepth")$SCT
+  
+  # normalise rows
+  avg_imm = t(apply(avg_imm, 1, function(x) x/mean(x)))
+  avg_cir = t(apply(avg_cir, 1, function(x) x/mean(x)))
+  
+  cor_ds = psych::corr.test(avg_imm, avg_cir, method = "sp")
+  cor_ds$maxrow = apply(cor_ds$r, 1, which.max)
+  cor_ds$maxcol = apply(cor_ds$r, 2, which.max)
+  
+  
+  plt_cor_l[[n]] = plotCorr(cor_ds, "This study", "Ramachandran et al.")
+}
+```
 
 

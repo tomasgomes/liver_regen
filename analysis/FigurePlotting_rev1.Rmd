@@ -24,6 +24,7 @@ library(ggrepel)
 library(ggridges)
 library(pheatmap)
 library(RColorBrewer)
+library(MetBrewer)
 ```
 
 Define plot theme(s)
@@ -2787,6 +2788,308 @@ diff_cnt_l$regenerating = diff_cnt_l$regenerating+theme(legend.position = "none"
 
 pdf("figure_panels/fig4/suppFig_countsDiff.pdf", height = 4.5, width = 9)
 print(cowplot::plot_grid(plotlist = diff_cnt_l[c(2,1,3)], ncol = 3, rel_widths = c(1,1,0.3), align = "h"))
+dev.off()
+```
+
+
+
+# Panels cirrhosis
+UMAP Immune cells
+
+```{r, fig.height=2, fig.width=2.75}
+imm_df = readRDS("results/cirrhosis/umap_imm_df.RDS")
+
+cols = MetBrewer::met.brewer("Egypt", length(unique(imm_df$simp_annot)))
+names(cols) = unique(imm_df$simp_annot)
+cols["Non annotated cells"] = "grey80"
+
+imm_df = imm_df[sample(1:nrow(imm_df), nrow(imm_df), replace = F),]
+plt = ggplot()+
+  geom_point(aes(x = UMAP_1, y = UMAP_2, colour = simp_annot), 
+             imm_df, size = 0.2)+
+  guides(colour = guide_legend(override.aes = list(size = 3)))+
+  scale_colour_manual(values = cols[order(names(cols))])+
+  theme_void()+
+  theme(aspect.ratio = 1,
+        legend.text = element_text(size = 7),
+        legend.key.size = unit(0.4, "cm"),
+        legend.title = element_blank())
+
+pdf("figure_panels_rev1/fig_cir/all_immune_umap.pdf", height = 2.2, width = 4.2)
+print(plt)
+dev.off()
+```
+
+UMAP Mono/Mac cells
+
+```{r, fig.height=2, fig.width=2.75}
+m_df = readRDS(file = "results/cirrhosis/umap_m_df.RDS")
+
+cols = MetBrewer::met.brewer("Klimt", length(unique(m_df$all_annot)))
+names(cols) = unique(m_df$all_annot)
+
+m_df = m_df[sample(1:nrow(m_df), nrow(m_df), replace = F),]
+plt = ggplot()+
+  geom_point(aes(x = UMAP_1, y = UMAP_2, colour = all_annot), 
+             m_df, size = 0.2)+
+  guides(colour = guide_legend(override.aes = list(size = 3)))+
+  scale_colour_manual(values = cols[order(names(cols))])+
+  theme_void()+
+  theme(aspect.ratio = 1,
+        legend.text = element_text(size = 6),
+        legend.key.size = unit(0.4, "cm"),
+        legend.title = element_blank())
+
+pdf("figure_panels_rev1/fig_cir/all_mono_umap.pdf", height = 2.2, width = 4.2)
+print(plt)
+dev.off()
+```
+
+UMAP T/NK cells
+
+```{r}
+t_df = readRDS(file = "results/cirrhosis/umap_t_df.RDS")
+
+cols = MetBrewer::met.brewer("Juarez", length(unique(t_df$all_annot)))
+names(cols) = unique(t_df$all_annot)
+
+t_df = t_df[sample(1:nrow(t_df), nrow(t_df), replace = F),]
+plt = ggplot()+
+  geom_point(aes(x = UMAP_1, y = UMAP_2, colour = all_annot), 
+             t_df, size = 0.2)+
+  guides(colour = guide_legend(override.aes = list(size = 3)))+
+  scale_colour_manual(values = cols[order(names(cols))])+
+  theme_void()+
+  theme(aspect.ratio = 1,
+        legend.text = element_text(size = 6),
+        legend.key.size = unit(0.375, "cm"),
+        legend.title = element_blank())
+
+pdf("figure_panels_rev1/fig_cir/all_tnk_umap.pdf", height = 2.2, width = 4.2)
+print(plt)
+dev.off()
+```
+
+Markers myeloid cells
+
+```{r}
+mat_m = readRDS(file = "results/cirrhosis/mat_myeloid_markers.RDS")
+
+cols_pal = colorRampPalette(rev(brewer.pal(n = 9, name = "RdBu")))(100)
+
+pdf("figure_panels_rev1/fig_cir/heat_mk_mye.pdf", height = 2.2, width = 6.3)
+pheatmap::pheatmap(mat_m, clustering_method = "ward.D", color = cols_pal,
+                   treeheight_col = 0, treeheight_row = 20, fontsize = 6.3)
+dev.off()
+```
+
+Markers lymphoid cells
+
+```{r}
+mat_l = readRDS("results/cirrhosis/mat_lymphoid_markers.RDS")
+
+cols_pal = colorRampPalette(rev(brewer.pal(n = 9, name = "RdBu")))(100)
+
+pdf("figure_panels_rev1/fig_cir/heat_mk_lym.pdf", height = 2.2, width = 6.3)
+pheatmap::pheatmap(mat_l, clustering_method = "ward.D", color = cols_pal,
+                   treeheight_col = 0, treeheight_row = 20, fontsize = 6.3)
+dev.off()
+```
+
+Proportions immune cells
+
+```{r}
+imm_props = readRDS(file = "results/cirrhosis/imm_props_dat.RDS")
+imm_pvals = readRDS("results/cirrhosis/imm_props_pval.RDS")
+
+plt = ggplot(imm_props, aes(x = Condition, y = Freq, group = Condition, colour = Condition))+
+  facet_wrap(~Var1, scales = "free")+
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.3, dodge.width = 1))+
+  stat_summary(fun.data = mean_se, position = position_dodge(width = 1), 
+               alpha = 0.35, colour = "black")+
+  theme_bw()+
+  theme(legend.position = "none")
+
+
+colnames(imm_pvals)[1] = "embolized"
+
+imm_props$Condition[imm_props$Condition=="embolised"] = "embolized"
+imm_props$Condition = factor(imm_props$Condition, 
+                             levels = c("healthy", "regenerating", "embolized"))
+
+pval_pos = imm_props %>%
+  group_by(Condition, Var1) %>%
+  summarise_at(vars("Freq"), mean)
+pval_pos$posy = pval_pos$Freq*1.02
+pval_pos$posx = as.numeric(pval_pos$Condition)+0.2
+pval_pos = pval_pos[pval_pos$Condition!="healthy",]
+pval_pos$pval = diag(as.matrix(imm_pvals[pval_pos$Var1,as.character(pval_pos$Condition)]))
+pval_pos$issig = ifelse(pval_pos$pval<=0.05, "*", "")
+
+plt = ggplot()+
+  facet_wrap(~Var1, scales = "free")+
+  geom_jitter(data = imm_props, mapping = aes(x = Condition, y = Freq, 
+                                              group = Condition, colour = Condition),
+              position = position_jitterdodge(jitter.width = 0.3, dodge.width = 1))+
+  stat_summary(data = imm_props, mapping = aes(x = Condition, y = Freq, 
+                                              group = Condition, colour = Condition),
+               fun.data = mean_se, position = position_dodge(width = 1), 
+               alpha = 0.6, colour = "black")+
+  geom_text(data = pval_pos, mapping = aes(x = posx, y = posy, label = issig), size = 6)+
+  scale_colour_manual(values = colcond, drop = T, limits = names(colcond)[c(1,2,4)])+
+  labs(y = "% (immune)")+
+  theme_bw()+
+  theme(legend.position = "none",
+        axis.title = element_text(size = 7.5, colour = "black"),
+        axis.text.x = element_text(size = 7, colour = "black"),
+        axis.text.y = element_text(size = 6, colour = "black"),
+        strip.text = element_text(size = 7),
+        strip.background = element_rect(fill = "white"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(size = 0.3, colour = "grey70"))
+
+pdf("figure_panels_rev1/fig_cir/immune_all_prop.pdf", height = 7.5, width = 11.5)
+print(plt)
+dev.off()
+```
+
+Proportions endothelial cells
+
+```{r}
+end_props = readRDS(file = "results/cirrhosis/end_props_dat.RDS")
+end_pvals = readRDS("results/cirrhosis/end_props_pval.RDS")
+colnames(end_pvals)[1] = "embolized"
+
+end_props$Condition[end_props$Condition=="embolised"] = "embolized"
+end_props$Condition = factor(end_props$Condition, 
+                             levels = c("healthy", "regenerating", "embolized"))
+
+pval_pos = end_props %>%
+  group_by(Condition, Var1) %>%
+  summarise_at(vars("Freq"), mean)
+pval_pos$posy = pval_pos$Freq*1.02
+pval_pos$posx = as.numeric(pval_pos$Condition)+0.2
+pval_pos = pval_pos[pval_pos$Condition!="healthy",]
+pval_pos$pval = diag(as.matrix(end_pvals[pval_pos$Var1,as.character(pval_pos$Condition)]))
+pval_pos$issig = ifelse(pval_pos$pval<=0.05, "*", "")
+
+plt = ggplot()+
+  facet_wrap(~Var1, scales = "free")+
+  geom_jitter(data = end_props, mapping = aes(x = Condition, y = Freq, 
+                                              group = Condition, colour = Condition),
+              position = position_jitterdodge(jitter.width = 0.3, dodge.width = 1))+
+  stat_summary(data = end_props, mapping = aes(x = Condition, y = Freq, 
+                                              group = Condition, colour = Condition),
+               fun.data = mean_se, position = position_dodge(width = 1), 
+               alpha = 0.6, colour = "black")+
+  geom_text(data = pval_pos, mapping = aes(x = posx, y = posy, label = issig), size = 6)+
+  scale_colour_manual(values = colcond, drop = T, limits = names(colcond)[c(1,2,4)])+
+  labs(y = "% (endothelial)")+
+  theme_bw()+
+  theme(legend.position = "none",
+        axis.title = element_text(size = 7.5, colour = "black"),
+        axis.text.x = element_text(size = 7, colour = "black"),
+        axis.text.y = element_text(size = 6, colour = "black"),
+        strip.text = element_text(size = 7),
+        strip.background = element_rect(fill = "white"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.major.y = element_line(size = 0.3, colour = "grey70"))
+
+pdf("figure_panels_rev1/fig_cir/endo_all_prop.pdf", height = 5, width = 7.8)
+print(plt)
+dev.off()
+```
+
+MP signatures
+
+```{r}
+mp_sig_df = readRDS(file = "results/cirrhosis/mono_cirr_ct_signatures.RDS")
+
+plot_df = reshape2::melt(mp_sig_df)
+plot_df$Condition[plot_df$Condition=="embolised"] = "embolized"
+plt = ggplot(plot_df[plot_df$variable %in% c("cirr_ct_MPs_4","cirr_ct_MPs_5"),], 
+       aes(x = mono_annot, y = value, fill = Condition))+
+  facet_grid(variable~mono_annot, scales = "free")+
+  geom_hline(yintercept = 0, linetype = "dashed", size = 0.3)+
+  geom_violin(scale = "count")+
+  scale_fill_manual(values = colcond, drop = T, limits = names(colcond)[c(1,2,4)])+
+  theme_classic()+
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.y = element_text(size = 6, colour = "black"),
+        axis.title.y = element_text(size = 6.5),
+        strip.text = element_text(size = 7),
+        panel.border = element_rect(colour = "black", fill = NA),
+        axis.line = element_blank(),
+        legend.position = c(0.048, 0.865),
+        legend.background = element_blank(),
+        legend.key.size = unit(0.3, "cm"),
+        legend.text = element_text(size = 6.5),
+        legend.title = element_text(size = 7))
+
+pdf("figure_panels_rev1/fig_cir/mp_sig_vio.pdf", height = 3, width = 10.35)
+print(plt)
+dev.off()
+```
+
+Endothelial signatures
+
+```{r}
+end_sig_df = readRDS(file = "results/cirrhosis/endo_cirr_ct_signatures.RDS")
+
+plot_df = reshape2::melt(end_sig_df)
+plot_df$Condition[plot_df$Condition=="embolised"] = "embolized"
+plt = ggplot(plot_df[plot_df$variable %in% c("cirr_ct_Endothelia_6","cirr_ct_Endothelia_7"),], 
+       aes(x = endo_simp, y = value, fill = Condition))+
+  facet_grid(variable~endo_simp, scales = "free")+
+  geom_hline(yintercept = 0, linetype = "dashed", size = 0.3)+
+  geom_violin(scale = "count")+
+  scale_fill_manual(values = colcond, drop = T, limits = names(colcond)[c(1,2,4)])+
+  theme_classic()+
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.y = element_text(size = 6, colour = "black"),
+        axis.title.y = element_text(size = 6.5),
+        strip.text = element_text(size = 7),
+        panel.border = element_rect(colour = "black", fill = NA),
+        axis.line = element_blank(),
+        legend.position = "bottom",
+        legend.background = element_blank(),
+        legend.margin = margin(0,0,0,0),
+        legend.key.size = unit(0.3, "cm"),
+        legend.text = element_text(size = 6.5),
+        legend.title = element_text(size = 7))
+
+pdf("figure_panels_rev1/fig_cir/endo_sig_vio.pdf", height = 2.8, width = 11)
+print(plt)
+dev.off()
+```
+
+Hepatocyte signatures
+
+```{r}
+scores_df = readRDS("results/cirrhosis/ds_hep_scoredDev_df.RDS")
+scores_df$Condition[scores_df$Condition=="embolised"] = "embolized"
+
+plt = ggplot(scores_df, aes(x = cirr_fetal_3, y = cirr_fetal_6, colour = Condition))+
+  facet_wrap(~subpops)+
+  geom_density_2d(size = 0.3)+
+  scale_colour_manual(values = colcond, drop = T, limits = names(colcond)[c(1,2,4)])+
+  theme_classic()+
+  theme(aspect.ratio = 1,
+        axis.text = element_text(colour = "black", size = 6),
+        axis.title = element_text(colour = "black", size = 6),
+        strip.text = element_text(size = 7),
+        legend.key.size = unit(0.3, "cm"),
+        legend.text = element_text(size = 6.5),
+        legend.title = element_text(size = 7))
+
+pdf("figure_panels_rev1/fig_cir/hep_dev_sig_density.pdf", height = 1.5, width = 4.5)
+print(plt)
 dev.off()
 ```
 
