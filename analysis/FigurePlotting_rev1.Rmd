@@ -132,6 +132,12 @@ colsallct = c("Cholangiocytes" = "bisque2", "Hepatocytes" = "tomato3", "Stellate
 colsub = c("rosybrown4","thistle4","thistle3","aquamarine4","aquamarine3",
            "forestgreen","tomato4","tomato3","darksalmon","skyblue",
            "cadetblue","sandybrown","palegoldenrod")
+colsmidct = c("Cholangiocytes" = "bisque2", "Hepatocytes" = "tomato3", 
+              "Mesenchymal" = "sandybrown", "pDCs" = "royalblue3", 
+              "T cells" = "lightskyblue3", "LSEC" = "aquamarine3",
+              "other ECs" = "forestgreen", "B cells" = "darkorchid1",
+              "Kupffer cells" = "skyblue1", "other Mono-Mac" = "steelblue3", 
+              "ILC" = "slateblue1")
 ```
 
 
@@ -2160,30 +2166,34 @@ dev.off()
 Total interactions per cell type in each condition
 
 ```{r}
-net_names_l = readRDS(file = "results/cell_comm/count_net_list.RDS")
+net_names_l = readRDS(file = "results/cell_comm/updt/count_net_list.RDS")
 # list per condition with interactions, genes, mean
-reform_list = readRDS(file = "results/cell_comm/reform_list.RDS")
+reform_list = readRDS(file = "results/cell_comm/updt/reform_list.RDS")
 # list per cond with ligand or receptor expression for each interaction
-scoring_mats = readRDS(file = "results/cell_comm/scoring_mats.RDS")
+scoring_mats = readRDS(file = "results/cell_comm/updt/scoring_mats.RDS")
 # reform_list + DE info + uniqueness/specificity of interaction/ligand/receptor
-inter_df = readRDS(file = "results/cell_comm/cond_diff_interact_DE.RDS")
+inter_df = readRDS(file = "results/cell_comm/updt/cond_diff_interact_DE.RDS")
 # interactions qith certain functions involving which cell types and in which conditions
-ct_g_cond_ann = readRDS(file = "results/cell_comm/ct_g_cond_ann.RDS")
+ct_g_cond_ann = readRDS(file = "results/cell_comm/updt/ct_g_cond_ann.RDS")
 # interaction with L and R, pair of cell types, mean exp, and function
-ct_int_exp = readRDS(file = "results/cell_comm/interact_celltype_exp_group.RDS")
+ct_int_exp_l = readRDS(file = "results/cell_comm/updt/interact_celltype_exp_group_list.RDS")
 # annotation for all interactions
 inter_annot = read.csv("data/interaction_annotation.csv", header = T)
 inter_annot$funct[grepl("imm", inter_annot$funct)] = "immune"
 inter_annot$funct[grepl("inflam", inter_annot$funct)] = "immune"
 # mut info data
-her_allint = readRDS(file = "./results/cell_comm/interactions_mutInfo_condComp.RDS")
+her_allint = readRDS(file = "./results/cell_comm/updt/interactions_mutInfo_condComp.RDS")
 # GSEA on mutual info results
-gsea_list = readRDS(file = "./results/cell_comm/gsea_interactions_mutInfo_condComp.RDS")
+all_gsea_list = readRDS(file = "./results/cell_comm/updt/allgsea_interactions_mutInfo_condComp.RDS")
+simp_gsea_list = readRDS(file = "./results/cell_comm/updt/simpgsea_interactions_mutInfo_condComp.RDS")
 # network data
-load("results/cell_comm/median_networks_cond.RData")
-load("results/cell_comm/networks_cond.RData")
-load("results/cell_comm/median_networks_cond_umap.RData")
-load("results/cell_comm/networks_cond_umap.RData")
+load("results/cell_comm/updt/median_networks_cond.RData")
+load("results/cell_comm/updt/networks_cond.RData")
+load("results/cell_comm/updt/median_networks_cond_midct.RData")
+load("results/cell_comm/updt/median_networks_cond_umap.RData")
+load("results/cell_comm/updt/networks_cond_umap.RData")
+load("results/cell_comm/updt/median_networks_cond_umap_midct.RData")
+comph_inters = readRDS(file = "results/cell_comm/updt/comph_inters.RDS")
 ```
 
 Plot changes in number of interactions per condition
@@ -2242,14 +2252,16 @@ total_unique$Var1 = rownames(total_unique)
 colnames(total_unique)[1] = "value"
 total_unique$Var2 = "total unique"
 
-net_names_all$Var1 = factor(net_names_all$Var1, levels = total_unique$Var1[order(total_unique$value, decreasing = F)])
+net_names_all$Var1 = factor(net_names_all$Var1, 
+                            levels = total_unique$Var1[order(total_unique$value, 
+                                                             decreasing = F)])
 plt_counts = ggplot(net_names_all, aes(x = Var1, y = value))+
   geom_point(mapping = aes(colour = Var2), size = 1.6)+
   geom_point(data = total_unique, mapping = aes(shape = Var2), size = 1.6)+
   coord_flip()+
   scale_colour_manual(values = colcond)+
   scale_shape_manual(values = c(4))+
-  scale_y_continuous(expand = c(0,0), limits = c(0,1850))+
+  scale_y_continuous(expand = c(0,0), limits = c(0,6500))+
   labs(y = "Total interactions", x = "Cell Type", colour = "Condition")+
   guides(colour = guide_legend(order = 1), shape = guide_legend(order = 2, title = NULL))+
   theme_bw()+
@@ -2272,7 +2284,7 @@ perc_df = perc_df[perc_df$Var2!="healthy",]
 perc_plt_emb = ggplot(perc_df[perc_df$Var2=="embolised",], aes(x = Var1, y = perc, fill = col))+
   geom_col()+
   scale_fill_manual(values = c("deepskyblue1", "red1"))+
-  scale_y_continuous(expand = c(0,0), limits = c(-15,65))+
+  scale_y_continuous(expand = c(0,0), limits = c(-45,70))+
   coord_flip()+
   labs(y = "% change\nembolised vs healthy", x = "Cell Type")+
   theme_bw()+
@@ -2285,7 +2297,7 @@ perc_plt_emb = ggplot(perc_df[perc_df$Var2=="embolised",], aes(x = Var1, y = per
 perc_plt_reg = ggplot(perc_df[perc_df$Var2=="regenerating",], aes(x = Var1, y = perc, fill = col))+
   geom_col()+
   scale_fill_manual(values = c("deepskyblue1", "red1"))+
-  scale_y_continuous(expand = c(0,0), limits = c(-15,65))+
+  scale_y_continuous(expand = c(0,0), limits = c(-45,70))+
   coord_flip()+
   labs(y = "% change\nregenerating vs healthy", x = "Cell Type")+
   theme_bw()+
@@ -2301,7 +2313,7 @@ cowplot::plot_grid(cowplot::plot_grid(plt_counts+theme(legend.position = "none")
                                       ncol = 3, align = "h", axis = "r", rel_widths = c(1,0.5,0.5)),
                    leg, nrow = 2, rel_heights = c(1, 0.1))
 
-pdf("figure_panels/fig4/mainFig_countsCond.pdf", height = 3.3, width = 5.75)
+pdf("figure_panels_rev1/fig_comm/mainFig_countsCond.pdf", height = 7, width = 7)
 cowplot::plot_grid(cowplot::plot_grid(plt_counts+theme(legend.position = "none"), 
                                       perc_plt_reg, perc_plt_emb, 
                                       ncol = 3, align = "h", axis = "r", rel_widths = c(1,0.4,0.4)),
@@ -2338,7 +2350,7 @@ bar_func_sub = ggplot(plot_df, aes(x = condition, fill = condition))+
         aspect.ratio = 1,
         legend.position = "none")
 
-pdf("figure_panels/fig4/mainFig_funcPart.pdf", height = 5.5, width = 4.5)
+pdf("figure_panels_rev1/fig_comm/mainFig_funcPart.pdf", height = 5.5, width = 4.5)
 print(bar_func_sub)
 dev.off()
 
@@ -2360,10 +2372,10 @@ bar_func_all = ggplot(plot_df, aes(x = condition, fill = condition))+
         panel.grid.major.y = element_line(),
         strip.text = element_text(size = 7),
         strip.background = element_blank(),
-        aspect.ratio = 1,
+        aspect.ratio = 1/2,
         legend.position = "none")
 
-pdf("figure_panels/fig4/suppFig_countsFunc.pdf", paper = "a4", width = 9, height = 13.5)
+pdf("figure_panels_rev1/fig_comm/suppFig_countsFunc.pdf", paper = "a4", width = 9, height = 13.5)
 print(bar_func_all)
 dev.off()
 ```
@@ -2404,7 +2416,7 @@ bar_func_all = ggplot(plot_df, aes(x = condition, fill = condition))+
 GSEA qvalue for changing interactions (using all)
 
 ```{r}
-plot_df = Reduce(rbind, gsea_list)
+plot_df = Reduce(rbind, all_gsea_list)
 plot_df$q.val = -log10(plot_df$q.val+0.0000005)*(plot_df$sscore/abs(plot_df$sscore))
 plot_df$comp = factor(plot_df$comp, levels = rev(c("he","hr","er")))
 m = tapply(plot_df$q.val, plot_df$group,mean)
@@ -2431,7 +2443,7 @@ gseaplt = ggplot(plot_df, aes(x = q.val, y = group, fill = comp))+
         legend.margin = margin(0,0,0,0),
         legend.key.size = unit(0.35, "cm"))
 
-pdf("figure_panels/fig4/mainFig_funcGSEA.pdf", height = 2.2, width = 2.85)
+pdf("figure_panels_rev1/fig_comm/mainFig_funcGSEA.pdf", height = 2.2, width = 2.85)
 print(gseaplt)
 dev.off()
 ```
@@ -2443,13 +2455,14 @@ gradexpcol = c("#f3edff", "#ecc8fa", "#9e42d4", "#792f91")
 
 filtFunc = function(x, mutthr = 0, expthr = 0.12, minct = 3){
   coldf = x[(x$mutInfo_he<=mutthr | x$mutInfo_hr<=mutthr),1:8]
+  coldf = x[,1:8]
   coldf$intlr = paste0(coldf$lr1, " -\n ", coldf$lr2)
   coldf = unique(coldf[,c(2,3,9,6:8)])
   nint = table(coldf$intlr)
   coldf = coldf[apply(coldf[,4:6], 1, function(x) any(x>=expthr)) & 
                   (coldf$intlr %in% names(nint)[nint>1] | apply(coldf[,4:6], 1, 
                                                                 function(x) any(x>=expthr*8))),]
-  coldf = rbindlist(list(reshape2::melt(coldf[,c(3,1,4:6)]), 
+  coldf = data.table::rbindlist(list(reshape2::melt(coldf[,c(3,1,4:6)]), 
                          reshape2::melt(coldf[,c(3,2,4:6)])), use.names = F)
   coldf$variable = unlist(lapply(strsplit(as.character(coldf$variable), "_"), function(x) x[1]))
   coldf$variable = factor(coldf$variable, levels = c("healthy", "embolised","regenerating"))
@@ -2508,23 +2521,24 @@ pltFunc = function(x){
   return(plt)
 }
 
-her_allint_f = merge(her_allint, inter_annot, by = 1, all.x = T)
-write.csv(her_allint_f[,c(1:8,28)], file = "figure_panels/fig4/all_interactions_functions.csv",
+her_allint_f = merge(her_allint$all, inter_annot, by = 1, all.x = T)
+write.csv(her_allint_f[,c(1:8,28)], file = "figure_panels_rev1/fig_comm/all_interactions_functions.csv",
           col.names = T, row.names = F, quote = F)
 # remove autocrine
 her_allint_f = her_allint_f[her_allint_f$ct1!=her_allint_f$ct2,]
+her_allint_f = her_allint_f[!is.na(her_allint_f$funct),]
 
 # ECM
 plot_df = filtFunc(her_allint_f[her_allint_f$funct=="ECM",], expthr = 0.15)
 ecm_plt = pltFunc(plot_df)
-pdf("figure_panels/fig4/mainFig_ecmInteract.pdf", height = 3, width = 7.5)
+pdf("figure_panels_rev1/fig_comm/mainFig_ecmInteract.pdf", height = 3, width = 7.5)
 print(ecm_plt)
 dev.off()
 
 # dev
 plot_df = filtFunc(her_allint_f[her_allint_f$funct=="development",], expthr = 0.15)
 dev_plt = pltFunc(plot_df)
-pdf("figure_panels/fig4/mainFig_devInteract.pdf", height = 3, width = 7.5)
+pdf("figure_panels_rev1/fig_comm/mainFig_devInteract.pdf", height = 3, width = 7.5)
 print(dev_plt)
 dev.off()
 ```
@@ -2544,7 +2558,7 @@ pltboth = ggplot()+
   guides(colour = guide_legend(override.aes = list(size = 2.3)))+
   scale_size_continuous(range = c(0, 4), limits = range(pe_l[[2]]$Freq))+
   scale_colour_manual(values = colsmajor)+
-  scale_fill_manual(values = colsallct)+
+  #scale_fill_manual(values = colsallct)+
   theme_classic()+ 
   theme(aspect.ratio = 1, 
         axis.line = element_blank(),
@@ -2553,8 +2567,10 @@ pltboth = ggplot()+
         axis.ticks = element_blank(),
         legend.title = element_blank(),
         legend.key.size = unit(0.35, "cm"),
-        legend.spacing.y = unit(0.1, "cm"))
-pdf("figure_panels/fig4/mainFig_inet_cond_all.pdf", height = 3.1, width = 5.2, useDingbats = F)
+        legend.spacing.y = unit(0.1, "cm"),
+        legend.position = "none")
+pdf("figure_panels_rev1/fig_comm/mainFig_inet_cond_all.pdf", 
+    height = 3.1, width = 5.2, useDingbats = F)
 print(pltboth)
 dev.off()
 
@@ -2568,7 +2584,72 @@ for(cc in unique(pe_cond_l_ch[[2]]$condition)){
                alpha = 1, pch = 21, size = 4)+
     scale_size_continuous(range = c(0, 4), limits = range(pe_cond_l_ch[[2]]$Freq))+
     scale_alpha_continuous(range = c(0, 1), limits = range(pe_cond_l_ch[[2]]$Freq))+
-    scale_fill_manual(values = colsallct)+
+    #scale_fill_manual(values = colsallct)+
+    labs(title = cc)+
+    guides(size = guide_legend(direction = "horizontal", nrow = 2),
+           alpha = guide_legend(direction = "horizontal", nrow = 2))+
+    theme_classic()+ 
+    theme(aspect.ratio = 1, 
+          axis.line = element_blank(),
+          axis.text = element_blank(),
+          axis.title = element_blank(),
+          axis.ticks = element_blank(),
+          panel.background = element_rect(colour = "black"),
+          legend.title = element_blank(),
+          legend.key.size = unit(0.35, "cm"),
+          legend.position = "none")
+}
+plt_cond_l_ch[["leg"]] = cowplot::get_legend(plt_cond_l_ch[["healthy"]])
+
+pdf("figure_panels_rev1/fig_comm/mainFig_inet_cond_median.pdf", height = 3.2, width = 5, useDingbats = F)
+print(plt_cond_l_ch$healthy)
+print(plt_cond_l_ch$embolised)
+print(plt_cond_l_ch$regenerating)
+dev.off()
+```
+
+Network plots with middle cell type resolution - MDS
+
+```{r}
+pltboth = ggplot()+
+  geom_point(data = point_cond_df, mapping = aes(x = X1, y = X2, colour = ct2), 
+             alpha = 0.6, show.legend = NA, size = 1.3)+
+  geom_segment(data = pe_mid_l[[2]], 
+               mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq), 
+               alpha = 0.15, show.legend = F)+
+  geom_point(data = pe_mid_l[[1]], 
+             mapping = aes(x = X1, y = X2, fill = ct_mid), 
+             alpha = 1, pch = 21, size = 4)+
+  guides(colour = guide_legend(override.aes = list(size = 2.3)))+
+  scale_size_continuous(range = c(0, 4), limits = range(pe_mid_l[[2]]$Freq))+
+  scale_colour_manual(values = colsmajor)+
+  scale_fill_manual(values = colsmidct)+
+  theme_classic()+ 
+  theme(aspect.ratio = 1, 
+        axis.line = element_blank(),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        legend.title = element_blank(),
+        legend.key.size = unit(0.35, "cm"),
+        legend.spacing.y = unit(0.1, "cm"),
+        legend.position = "none")
+pdf("figure_panels_rev1/fig_comm/mainFig_inet_cond_mid.pdf", 
+    height = 3.1, width = 5.2, useDingbats = F)
+print(pltboth)
+dev.off()
+
+plt_cond_l_ch = list()
+for(cc in unique(pe_cond_l_mid[[2]]$condition)){
+  plt_cond_l_ch[[cc]] = ggplot()+
+    geom_segment(data = pe_cond_l_mid[[2]][pe_cond_l_mid[[2]]$condition==cc,], 
+                 mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq, alpha = Freq))+
+    geom_point(data = pe_cond_l_mid[[1]], 
+               mapping = aes(x = X1, y = X2, fill = ct_mid), 
+               alpha = 1, pch = 21, size = 4)+
+    scale_size_continuous(range = c(0, 4), limits = range(pe_cond_l_mid[[2]]$Freq))+
+    scale_alpha_continuous(range = c(0, 1), limits = range(pe_cond_l_mid[[2]]$Freq))+
+    scale_fill_manual(values = colsmidct)+
     labs(title = cc)+
     guides(size = guide_legend(direction = "horizontal", nrow = 2),
            alpha = guide_legend(direction = "horizontal", nrow = 2))+
@@ -2582,9 +2663,9 @@ for(cc in unique(pe_cond_l_ch[[2]]$condition)){
           legend.title = element_blank(),
           legend.key.size = unit(0.35, "cm"))
 }
-plt_cond_l_ch[["leg"]] = cowplot::get_legend(plt_cond_l_ch[["healthy"]])
 
-pdf("figure_panels/fig4/mainFig_inet_cond_median.pdf", height = 3.2, width = 5, useDingbats = F)
+pdf("figure_panels_rev1/fig_comm/mainFig_inet_cond_median_mid.pdf", 
+    height = 3.2, width = 5, useDingbats = F)
 print(plt_cond_l_ch$healthy)
 print(plt_cond_l_ch$embolised)
 print(plt_cond_l_ch$regenerating)
@@ -2615,8 +2696,9 @@ pltboth = ggplot()+
         axis.ticks = element_blank(),
         legend.title = element_blank(),
         legend.key.size = unit(0.35, "cm"),
-        legend.spacing.y = unit(0.1, "cm"))
-pdf("figure_panels/fig4/mainFig_inet_cond_umap_all.pdf", height = 3.1, width = 5.2, useDingbats = F)
+        legend.spacing.y = unit(0.1, "cm"),
+        legend.position = "none")
+pdf("figure_panels_rev1/fig_comm/mainFig_inet_cond_umap_all.pdf", height = 3.1, width = 5.2, useDingbats = F)
 print(pltboth)
 dev.off()
 
@@ -2642,11 +2724,75 @@ for(cc in unique(pe_umap_cond_l_ch[[2]]$cond)){
           axis.ticks = element_blank(),
           panel.background = element_rect(colour = "black"),
           legend.title = element_blank(),
+          legend.key.size = unit(0.35, "cm"),
+          legend.position = "none")
+}
+plt_cond_l_ch[["leg"]] = cowplot::get_legend(plt_cond_l_ch[["healthy"]])
+
+pdf("figure_panels_rev1/fig_comm/mainFig_inet_cond_umap_median.pdf", height = 3.2, width = 5, useDingbats = F)
+print(plt_cond_l_ch$healthy)
+print(plt_cond_l_ch$embolised)
+print(plt_cond_l_ch$regenerating)
+dev.off()
+```
+
+Network plots with middle cell type resolution - UMAP
+
+```{r}
+pltboth = ggplot()+
+  geom_point(data = point_cond_umap_df, mapping = aes(x = X1, y = X2, colour = ct2), 
+             alpha = 0.6, show.legend = NA, size = 1.3)+
+  geom_segment(data = pe_umap_mid_l[[2]], 
+               mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq), 
+               alpha = 0.15, show.legend = F)+
+  geom_point(data = pe_umap_mid_l[[1]], 
+             mapping = aes(x = X1, y = X2, fill = ct_mid), 
+             alpha = 1, pch = 21, size = 4)+
+  guides(colour = guide_legend(override.aes = list(size = 2.3)))+
+  scale_size_continuous(range = c(0, 4))+
+  scale_colour_manual(values = colsmajor)+
+  scale_fill_manual(values = colsmidct)+
+  theme_classic()+ 
+  theme(aspect.ratio = 1, 
+        axis.line = element_blank(),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        legend.title = element_blank(),
+        legend.key.size = unit(0.35, "cm"),
+        legend.spacing.y = unit(0.1, "cm"),
+        legend.position = "none")
+pdf("figure_panels_rev1/fig_comm/mainFig_inet_cond_umap_all_mid.pdf", height = 3.1, width = 5.2, useDingbats = F)
+print(pltboth)
+dev.off()
+
+plt_cond_l_ch = list()
+for(cc in unique(pe_umap_cond_l_mid[[2]]$cond)){
+  plt_cond_l_ch[[cc]] = ggplot()+
+    geom_segment(data = pe_umap_cond_l_mid[[2]][pe_umap_cond_l_mid[[2]]$cond==cc,], 
+                 mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq, alpha = Freq))+
+    geom_point(data = pe_umap_cond_l_mid[[1]], 
+               mapping = aes(x = X1, y = X2, fill = ct_mid), 
+               alpha = 1, pch = 21, size = 4)+
+    scale_size_continuous(range = c(0, 4), limits = range(pe_umap_cond_l_mid[[2]]$Freq))+
+    scale_alpha_continuous(range = c(0, 1), limits = range(pe_umap_cond_l_mid[[2]]$Freq))+
+    scale_fill_manual(values = colsmidct)+
+    labs(title = cc)+
+    guides(size = guide_legend(direction = "horizontal", nrow = 2),
+           alpha = guide_legend(direction = "horizontal", nrow = 2))+
+    theme_classic()+ 
+    theme(aspect.ratio = 1, 
+          axis.line = element_blank(),
+          axis.text = element_blank(),
+          axis.title = element_blank(),
+          axis.ticks = element_blank(),
+          panel.background = element_rect(colour = "black"),
+          legend.title = element_blank(),
           legend.key.size = unit(0.35, "cm"))
 }
 plt_cond_l_ch[["leg"]] = cowplot::get_legend(plt_cond_l_ch[["healthy"]])
 
-pdf("figure_panels/fig4/mainFig_inet_cond_umap_median.pdf", height = 3.2, width = 5, useDingbats = F)
+pdf("figure_panels_rev1/fig_comm/mainFig_inet_cond_umap_median_mid.pdf", height = 3.2, width = 5, useDingbats = F)
 print(plt_cond_l_ch$healthy)
 print(plt_cond_l_ch$embolised)
 print(plt_cond_l_ch$regenerating)
@@ -2676,7 +2822,7 @@ plot_df = filtFunc(her_allint_f[her_allint_f$id_cp_interaction %in% unique(edge_
                    expthr = 0.07, minct = 2)
 plot_df = plot_df[!(plot_df$intlr %in% c(devdf$intlr, ecmdf$intlr)),]
 imm_plt = pltFunc(plot_df)
-pdf("figure_panels/fig4/mainFig_immuneNetInteract_many.pdf", height = 3, width = 20)
+pdf("figure_panels_rev1/fig_comm/mainFig_immuneNetInteract_many.pdf", height = 3, width = 20)
 print(imm_plt)
 dev.off()
 
@@ -2684,41 +2830,39 @@ plot_df = filtFunc(her_allint_f[her_allint_f$id_cp_interaction %in% unique(edge_
                    expthr = 0.3, minct = 2)
 plot_df = plot_df[!(plot_df$intlr %in% c(devdf$intlr, ecmdf$intlr)),]
 imm_plt = pltFunc(plot_df)
-pdf("figure_panels/fig4/mainFig_immuneNetInteract.pdf", height = 2.86, width = 7.1)
+pdf("figure_panels_rev1/fig_comm/mainFig_immuneNetInteract.pdf", height = 2.86, width = 7.1)
 print(imm_plt)
 dev.off()
 ```
 
-
-## Supplementary
 Heatmaps with number of interactions per condition
 
 ```{r}
 cnts_list = list()
 tab_list = list()
-for(n in names(inter_df)){
+for(n in names(inter_df)[1:3]){
   subdfct = unique(inter_df[[n]][,1:3])
   subdfct$ct1[grepl("LSEC_", subdfct$ct1)] = "LSEC"
   subdfct$ct2[grepl("LSEC_", subdfct$ct2)] = "LSEC"
   subdfct$ct1[grepl("Hepat", subdfct$ct1)] = "Hepatocytes"
   subdfct$ct2[grepl("Hepat", subdfct$ct2)] = "Hepatocytes"
-  subdfct$ct1[grepl("non-", subdfct$ct1)] = "Endothelial cells\n(non-LSEC)"
-  subdfct$ct2[grepl("non-", subdfct$ct2)] = "Endothelial cells\n(non-LSEC)"
+  #subdfct$ct1[grepl("non-", subdfct$ct1)] = "Endothelial cells\n(non-LSEC)"
+  #subdfct$ct2[grepl("non-", subdfct$ct2)] = "Endothelial cells\n(non-LSEC)"
   subdfct = unique(subdfct)
   dfct = table(data.frame("ct1" = c(subdfct$ct1, subdfct$ct2),
                           "ct2" = c(subdfct$ct2, subdfct$ct1)))
   hcl = hclust(dist(dfct), method = "ward.D2")
   plot_df = data.frame(dfct)
-  #plot_df$ct1 = factor(plot_df$ct1, levels = levels(plot_df$ct1)[hcl$order])
-  #plot_df$ct2 = factor(plot_df$ct2, levels = levels(plot_df$ct2)[hcl$order])
-  plot_df$ct1 = factor(plot_df$ct1, levels = rev(c("Stellate cells", "LSEC", "Endothelial cells\n(non-LSEC)",
-                                                   "Kupffer cells", "cDCs", "Macrophages", "Cholangiocytes",
-                                                   "pDCs", "ab-T cells", "Hepatocytes", "gd-T cells", 
-                                                   "B cells", "Plasmablasts")))
-  plot_df$ct2 = factor(plot_df$ct2, levels = rev(c("Stellate cells", "LSEC", "Endothelial cells\n(non-LSEC)",
-                                                   "Kupffer cells", "cDCs", "Macrophages", "Cholangiocytes",
-                                                   "pDCs", "ab-T cells", "Hepatocytes", "gd-T cells", 
-                                                   "B cells", "Plasmablasts")))
+  plot_df$ct1 = factor(plot_df$ct1, levels = levels(net_names_all$Var1))
+  plot_df$ct2 = factor(plot_df$ct2, levels = levels(net_names_all$Var1))
+  #plot_df$ct1 = factor(plot_df$ct1, levels = rev(c("Stellate cells", "LSEC", "Endothelial cells\n(non-LSEC)",
+  #                                                 "Kupffer cells", "cDCs", "Macrophages", "Cholangiocytes",
+  #                                                 "pDCs", "ab-T cells", "Hepatocytes", "gd-T cells", 
+  #                                                 "B cells", "Plasmablasts")))
+  #plot_df$ct2 = factor(plot_df$ct2, levels = rev(c("Stellate cells", "LSEC", "Endothelial cells\n(non-LSEC)",
+  #                                                 "Kupffer cells", "cDCs", "Macrophages", "Cholangiocytes",
+  #                                                 "pDCs", "ab-T cells", "Hepatocytes", "gd-T cells", 
+  #                                                 "B cells", "Plasmablasts")))
   pltcnts = ggplot(plot_df, aes(x = ct1, y = ct2, size = Freq, colour = Freq))+
     geom_point()+
     labs(x = "cell type", y = "cell type", title = n)+
@@ -2741,9 +2885,8 @@ cnts_list$healthy = cnts_list$healthy+theme(legend.position = "none")
 cnts_list$embolised = cnts_list$embolised+theme(legend.position = "none")
 cnts_list$regenerating = cnts_list$regenerating+theme(legend.position = "none")
 
-pdf("figure_panels/fig4/suppFig_countsCond.pdf", height = 5, width = 12)
-print(cowplot::plot_grid(plotlist = cnts_list[c(1,3,2,4)], ncol = 4, 
-                         rel_widths = c(1,1,1,0.3), align = "h"))
+pdf("figure_panels_rev1/fig_comm/suppFig_countsCond.pdf", height = 15, width = 15)
+cnts_list[[1]]+cnts_list[[3]]+cnts_list[[2]]+cnts_list[[4]]+      patchwork::plot_layout(ncol = 2)
 dev.off()
 ```
 
@@ -2757,22 +2900,26 @@ for(n in c("embolised", "regenerating")){
   plot_df = data.frame(dif_df)
   #plot_df$ct1 = factor(plot_df$ct1, levels = levels(plot_df$ct1)[hcl$order])
   #plot_df$ct2 = factor(plot_df$ct2, levels = levels(plot_df$ct2)[hcl$order])
-  plot_df$ct1 = factor(plot_df$ct1, levels = rev(c("Stellate cells", "LSEC", "Endothelial cells\n(non-LSEC)",
-                                                   "Kupffer cells", "cDCs", "Macrophages", "Cholangiocytes",
-                                                   "pDCs", "ab-T cells", "Hepatocytes", "gd-T cells", 
-                                                   "B cells", "Plasmablasts")))
-  plot_df$ct2 = factor(plot_df$ct2, levels = rev(c("Stellate cells", "LSEC", "Endothelial cells\n(non-LSEC)",
-                                                   "Kupffer cells", "cDCs", "Macrophages", "Cholangiocytes",
-                                                   "pDCs", "ab-T cells", "Hepatocytes", "gd-T cells", 
-                                                   "B cells", "Plasmablasts")))
-  pltcnts = ggplot(plot_df, aes(x = ct1, y = ct2, size = abs(Freq), colour = Freq))+
+  plot_df$ct1 = factor(plot_df$ct1, levels = levels(net_names_all$Var1))
+  plot_df$ct2 = factor(plot_df$ct2, levels = levels(net_names_all$Var1))
+  #plot_df$ct1 = factor(plot_df$ct1, levels = rev(c("Stellate cells", "LSEC", "Endothelial cells\n(non-LSEC)",
+  #                                                 "Kupffer cells", "cDCs", "Macrophages", "Cholangiocytes",
+  #                                                 "pDCs", "ab-T cells", "Hepatocytes", "gd-T cells", 
+  #                                                 "B cells", "Plasmablasts")))
+  #plot_df$ct2 = factor(plot_df$ct2, levels = rev(c("Stellate cells", "LSEC", "Endothelial cells\n(non-LSEC)",
+  #                                                 "Kupffer cells", "cDCs", "Macrophages", "Cholangiocytes",
+  #                                                 "pDCs", "ab-T cells", "Hepatocytes", "gd-T cells", 
+  #                                                 "B cells", "Plasmablasts")))
+  pltcnts = ggplot(plot_df[order(plot_df$Freq, decreasing = F),], 
+                   aes(x = ct1, y = ct2, size = abs(Freq), colour = Freq))+
     geom_point()+
     labs(x = "cell type", y = "cell type", title = paste0(n, " - healthy"))+
     guides(colour = guide_legend(title = "change in\n# interactions", 
                                  reverse = T, override.aes = list(size = 4)), 
            size = guide_none())+
     scale_colour_gradientn(colors = c("#d7191c", "#fdae61", "#ededed", "#c2a5cf", "#7b3294"), 
-                           limits = c(-100, 100))+
+                           limits = c(-110, 110))+
+    scale_size_continuous(range = c(0.2, 5))+
     theme_classic()+
     theme(aspect.ratio = 1,
           panel.background = element_rect(colour = "black"),
@@ -2786,10 +2933,503 @@ diff_cnt_l$legend = cowplot::get_legend(diff_cnt_l$embolised)
 diff_cnt_l$embolised = diff_cnt_l$embolised+theme(legend.position = "none")
 diff_cnt_l$regenerating = diff_cnt_l$regenerating+theme(legend.position = "none")
 
-pdf("figure_panels/fig4/suppFig_countsDiff.pdf", height = 4.5, width = 9)
+pdf("figure_panels_rev1/fig_comm/suppFig_countsDiff.pdf", height = 8, width = 15)
 print(cowplot::plot_grid(plotlist = diff_cnt_l[c(2,1,3)], ncol = 3, rel_widths = c(1,1,0.3), align = "h"))
 dev.off()
 ```
+
+Heatmaps by mid cell type
+
+```{r}
+match_df = unique(data.frame("ct" = c(point_cond_umap_df$ct, 
+                                      "Midzonal LSEC", "Pericentral LSEC", 
+                                      "IgG+ Plasma cells", "TRM cells", "CD8 ab-T cells 3",
+                                      "Hepatocytes_Z1","Hepatocytes_Z2","Hepatocytes_Z3"),
+                             "ct_mid" = c(point_cond_umap_df$ct_mid,
+                                          "LSEC", "LSEC","B cells", "T cells", "T cells",
+                                          "Hepatocytes","Hepatocytes","Hepatocytes")))
+rownames(match_df) = match_df$ct
+
+# heatmaps by mid cell type?
+cnts_list = list()
+tab_list = list()
+for(n in names(inter_df)[1:3]){
+  subdfct = unique(inter_df[[n]][,1:3])
+  subdfct$ct1[grepl("Hepat", subdfct$ct1)] = "Hepatocytes"
+  subdfct$ct2[grepl("Hepat", subdfct$ct2)] = "Hepatocytes"
+  subdfct$mid_ct1 = match_df[subdfct$ct1, "ct_mid"]
+  subdfct$mid_ct2 = match_df[subdfct$ct2, "ct_mid"]
+
+  subdfct = unique(subdfct[,c(1,4:5)])
+  dfct = table(data.frame("ct1" = c(subdfct$mid_ct1, subdfct$mid_ct2),
+                          "ct2" = c(subdfct$mid_ct2, subdfct$mid_ct1)))
+  hcl = hclust(dist(dfct), method = "ward.D2")
+  plot_df = data.frame(dfct)
+  plot_df$ct1 = factor(plot_df$ct1, levels = hcl$labels[hcl$order])
+  plot_df$ct2 = factor(plot_df$ct2, levels = hcl$labels[hcl$order])
+  
+  pltcnts = ggplot(plot_df[order(plot_df$Freq, decreasing = F),], 
+                   aes(x = ct1, y = ct2, size = Freq, colour = Freq))+
+    geom_point()+
+    labs(x = "cell type", y = "cell type", title = n)+
+    guides(colour = guide_legend(title = "# interactions", reverse = T), 
+           size = guide_legend(title = "# interactions", reverse = T))+
+    scale_colour_gradientn(colors = c("#ededed", "#deebf7", "#9ecae1", "#bcbddc", "#756bb1"), 
+                           limits = c(0, 320))+
+    scale_size_continuous(limits = c(0, 320))+
+    theme_classic()+
+    theme(aspect.ratio = 1,
+          panel.background = element_rect(colour = "black"),
+          axis.line = element_blank(),
+          axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+          axis.text = element_text(colour = "black"))
+  cnts_list[[n]] = pltcnts
+  tab_list[[n]] = dfct
+}
+cnts_list$legend = cowplot::get_legend(cnts_list$healthy)
+cnts_list$healthy = cnts_list$healthy+theme(legend.position = "none")
+cnts_list$embolised = cnts_list$embolised+theme(legend.position = "none")
+cnts_list$regenerating = cnts_list$regenerating+theme(legend.position = "none")
+
+pdf("figure_panels_rev1/fig_comm/suppFig_countsCond_mid.pdf", height = 6.9, width = 6.9)
+cnts_list[[1]]+cnts_list[[3]]+cnts_list[[2]]+cnts_list[[4]]+      patchwork::plot_layout(ncol = 2)
+dev.off()
+```
+
+```{r}
+diff_cnt_l = list()
+for(n in c("embolised", "regenerating")){
+  dif_df = tab_list[[n]]-tab_list$healthy
+  hcl = hclust(dist(dif_df), method = "ward.D2")
+  plot_df = data.frame(dif_df)
+  plot_df$ct1 = factor(plot_df$ct1, levels = levels(plot_df$ct1)[hcl$order])
+  plot_df$ct2 = factor(plot_df$ct2, levels = levels(plot_df$ct2)[hcl$order])
+
+  pltcnts = ggplot(plot_df[order(plot_df$Freq, decreasing = F),], 
+                   aes(x = ct1, y = ct2, size = abs(Freq), colour = Freq))+
+    geom_point()+
+    labs(x = "cell type", y = "cell type", title = paste0(n, " - healthy"))+
+    guides(colour = guide_legend(title = "change in\n# interactions", 
+                                 reverse = T, override.aes = list(size = 4)), 
+           size = guide_none())+
+    scale_colour_gradientn(colors = c("#d7191c", "#fdae61", "#ededed", "#c2a5cf", "#7b3294"), 
+                           limits = c(-150, 150))+
+    scale_size_continuous(range = c(0.2, 5))+
+    theme_classic()+
+    theme(aspect.ratio = 1,
+          panel.background = element_rect(colour = "black"),
+          axis.line = element_blank(),
+          axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4),
+          axis.text = element_text(colour = "black", size = 8))
+  print(pltcnts)
+  diff_cnt_l[[n]] = pltcnts
+}
+diff_cnt_l$legend = cowplot::get_legend(diff_cnt_l$embolised)
+diff_cnt_l$embolised = diff_cnt_l$embolised+theme(legend.position = "none")
+diff_cnt_l$regenerating = diff_cnt_l$regenerating+theme(legend.position = "none")
+
+pdf("figure_panels_rev1/fig_comm/suppFig_countsDiff_mid.pdf", height = 3.45, width = 6.9)
+print(cowplot::plot_grid(plotlist = diff_cnt_l[c(2,1,3)], 
+                         ncol = 3, rel_widths = c(1,1,0.3), align = "hv"))
+dev.off()
+```
+
+Unique interactions from E and R
+
+```{r}
+# number of new unique interactions
+## i.e. this ligand-receptor pair was absent at least in healthy and always includes this ct
+# get interactions that are not in healthy
+inter_h = inter_df$healthy$id_cp_interaction
+inter_reg_sub = inter_df$regenerating[!inter_df$regenerating$id_cp_interaction %in% inter_h,
+                                      1:3]
+inter_emb_sub = inter_df$embolised[!inter_df$embolised$id_cp_interaction %in% inter_h, 1:3]
+
+pve_inter = rbind(inter_reg_sub, inter_emb_sub)
+pve_inter$cond = c(rep("regenerating", nrow(inter_reg_sub)),
+                   rep("embolised", nrow(inter_emb_sub)))
+pve_inter$mid_ct1 = match_df[pve_inter$ct1,"ct_mid"]
+pve_inter$mid_ct2 = match_df[pve_inter$ct2,"ct_mid"]
+
+# list unique interactions (all ct)
+ct_inter_l = list()
+for(cond in unique(pve_inter$cond)){
+  ct_inter_l[[cond]] = list()
+  sub_pve_inter = pve_inter[pve_inter$cond==cond,]
+  sub_pve_inter = sub_pve_inter[sub_pve_inter$ct1!=sub_pve_inter$ct2,]
+  
+  inter_u = unique(sub_pve_inter$id_cp_interaction)
+  for(i in inter_u){
+    idf = sub_pve_inter[sub_pve_inter$id_cp_interaction==i, c("ct1", "ct2")]
+    tab_int_nu = table(idf$ct1, idf$ct2)
+    
+    if(nrow(tab_int_nu)==1){
+      ct_inter_l[[cond]][[i]] = rownames(tab_int_nu)
+    }
+    if(ncol(tab_int_nu)==1){
+      ct_inter_l[[cond]][[i]] = colnames(tab_int_nu)
+    }
+  }
+  
+}
+ct_inter_l = reshape2::melt(ct_inter_l)
+table(ct_inter_l$value, ct_inter_l$L1)
+
+# list unique interactions (mid ct)
+ctmid_inter_l = list()
+ctmid_inter_l_ct = list()
+for(cond in unique(pve_inter$cond)){
+  ctmid_inter_l[[cond]] = list()
+  ctmid_inter_l_ct[[cond]] = list()
+  sub_pve_inter = pve_inter[pve_inter$cond==cond,]
+  sub_pve_inter = sub_pve_inter[sub_pve_inter$mid_ct1!=sub_pve_inter$mid_ct2,]
+  
+  inter_u = unique(sub_pve_inter$id_cp_interaction)
+  for(i in inter_u){
+    idf = sub_pve_inter[sub_pve_inter$id_cp_interaction==i, c("mid_ct1", "mid_ct2")]
+    tab_int_nu = table(idf$mid_ct1, idf$mid_ct2)
+    mid_ct1_ct = sub_pve_inter[sub_pve_inter$id_cp_interaction==i, "ct1"]
+    mid_ct2_ct = sub_pve_inter[sub_pve_inter$id_cp_interaction==i, "ct2"]
+    
+    if(nrow(tab_int_nu)==1){
+      ctmid_inter_l[[cond]][[i]] = rownames(tab_int_nu)
+      ctmid_inter_l_ct[[cond]][[i]] = mid_ct1_ct
+    }
+    if(ncol(tab_int_nu)==1){
+      ctmid_inter_l[[cond]][[i]] = colnames(tab_int_nu)
+      ctmid_inter_l_ct[[cond]][[i]] = mid_ct2_ct
+    }
+  }
+  
+}
+ctmid_inter_l = reshape2::melt(ctmid_inter_l)
+ctmid_inter_l_ct = unique(reshape2::melt(ctmid_inter_l_ct))
+ctmid_inter_l = merge(ctmid_inter_l, ctmid_inter_l_ct, by = c("L2", "L1"), 
+                      all = T)[,c(3,1,2,4)]
+table(ctmid_inter_l$value.x, ctmid_inter_l$L1)
+```
+
+Functions to plot interactions
+
+```{r}
+filtFuncU = function(x, intdf, mutthr = 0, expthr = 0.12, minct = 3){
+  coldf = x[,1:8]
+  #int_ct_p_t = paste0(intdf$value, intdf$L2)
+  coldf$isMain1 = apply(coldf, 1, function(y) paste0(y[2], y[1]) %in% intdf)
+  coldf$isMain2 = apply(coldf, 1, function(y) paste0(y[3], y[1]) %in% intdf)
+  
+  # swap if isMain2
+  for(i in 1:nrow(coldf)){
+    if(coldf[i,"isMain2"]){
+      tmpct = coldf[i,"ct2"]
+      tmplr = coldf[i,"lr2"]
+      tmpma = coldf[i,"isMain2"]
+      
+      coldf[i,"ct2"] = coldf[i,"ct1"]
+      coldf[i,"lr2"] = coldf[i,"lr1"]
+      coldf[i,"isMain2"] = coldf[i,"isMain1"]
+      
+      coldf[i,"ct1"] = tmpct
+      coldf[i,"lr1"] = tmplr
+      coldf[i,"isMain1"] = tmpma
+    }
+  }
+
+  # interaction names
+  coldf$intlr = paste0(coldf$lr1, " -\n ", coldf$lr2)
+  coldf = unique(coldf[,c(2,3,11,6:10)])
+  # interaction frequency
+  nint = table(coldf$intlr)
+  # expression and interaction filtering
+  coldf = coldf[apply(coldf[,4:6], 1, function(x) any(x>=expthr)) & 
+                  (coldf$intlr %in% names(nint)[nint>1] | 
+                     apply(coldf[,4:6], 1, function(x) any(x>=expthr*8))),]
+  # reshaping for plot
+  coldf = data.table::rbindlist(list(reshape2::melt(coldf[,c(3,1,4:7)]), 
+                                     reshape2::melt(coldf[,c(3,2,4:6, 8)])), use.names = F)
+  coldf$variable = unlist(lapply(strsplit(as.character(coldf$variable), "_"), 
+                                 function(x) x[1]))
+  coldf$variable = factor(coldf$variable, levels = c("healthy","regenerating", "embolised"))
+  coldf = coldf[order(coldf$value, decreasing = T),]
+  coldf = coldf[!duplicated(coldf[,1:4]),]
+  coldf$ct1 = gsub("Endothelial cells", "EC", coldf$ct1)
+  coldf$intlr = gsub("receptor", "rec", coldf$intlr)
+  coldf$intlr = gsub("complex", "comp", coldf$intlr)
+  nct = table(coldf$ct1)
+  coldf = coldf[coldf$ct1 %in% names(nct)[nct>=minct*3],]
+  nint = table(coldf$intlr)
+  coldf = coldf[coldf$intlr %in% names(nint)[nint>3],]
+  
+  # confirm that all interactions have at least one TRUE
+  ntrue = tapply(coldf$isMain1, coldf$intlr, sum)
+  coldf = coldf[coldf$intlr %in% names(ntrue)[ntrue>0]]
+  
+  # formatting
+  coldf = coldf[order(coldf$isMain1, coldf$intlr, -coldf$value, decreasing = T),]
+  coldf$ct1 = factor(coldf$ct1, levels = rev(unique(coldf$ct1)))
+  coldf$intlr = factor(coldf$intlr, levels = rev(unique(coldf$intlr)))
+  coldf = coldf[order(coldf$isMain1, decreasing = F),]
+  
+  return(coldf)
+}
+
+pltFuncU = function(x){
+  plt = ggplot(x, aes(y = ct1, x = variable, fill = value, colour = isMain1))+
+    facet_grid(intlr~., scales = "free_y", space = "free_y")+
+    geom_tile(size = 0.4)+
+    scale_x_discrete(expand = c(0,0))+
+    scale_fill_gradientn(colors = gradexpcol)+
+    scale_colour_manual(values = c("white", "black"))+
+    guides(fill = guide_colourbar(barheight = unit(0.4, "cm")),
+           colour = guide_none())+
+    labs(x = "Condition", y = "Cell type", fill = "mean exp")+
+    theme_classic()+
+    theme(axis.text.y = element_text(colour = "black", size = 7, 
+                                     angle = 0, hjust = 1, vjust = 0.5),
+          axis.text.x = element_text(colour = "black", size = 6.5, 
+                                     angle = 35, hjust=1, vjust=1),
+          axis.title = element_text(size = 7),
+          axis.line = element_blank(),
+          legend.position = "bottom",
+          legend.title = element_text(size = 7),
+          legend.box.margin = margin(0,0,0,0),
+          legend.text = element_text(size = 6),
+          strip.text.y = element_text(angle = 0, size = 7, margin = margin(0,0,3,0), 
+                                      hjust = 0.5, vjust = 0.5, face = "bold"),
+          strip.background = element_blank())
+  return(plt)
+}
+```
+
+Plot all
+
+```{r}
+plot_df = filtFuncU(her_allint_f[her_allint_f$id_cp_interaction %in% ct_inter_l$L2[!grepl("stress", ct_inter_l$value)],],
+                    intdf = paste0(ct_inter_l$value, ct_inter_l$L2), 
+                    expthr = 0.2, minct = 1)
+imm_plt = pltFuncU(plot_df)
+pdf("figure_panels_rev1/fig_comm/mainFig_InteractUnique.pdf", 
+    height = 20, width = 2.8)
+print(imm_plt)
+dev.off()
+
+plot_df = filtFuncU(her_allint_f[her_allint_f$id_cp_interaction %in% ctmid_inter_l$L2[!grepl("stress", ctmid_inter_l$value.y)],],
+                   intdf = paste0(ctmid_inter_l$value.y, ctmid_inter_l$L2), 
+                   expthr = 0.2, minct = 3)
+imm_plt = pltFuncU(plot_df)
+pdf("figure_panels_rev1/fig_comm/mainFig_InteractUnique_mid.pdf", 
+    height = 32, width = 2.8)
+print(imm_plt)
+dev.off()
+```
+
+Plot one by one
+
+```{r}
+plot_df = filtFuncU(her_allint_f[her_allint_f$id_cp_interaction %in% ct_inter_l$L2[!grepl("stress", ct_inter_l$value)],],
+                    intdf = paste0(ct_inter_l$value, ct_inter_l$L2), 
+                    expthr = 0.2, minct = 3)
+
+folder = "figure_panels_rev1/fig_comm/heatmaps_interact_indiv/"
+for(i in 1:length(unique(plot_df$intlr))){
+  iii = unique(plot_df$intlr)[i]
+  sub_plot_df = plot_df[plot_df$intlr==iii,]
+  sub_plot_df = sub_plot_df[order(sub_plot_df$isMain1, sub_plot_df$value, decreasing = T),]
+  sub_plot_df$ct1 = factor(sub_plot_df$ct1, levels = rev(unique(sub_plot_df$ct1)))
+  sub_plot_df = sub_plot_df[order(sub_plot_df$isMain1, decreasing = F),]
+  
+  pdf(paste0(folder, "mainFig_InteractUnique_", i, ".pdf"), height = 3, width = 4)
+  print(pltFuncU(sub_plot_df))
+  dev.off()
+}
+
+plot_df = filtFuncU(her_allint_f[her_allint_f$id_cp_interaction %in% ctmid_inter_l$L2[!grepl("stress", ctmid_inter_l$value.y)],],
+                   intdf = paste0(ctmid_inter_l$value.y, ctmid_inter_l$L2), 
+                   expthr = 0.2, minct = 3)
+
+folder = "figure_panels_rev1/fig_comm/heatmaps_interact_indiv/"
+for(i in 1:length(unique(plot_df$intlr))){
+  iii = unique(plot_df$intlr)[i]
+  sub_plot_df = plot_df[plot_df$intlr==iii,]
+  sub_plot_df = sub_plot_df[order(sub_plot_df$isMain1, sub_plot_df$value, decreasing = T),]
+  sub_plot_df$ct1 = factor(sub_plot_df$ct1, levels = rev(unique(sub_plot_df$ct1)))
+  sub_plot_df = sub_plot_df[order(sub_plot_df$isMain1, decreasing = F),]
+  
+  pdf(paste0(folder, "mainFig_InteractUnique_mid_", i, ".pdf"), height = 3, width = 2.8)
+  print(pltFuncU(sub_plot_df))
+  dev.off()
+}
+```
+
+Plot one by one, all in H vs PVE network
+
+```{r}
+edge_min = edge_cond_df[,c(1:4,9:12)]
+edge_min = merge(edge_min, unique(her_allint_f[,c(1,13)]), by.x = 3, by.y = 1, all.x = T)
+edge_min = merge(edge_min, unique(her_allint_f[,c(1,17)]), by.x = 1, by.y = 1, all.x = T)
+edge_min = edge_min[edge_min$ct_g1!=edge_min$ct_g2,]
+edge_min = edge_min[edge_min$id_cp_interaction %in% comph_inters,]
+
+plot_df = filtFunc(her_allint_f[her_allint_f$id_cp_interaction %in% unique(edge_min$id_cp_interaction),],
+                   expthr = 0.15, minct = 2)
+#imm_plt = pltFunc(plot_df)
+#pdf("figure_panels_rev1/fig_comm/test.pdf", width = 50, height = 3)
+#print(imm_plt)
+#dev.off()
+
+folder = "figure_panels_rev1/fig_comm/heatmaps_interact_indiv_hpve/"
+for(i in 1:length(unique(plot_df$intlr))){
+  iii = unique(plot_df$intlr)[i]
+  sub_plot_df = plot_df[plot_df$intlr==iii,]
+  sub_plot_df = sub_plot_df[order(sub_plot_df$value, decreasing = T),]
+  sub_plot_df$ct1 = factor(sub_plot_df$ct1, levels = rev(unique(sub_plot_df$ct1)))
+
+  pdf(paste0(folder, "mainFig_InteractHPVE_", i, ".pdf"), height = 3, width = 4)
+  print(pltFunc(sub_plot_df))
+  dev.off()
+}
+```
+
+Plot changes in number of interactions per condition - mid resolution
+
+```{r}
+match_df = unique(data.frame("ct" = c(point_cond_umap_df$ct, 
+                                      "Midzonal LSEC", "Pericentral LSEC", 
+                                      "IgG+ Plasma cells", "TRM cells", "CD8 ab-T cells 3",
+                                      "Hepatocytes_Z1","Hepatocytes_Z2","Hepatocytes_Z3"),
+                             "ct_mid" = c(point_cond_umap_df$ct_mid,
+                                          "LSEC", "LSEC","B cells", "T cells", "T cells",
+                                          "Hepatocytes","Hepatocytes","Hepatocytes")))
+rownames(match_df) = match_df$ct
+
+# correct some names
+reform_list_int = list()
+for(n in names(reform_list)[1:3]){
+  reform_list[[n]]$ct1[grepl("Hepa", reform_list[[n]]$ct1)] = "Hepatocytes"
+  reform_list[[n]]$ct2[grepl("Hepa", reform_list[[n]]$ct2)] = "Hepatocytes"
+  reform_list[[n]]$ct1[grepl("LSEC_", reform_list[[n]]$ct1)] = "LSEC"
+  reform_list[[n]]$ct2[grepl("LSEC_", reform_list[[n]]$ct2)] = "LSEC"
+  reform_list_int[[n]] = reform_list[[n]][reform_list[[n]]$ct1!="Dividing cells" &
+                                            reform_list[[n]]$ct2!="Dividing cells",]
+  reform_list_int[[n]] = reform_list_int[[n]][!duplicated(reform_list_int[[n]][,1:3]),1:3]
+  
+  reform_list_int[[n]]$mid_ct1 = match_df[reform_list_int[[n]]$ct1,"ct_mid"]
+  reform_list_int[[n]]$mid_ct2 = match_df[reform_list_int[[n]]$ct2,"ct_mid"]
+  
+  reform_list_int[[n]] = unique(reform_list_int[[n]][,c(1,4:5)])
+  colnames(reform_list_int[[n]])[2:3] = c("ct1", "ct2")
+}
+
+# count interactions
+infer_df = data.frame(expand.grid(unique(reform_list_int$healthy$ct1), 
+                                  unique(reform_list_int$healthy$ct1)))
+nr = nrow(infer_df)
+infer_df = rbind(infer_df, infer_df, infer_df)
+infer_df$count = 0
+infer_df$cond = rep(names(reform_list)[1:3], each = nr)
+colnames(infer_df)[1:2] = c("SOURCE", "TARGET")
+for(i in 1:nrow(infer_df)){
+  tmp = reform_list_int[[infer_df[i,4]]]
+  infer_df[i,3] = dim(tmp[(tmp$ct1==infer_df[i,1] & tmp$ct2==infer_df[i,2]) |
+                            (tmp$ct2==infer_df[i,1] & tmp$ct1==infer_df[i,2]),])[1]
+}
+## make one to count over all
+infer_all = data.frame(expand.grid(unique(reform_list_int$healthy$ct1), 
+                                   unique(reform_list_int$healthy$ct1)))
+infer_all$count = 0
+colnames(infer_all)[1:2] = c("SOURCE", "TARGET")
+reform_all_int = unique(Reduce(rbind, reform_list_int))
+for(i in 1:nrow(infer_all)){
+  infer_all[i,3] = infer_all[i,3]+dim(tmp[(reform_all_int$ct1==infer_all[i,1] & reform_all_int$ct2==infer_all[i,2]) |
+                                            (reform_all_int$ct2==infer_all[i,1] & reform_all_int$ct1==infer_all[i,2]),])[1]
+}
+
+infer_df_list = list(healthy = infer_df[infer_df$cond=="healthy",],
+                     embolised = infer_df[infer_df$cond=="embolised",],
+                     regenerating = infer_df[infer_df$cond=="regenerating",],
+                     all = infer_all)
+
+net_names_all = t(Reduce(rbind, lapply(infer_df_list[1:3], function(x) tapply(x$count, x$SOURCE, sum))))
+colnames(net_names_all) = names(net_names_l)[1:3]
+net_names_all = reshape2::melt(net_names_all)
+net_names_all$Var1 = factor(net_names_all$Var1, 
+                            levels = net_names_all[net_names_all$Var2=="healthy","Var1"][order(net_names_all[net_names_all$Var2=="healthy","value"], decreasing = F)])
+
+total_unique = data.frame(t(t(Reduce(rbind, lapply(infer_df_list[4], 
+                                                   function(x) tapply(x$count, x$SOURCE, sum))))))
+total_unique$Var1 = rownames(total_unique)
+colnames(total_unique)[1] = "value"
+total_unique$Var2 = "total unique"
+
+net_names_all$Var1 = factor(net_names_all$Var1, 
+                            levels = total_unique$Var1[order(total_unique$value, 
+                                                             decreasing = F)])
+plt_counts = ggplot(net_names_all, aes(x = Var1, y = value))+
+  geom_point(mapping = aes(colour = Var2), size = 1.6)+
+  geom_point(data = total_unique, mapping = aes(shape = Var2), size = 1.6)+
+  coord_flip()+
+  scale_colour_manual(values = colcond[1:3])+
+  scale_shape_manual(values = c(4))+
+  scale_y_continuous(expand = c(0,0), limits = c(0,3000))+
+  labs(y = "Total interactions", x = "Cell Type", colour = "Condition")+
+  guides(colour = guide_legend(order = 1), shape = guide_legend(order = 2, title = NULL))+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1),
+        axis.text = element_text(colour = "black"),
+        axis.title.x = element_text(size = 8),
+        legend.margin = margin(1, 1, 1, 1),
+        legend.spacing.x = unit(0.05, "cm"),
+        legend.direction = "horizontal",legend.box = "horizontal")
+leg = cowplot::get_legend(plt_counts)
+
+perc_df = data.frame("Var1" = net_names_all$Var1,
+                     "Var2" = net_names_all$Var2,
+                     "perc" = c(rep(0, length(unique(net_names_all$Var1))),
+                                (net_names_all$value[net_names_all$Var2=="embolised"]-net_names_all$value[net_names_all$Var2=="healthy"])/net_names_all$value[net_names_all$Var2=="healthy"],
+                                (net_names_all$value[net_names_all$Var2=="regenerating"]-net_names_all$value[net_names_all$Var2=="healthy"])/net_names_all$value[net_names_all$Var2=="healthy"])*100)
+perc_df$col = ifelse(perc_df$perc>0, "green", "red")
+perc_df = perc_df[perc_df$Var2!="healthy",]
+
+perc_plt_emb = ggplot(perc_df[perc_df$Var2=="embolised",], aes(x = Var1, y = perc, fill = col))+
+  geom_col()+
+  scale_fill_manual(values = c("deepskyblue1", "red1"))+
+  scale_y_continuous(expand = c(0,0), limits = c(-20,55))+
+  coord_flip()+
+  labs(y = "% change\nembolised vs healthy", x = "Cell Type")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1, colour = "black"),
+        axis.text.y = element_blank(),
+        axis.title.x = element_text(size = 8),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "none")
+perc_plt_reg = ggplot(perc_df[perc_df$Var2=="regenerating",], aes(x = Var1, y = perc, fill = col))+
+  geom_col()+
+  scale_fill_manual(values = c("deepskyblue1", "red1"))+
+  scale_y_continuous(expand = c(0,0), limits = c(-20,55))+
+  coord_flip()+
+  labs(y = "% change\nregenerating vs healthy", x = "Cell Type")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 30, vjust = 1, hjust = 1, colour = "black"),
+        axis.text.y = element_blank(),
+        axis.title.x = element_text(size = 8),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "none")
+
+cowplot::plot_grid(cowplot::plot_grid(plt_counts+theme(legend.position = "none"), 
+                                      perc_plt_emb, perc_plt_reg, 
+                                      ncol = 3, align = "h", axis = "r", rel_widths = c(1,0.5,0.5)),
+                   leg, nrow = 2, rel_heights = c(1, 0.1))
+
+pdf("figure_panels_rev1/fig_comm/mainFig_countsCond_mid.pdf", height = 3.35, width = 5.5)
+cowplot::plot_grid(cowplot::plot_grid(plt_counts+theme(legend.position = "none"), 
+                                      perc_plt_reg, perc_plt_emb, 
+                                      ncol = 3, align = "h", axis = "r", rel_widths = c(1,0.4,0.4)),
+                   leg, nrow = 2, rel_heights = c(1, 0.1))
+dev.off()
+```
+
 
 
 
@@ -2921,7 +3561,7 @@ pval_pos = imm_props %>%
   group_by(Condition, Var1) %>%
   summarise_at(vars("Freq"), mean)
 pval_pos$posy = pval_pos$Freq*1.02
-pval_pos$posx = as.numeric(pval_pos$Condition)+0.2
+pval_pos$posx = as.numeric(pval_pos$Condition)+0.3
 pval_pos = pval_pos[pval_pos$Condition!="healthy",]
 pval_pos$pval = diag(as.matrix(imm_pvals[pval_pos$Var1,as.character(pval_pos$Condition)]))
 pval_pos$issig = ifelse(pval_pos$pval<=0.05, "*", "")
@@ -2930,26 +3570,31 @@ plt = ggplot()+
   facet_wrap(~Var1, scales = "free")+
   geom_jitter(data = imm_props, mapping = aes(x = Condition, y = Freq, 
                                               group = Condition, colour = Condition),
-              position = position_jitterdodge(jitter.width = 0.3, dodge.width = 1))+
+              position = position_jitterdodge(jitter.width = 0.3, dodge.width = 1), size = 0.5)+
   stat_summary(data = imm_props, mapping = aes(x = Condition, y = Freq, 
                                               group = Condition, colour = Condition),
                fun.data = mean_se, position = position_dodge(width = 1), 
-               alpha = 0.6, colour = "black")+
-  geom_text(data = pval_pos, mapping = aes(x = posx, y = posy, label = issig), size = 6)+
+               alpha = 0.6, colour = "black", size = 0.25)+
+  geom_text(data = pval_pos, mapping = aes(x = posx, y = posy, label = issig), size = 4)+
   scale_colour_manual(values = colcond, drop = T, limits = names(colcond)[c(1,2,4)])+
-  labs(y = "% (immune)")+
+  scale_x_discrete(labels = c("H", "R", "E"))+
+  labs(y = "proportion % (immune)")+
   theme_bw()+
   theme(legend.position = "none",
-        axis.title = element_text(size = 7.5, colour = "black"),
-        axis.text.x = element_text(size = 7, colour = "black"),
+        axis.title = element_text(size = 6, colour = "black"),
+        axis.text.x = element_text(size = 6, colour = "black"),
         axis.text.y = element_text(size = 6, colour = "black"),
-        strip.text = element_text(size = 7),
+        strip.text = element_text(size = 6),
         strip.background = element_rect(fill = "white"),
         panel.grid.minor = element_blank(),
         panel.grid.major.x = element_blank(),
         panel.grid.major.y = element_line(size = 0.3, colour = "grey70"))
 
-pdf("figure_panels_rev1/fig_cir/immune_all_prop.pdf", height = 7.5, width = 11.5)
+#pdf("figure_panels_rev1/fig_cir/immune_all_prop.pdf", height = 7.5, width = 11.5)
+print(plt)
+#dev.off()
+
+pdf("figure_panels_rev1/fig_cir/immune_all_prop_resized.pdf", height = 5.5, width = 7)
 print(plt)
 dev.off()
 ```
@@ -3009,8 +3654,13 @@ mp_sig_df = readRDS(file = "results/cirrhosis/mono_cirr_ct_signatures.RDS")
 
 plot_df = reshape2::melt(mp_sig_df)
 plot_df$Condition[plot_df$Condition=="embolised"] = "embolized"
-plt = ggplot(plot_df[plot_df$variable %in% c("cirr_ct_MPs_4","cirr_ct_MPs_5"),], 
-       aes(x = mono_annot, y = value, fill = Condition))+
+plot_df$Condition = factor(plot_df$Condition, 
+                           levels = c("healthy","regenerating","embolized"))
+sub_plot_df = plot_df[plot_df$variable %in% c("cirr_ct_MPs_4","cirr_ct_MPs_5"),]
+sub_plot_df$variable = gsub("cirr_ct_MPs_4", "SAMac (1)", sub_plot_df$variable)
+sub_plot_df$variable = gsub("cirr_ct_MPs_5", "SAMac (2)", sub_plot_df$variable)
+
+plt = ggplot(sub_plot_df, aes(x = mono_annot, y = value, fill = Condition))+
   facet_grid(variable~mono_annot, scales = "free")+
   geom_hline(yintercept = 0, linetype = "dashed", size = 0.3)+
   geom_violin(scale = "count")+
@@ -3042,8 +3692,16 @@ end_sig_df = readRDS(file = "results/cirrhosis/endo_cirr_ct_signatures.RDS")
 
 plot_df = reshape2::melt(end_sig_df)
 plot_df$Condition[plot_df$Condition=="embolised"] = "embolized"
-plt = ggplot(plot_df[plot_df$variable %in% c("cirr_ct_Endothelia_6","cirr_ct_Endothelia_7"),], 
-       aes(x = endo_simp, y = value, fill = Condition))+
+plot_df$Condition[plot_df$Condition=="embolised"] = "embolized"
+plot_df$Condition = factor(plot_df$Condition, 
+                           levels = c("healthy","regenerating","embolized"))
+sub_plot_df = plot_df[plot_df$variable %in% c("cirr_ct_Endothelia_6","cirr_ct_Endothelia_7"),]
+sub_plot_df$variable = gsub("cirr_ct_Endothelia_6", 
+                            "SAEndothelial (1)", sub_plot_df$variable)
+sub_plot_df$variable = gsub("cirr_ct_Endothelia_7", "SAEndothelial (2)",
+                            sub_plot_df$variable)
+
+plt = ggplot(sub_plot_df, aes(x = endo_simp, y = value, fill = Condition))+
   facet_grid(variable~endo_simp, scales = "free")+
   geom_hline(yintercept = 0, linetype = "dashed", size = 0.3)+
   geom_violin(scale = "count")+
@@ -3079,6 +3737,7 @@ plt = ggplot(scores_df, aes(x = cirr_fetal_3, y = cirr_fetal_6, colour = Conditi
   facet_wrap(~subpops)+
   geom_density_2d(size = 0.3)+
   scale_colour_manual(values = colcond, drop = T, limits = names(colcond)[c(1,2,4)])+
+  labs(x = "Adult hepatocyte signature", y = "Fetal hepatocyte signature")+
   theme_classic()+
   theme(aspect.ratio = 1,
         axis.text = element_text(colour = "black", size = 6),

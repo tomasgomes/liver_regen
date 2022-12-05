@@ -847,5 +847,199 @@ saveRDS(pvals_df, file = "results/cirrhosis/end_props_pval.RDS")
 
 
 
+# Examine specific genes
+Load endothelial data
+
+```{r}
+only_end_cells = readRDS("results/endothelial/only_end_cells_zon.RDS")
+```
+
+Genes
+
+```{r}
+genes_endo_l = list("Ding2010_PH" = c("KDR", "VEGFA", "FLT4", "ID1", "AKT1", "HGF", "WNT2"), 
+                    "Hu2014_PH" = c("ANGPT2", "TGFB1", "TEK", "CD74", "PLXDC1", "ISG15", 
+                                    "CLEC2D", "TIAM1", "CXCL9"),
+                    "Rafi2016_PH" = c("FLT1", "HBEGF", "CCN2"), 
+                    "Gomez-Salinero2018_PH" = c("RSPO3", "WNT9B"),
+                    "Rafi2016_PH_other" = c("ANG", "BDNF", "BMP2", "BMP4", "BTC", "DKK1", 
+                                            "DKK3", "DHH", "EGFL7", "EFNB2", "FGF2", "GDF11", 
+                                            "GDNF", "JAG1", "IL1B", "IL6", "KL", "MMP14", "NRG1", 
+                                            "NOS1", "NTF3", "SERPINF1", "PTGES2", "PGF", 
+                                            "CXCL12", "THBS1", "TNF", "WLS"),
+                    "Ding2014_Fib" = c("CXCR4", "CXCR7", "FGFR1", "PDGFC", "FST", "APLN"))
+genes_endo = reshape2::melt(genes_endo_l)
+```
+
+
+
+```{r}
+avg_endo = AverageExpression(only_end_cells, assays = "SCT", group.by = "endo_simp")$SCT
+```
+
+
+
+```{r}
+avg_endo_meta = merge(genes_endo, reshape2::melt(t(scale(t(avg_endo)))), by = 1)
+
+# clustering
+hc_rows = hclust(dist(t(scale(t(avg_endo[unique(avg_endo_meta$value),])))), method = "ward.D")
+hc_cols = hclust(dist(scale(t(avg_endo[unique(avg_endo_meta$value),]))), method = "ward.D")
+
+avg_endo_meta$value = factor(avg_endo_meta$value, levels = hc_rows$labels[hc_rows$order])
+avg_endo_meta$Var2 = factor(avg_endo_meta$Var2, levels = hc_cols$labels[hc_cols$order])
+```
+
+
+
+```{r}
+ggplot(avg_endo_meta, aes(x = Var2, y = value, fill = value.y))+
+  facet_grid(L1~., scales = "free", space = "free")+
+  geom_tile()+
+  scale_x_discrete(expand = c(0,0))+
+  scale_fill_viridis_c(option = "A")+
+  theme_classic()+
+  theme(strip.text.y = element_text(angle = 0, size = 7),
+        axis.text = element_text(size = 6.5, colour = "black"), 
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+
+
+```{r}
+only_end_cells$endo_simp_cond = paste0(only_end_cells$endo_simp, "..", only_end_cells$Condition)
+avg_endo_cond = AverageExpression(only_end_cells, assays = "SCT", group.by = "endo_simp_cond")$SCT
+```
+
+
+
+```{r}
+avg_endoc_meta = merge(genes_endo, reshape2::melt(t(scale(t(avg_endo_cond)))), by = 1)
+
+# clustering
+hc_rows = hclust(dist(t(scale(t(avg_endo_cond[unique(avg_endoc_meta$value),])))), method = "ward.D")
+hc_cols = hclust(dist(scale(t(avg_endo_cond[unique(avg_endoc_meta$value),]))), method = "ward.D")
+
+avg_endoc_meta$value = factor(avg_endoc_meta$value, levels = hc_rows$labels[hc_rows$order])
+avg_endoc_meta$Var2 = factor(avg_endoc_meta$Var2, levels = hc_cols$labels[hc_cols$order])
+
+# split cell type and condition
+avg_endoc_meta$endo_simp = unlist(lapply(strsplit(as.character(avg_endoc_meta$Var2), "..", fixed = T),
+                                        function(x) x[1]))
+avg_endoc_meta$endo_simp = factor(avg_endoc_meta$endo_simp, levels = unique(avg_endoc_meta$endo_simp))
+avg_endoc_meta$cond = unlist(lapply(strsplit(as.character(avg_endoc_meta$Var2), "..", fixed = T),
+                                   function(x) x[2]))
+avg_endoc_meta$cond = factor(avg_endoc_meta$cond, levels = c("healthy", "regenerating", "embolised"))
+```
+
+
+
+```{r}
+ggplot(avg_endoc_meta, aes(x = endo_simp, y = value, fill = value.y))+
+  facet_grid(L1~cond, scales = "free", space = "free")+
+  geom_tile()+
+  scale_x_discrete(expand = c(0,0))+
+  scale_fill_viridis_c(option = "A")+
+  theme_classic()+
+  theme(strip.text.y = element_text(angle = 0, size = 7),
+        axis.text = element_text(size = 6.5, colour = "black"), 
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+
+
+```{r}
+inter_df = readRDS(file = "results/cell_comm/updt/cond_diff_interact_DE.RDS")[1:3]
+inter_df = reshape2::melt(lapply(inter_df, function(x) x[,c(1:8)]), 
+                          id.vars = colnames(inter_df$healthy[,c(1:8)]))
+inter_df$ct_pair = paste0(inter_df$ct1, "..", inter_df$ct2)
+inter_df$lr_pair = paste0(inter_df$lr1, "..", inter_df$lr2)
+
+inter_df_endo = inter_df[inter_df$ct1 %in% unique(only_end_cells$endo_simp) |
+                           inter_df$ct2 %in% unique(only_end_cells$endo_simp),]
+```
+
+
+
+```{r}
+inter_df_str = unique(inter_df_endo[inter_df_endo$gn1 %in% genes_endo$value & 
+                          inter_df_endo$gn2 %in% genes_endo$value,
+                          c("ct_pair", "lr_pair", "value", "L1")])
+```
+
+
+
+```{r}
+ggplot(inter_df_str, aes(x = L1, y = ct_pair, fill = value))+
+  facet_grid(lr_pair~., scales = "free", space = "free")+
+  geom_tile()+
+  scale_x_discrete(expand = c(0,0))+
+  scale_fill_viridis_c(option = "A")+
+  theme_classic()+
+  theme(strip.text.y = element_text(angle = 0, size = 7),
+        axis.text = element_text(size = 6.5, colour = "black"), 
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+
+
+```{r}
+inter_df_sub = inter_df_str %>% group_by(lr_pair) %>% top_n(value, n=1)
+inter_df_sub = inter_df_str[inter_df_str$ct_pair %in% inter_df_sub$ct_pair & 
+                              inter_df_str$lr_pair %in% inter_df_sub$lr_pair,]
+ggplot(inter_df_sub, aes(x = L1, y = ct_pair, fill = value))+
+  facet_grid(lr_pair~., scales = "free", space = "free")+
+  geom_tile()+
+  scale_x_discrete(expand = c(0,0))+
+  scale_fill_viridis_c(option = "A", na.value = 0)+
+  theme_classic()+
+  theme(strip.text.y = element_text(angle = 0, size = 7),
+        axis.text = element_text(size = 6.5, colour = "black"), 
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
+```
+
+
+
+```{r}
+inter_df_endo2 = inter_df[grepl("LSEC ", inter_df$ct1) | grepl(" LSEC", inter_df$ct1),]
+inter_df_sub = unique(inter_df_endo2[inter_df_endo2$gn1 %in% genes_endo$value | 
+                                       inter_df_endo2$gn2 %in% genes_endo$value,
+                                     c("ct1", "ct2", "ct_pair", "lr_pair", "value", "L1")])
+inter_df_endo_u = unique(inter_df_endo2[,c("ct1", "ct2", "ct_pair", "lr_pair", "value", "L1")])
+
+n_angio = table(inter_df_sub$ct1, inter_df_sub$ct2)
+f_angio = n_angio
+for(n in colnames(f_angio)){
+  f_angio[,n] = f_angio[,n]/log10(table(inter_df_endo_u$ct2)[n])
+}
+
+pheatmap::pheatmap(f_angio[order(rowSums(f_angio), decreasing = T),order(colSums(f_angio), decreasing = T)], clustering_method = "ward.D2", cluster_cols = F, cluster_rows = F)
+```
+
+
+
+```{r}
+plot_df = reshape2::melt(f_angio[order(rowSums(f_angio), decreasing = F),
+                                 order(colSums(f_angio), decreasing = T)])
+plot_df$isLSEC = c("other", "LSEC")[(grepl("LSEC ", plot_df$Var2) | grepl(" LSEC", plot_df$Var2))+1]
+
+ggplot(plot_df, aes(x = Var2, y = Var1, fill = value))+
+  facet_grid(~isLSEC, scale = "free_x", space = "free_x")+
+  geom_tile()+
+  scale_fill_viridis_c(option = "C")+
+  scale_x_discrete(expand = c(0,0))+
+  scale_y_discrete(expand = c(0,0))+
+  labs(fill = "# interactions\n(norm.)", x = "Receiving cell type",
+       y = "Sending cell type")+
+  theme_classic()+
+  theme(axis.text = element_text(colour = "black", size = 6),
+        axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1),
+        legend.text = element_text(size = 6),
+        legend.title = element_text(size = 6.5),
+        axis.title = element_text(size = 6.5),
+        strip.text = element_text(size = 6.5))
+```
+
+
 
 

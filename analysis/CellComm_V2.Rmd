@@ -1190,7 +1190,7 @@ makeMedianCond = function(point_df, edge_df, cl = c("ct", "ct_g1", "ct_g2"), edg
 }
 ```
 
-Plot ligands and receptors with MDS
+Prepare data
 
 ```{r, fig.width=16, fig.height=4.6}
 inter_df = readRDS(file = "results/cell_comm/updt/cond_diff_interact_DE.RDS")
@@ -1235,7 +1235,7 @@ mean_exp_cond_lr = apply(sub_allcells_css@assays$SCT@data[all_lr_genes,], 1,
 max_cond_ct = rownames(mean_exp_cond_lr)[apply(mean_exp_cond_lr, 2, which.max)]
 names(max_cond_ct) = colnames(mean_exp_cond_lr)
 max_cond_ct_ct = unlist(lapply(strsplit(max_cond_ct, "_"), function(x) x[1]))
-max_cond_ct_cond = unlist(lapply(strsplit(max_cond_ct, "_"), function(x) x[2]))
+max_cond_ct_cond = unlist(lapply(strsplit(max_cond_ct, "_"), function(x) x[length(x)]))
 
 # correlation of mean expression
 cor_cond_lr = cor(mean_exp_cond_lr, method = "sp")
@@ -1243,7 +1243,11 @@ cor_cond_lr = cor(mean_exp_cond_lr, method = "sp")
 # filter correlation with itself, keep only genes with cor>=0.3
 diag(cor_cond_lr) = 0
 adj_cond_mat = cor_cond_lr>=0.3
+```
 
+Plot ligands and receptors with MDS
+
+```{r}
 # build graph, project with MDS
 network_cond = graph_from_adjacency_matrix(adj_cond_mat, weighted=T, mode="undirected", diag=F)
 l_cond = igraph::layout_with_mds(network_cond)
@@ -1422,12 +1426,96 @@ cowplot::plot_grid(plt_cond_l_ch[[1]]+theme(legend.position = "none"),
                    ncol = 2, rel_widths = c(1,1,1,0.5))
 ```
 
+MDS with simplified labels
+
+```{r}
+# add labels to points
+point_cond_df$ct_mid = point_cond_df$ct
+point_cond_df$ct_mid[grepl("NK", point_cond_df$ct)] = "ILC"
+point_cond_df$ct_mid[grepl("ILC", point_cond_df$ct)] = "ILC"
+point_cond_df$ct_mid[grepl("T cells", point_cond_df$ct)] = "T cells"
+point_cond_df$ct_mid[grepl("MAIT", point_cond_df$ct)] = "T cells"
+point_cond_df$ct_mid[grepl("Treg", point_cond_df$ct)] = "T cells"
+point_cond_df$ct_mid[grepl("Stellate", point_cond_df$ct)] = "Mesenchymal"
+point_cond_df$ct_mid[grepl("LSEC", point_cond_df$ct)] = "LSEC"
+point_cond_df$ct_mid[grepl("non-LSEC", point_cond_df$ct, 
+                                fixed = T)] = "other ECs"
+point_cond_df$ct_mid[grepl("Lymphatic EC", point_cond_df$ct, 
+                                fixed = T)] = "other ECs"
+point_cond_df$ct_mid[grepl("Dividing endothelial cells", point_cond_df$ct, 
+                                fixed = T)] = "other ECs"
+point_cond_df$ct_mid[grepl("Monocytes", point_cond_df$ct)] = "other Mono-Mac"
+point_cond_df$ct_mid[grepl("Macrophages", point_cond_df$ct)] = "other Mono-Mac"
+point_cond_df$ct_mid[grepl("cDC", point_cond_df$ct)] = "other Mono-Mac"
+point_cond_df$ct_mid[grepl("activated DCs", point_cond_df$ct)] = "other Mono-Mac"
+point_cond_df$ct_mid[grepl("Kupffer", point_cond_df$ct)] = "Kupffer cells"
+point_cond_df$ct_mid[grepl("Plasma", point_cond_df$ct)] = "B cells"
+
+# add labels to edges
+match_df = unique(data.frame("ct" = point_cond_df$ct,
+                             "ct_mid" = point_cond_df$ct_mid))
+rownames(match_df) = match_df$ct
+
+edge_cond_df$mid_g1 = match_df[edge_cond_df$ct_g1,"ct_mid"]
+edge_cond_df$mid_g2 = match_df[edge_cond_df$ct_g2,"ct_mid"]
+
+pe_mid_l = makeMedian(point_cond_df, edge_cond_df, 
+                      cl = c("ct_mid", "mid_g1", "mid_g2"))
+
+# plot total gene correlation projection and median network
+pltboth = ggplot()+
+  geom_point(data = point_cond_df, mapping = aes(x = X1, y = X2, colour = ct2), 
+             alpha = 0.25, show.legend = F)+
+  scale_shape_manual(values = c(0,4,19))+
+  geom_segment(data = pe_mid_l[[2]], 
+               mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq), 
+               alpha = 0.15, show.legend = F)+
+  geom_point(data = pe_mid_l[[1]], 
+             mapping = aes(x = X1, y = X2, fill = ct_mid), 
+             alpha = 1, pch = 21, size = 4)+
+  scale_size_continuous(range = c(0, 4))+
+  theme_classic()+ theme(aspect.ratio = 1)
+print(pltboth)
+
+# get median per cell type, per condition - HEALTHY COMPARISON NETWORK
+pe_cond_l_mid = makeMedianCond(point_cond_df, 
+                                   edge_cond_df[edge_cond_df$id_cp_interaction%in%comph_inters,],
+                                   edge_by = "condition", 
+                               cl = c("ct_mid", "mid_g1", "mid_g2"))
+
+plt_cond_l_ch = list()
+for(cc in unique(pe_cond_l[[2]]$condition)){
+  plt_cond_l_ch[[cc]] = ggplot()+
+    geom_segment(data = pe_cond_l_mid[[2]][pe_cond_l_mid[[2]]$condition==cc,], 
+                 mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq, alpha = Freq))+
+    geom_point(data = pe_cond_l_mid[[1]], 
+               mapping = aes(x = X1, y = X2, fill = ct_mid), 
+               alpha = 1, pch = 21, size = 4)+
+    scale_size_continuous(range = c(0, 4), limits = range(pe_cond_l_mid[[2]]$Freq))+
+    scale_alpha_continuous(limits = range(pe_cond_l_mid[[2]]$Freq))+
+    labs(title = cc)+
+    guides(size = guide_legend(direction = "horizontal", nrow = 2),
+           alpha = guide_legend(direction = "horizontal", nrow = 2))+
+    theme_classic()
+}
+plt_cond_l_ch[["leg"]] = cowplot::get_legend(plt_cond_l_ch[["healthy"]])
+
+# plot HEALTHY COMPARISON NETWORK median per condition
+cowplot::plot_grid(plt_cond_l_ch[[1]]+theme(legend.position = "none"), 
+                   plt_cond_l_ch[[2]]+theme(legend.position = "none"),
+                   plt_cond_l_ch[[3]]+theme(legend.position = "none"), plt_cond_l_ch$leg, 
+                   ncol = 4, rel_widths = c(1,1,1,0.5))
+```
+
 Save network objects
 
 ```{r}
+saveRDS(comph_inters, file = "results/cell_comm/updt/comph_inters.RDS")
 save(edge_cond_df, point_cond_df, file = "results/cell_comm/updt/networks_cond.RData")
 save(pe_l, pe_cond_l, pe_cond_l_u, pe_cond_l_h, pe_cond_l_ch, 
      file = "results/cell_comm/updt/median_networks_cond.RData")
+save(pe_mid_l, pe_cond_l_mid, 
+     file = "results/cell_comm/updt/median_networks_cond_midct.RData")
 ```
 
 Plot ligands and receptors with UMAP
@@ -1527,12 +1615,95 @@ cowplot::plot_grid(plt_umap_cond_l_ch[[1]]+theme(legend.position = "none"),
                    ncol = 4, rel_widths = c(1,1,1,0.5))
 ```
 
+UMAPs with simplified labels
+
+```{r}
+# add labels to points
+point_cond_umap_df$ct_mid = point_cond_umap_df$ct
+point_cond_umap_df$ct_mid[grepl("NK", point_cond_umap_df$ct)] = "ILC"
+point_cond_umap_df$ct_mid[grepl("ILC", point_cond_umap_df$ct)] = "ILC"
+point_cond_umap_df$ct_mid[grepl("T cells", point_cond_umap_df$ct)] = "T cells"
+point_cond_umap_df$ct_mid[grepl("MAIT", point_cond_umap_df$ct)] = "T cells"
+point_cond_umap_df$ct_mid[grepl("Treg", point_cond_umap_df$ct)] = "T cells"
+point_cond_umap_df$ct_mid[grepl("Stellate", point_cond_umap_df$ct)] = "Mesenchymal"
+point_cond_umap_df$ct_mid[grepl("LSEC", point_cond_umap_df$ct)] = "LSEC"
+point_cond_umap_df$ct_mid[grepl("non-LSEC", point_cond_umap_df$ct, 
+                                fixed = T)] = "other ECs"
+point_cond_umap_df$ct_mid[grepl("Lymphatic EC", point_cond_umap_df$ct, 
+                                fixed = T)] = "other ECs"
+point_cond_umap_df$ct_mid[grepl("Dividing endothelial cells", point_cond_umap_df$ct, 
+                                fixed = T)] = "other ECs"
+point_cond_umap_df$ct_mid[grepl("Monocytes", point_cond_umap_df$ct)] = "other Mono-Mac"
+point_cond_umap_df$ct_mid[grepl("Macrophages", point_cond_umap_df$ct)] = "other Mono-Mac"
+point_cond_umap_df$ct_mid[grepl("cDC", point_cond_umap_df$ct)] = "other Mono-Mac"
+point_cond_umap_df$ct_mid[grepl("activated DCs", point_cond_umap_df$ct)] = "other Mono-Mac"
+point_cond_umap_df$ct_mid[grepl("Kupffer", point_cond_umap_df$ct)] = "Kupffer cells"
+point_cond_umap_df$ct_mid[grepl("Plasma", point_cond_umap_df$ct)] = "B cells"
+
+# add labels to edges
+match_df = unique(data.frame("ct" = point_cond_umap_df$ct,
+                             "ct_mid" = point_cond_umap_df$ct_mid))
+rownames(match_df) = match_df$ct
+
+edge_cond_umap_df$mid_g1 = match_df[edge_cond_umap_df$ct_g1,"ct_mid"]
+edge_cond_umap_df$mid_g2 = match_df[edge_cond_umap_df$ct_g2,"ct_mid"]
+
+pe_umap_mid_l = makeMedian(point_cond_umap_df, edge_cond_umap_df, 
+                           cl = c("ct_mid", "mid_g1", "mid_g2"))
+
+# plot total gene correlation projection and median network
+pltboth = ggplot()+
+  geom_point(data = point_cond_umap_df, mapping = aes(x = X1, y = X2, colour = ct2), 
+             alpha = 0.25, show.legend = F)+
+  scale_shape_manual(values = c(0,4,19))+
+  geom_segment(data = pe_umap_mid_l[[2]], 
+               mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq), 
+               alpha = 0.15, show.legend = F)+
+  geom_point(data = pe_umap_mid_l[[1]], 
+             mapping = aes(x = X1, y = X2, fill = ct_mid), 
+             alpha = 1, pch = 21, size = 4)+
+  scale_size_continuous(range = c(0, 4))+
+  theme_classic()+ theme(aspect.ratio = 1)
+print(pltboth)
+
+# get median per cell type, per condition - HEALTHY COMPARISON NETWORK
+pe_umap_cond_l_mid = makeMedianCond(point_cond_umap_df, 
+                                   edge_cond_umap_df[edge_cond_umap_df$id_cp_interaction%in%comph_inters,],
+                                   edge_by = "cond", cl = c("ct_mid", "mid_g1", "mid_g2"))
+
+plt_umap_cond_l_ch = list()
+for(cc in unique(pe_cond_l[[2]]$cond)){
+  plt_umap_cond_l_ch[[cc]] = ggplot()+
+    geom_segment(data = pe_umap_cond_l_mid[[2]][pe_umap_cond_l_mid[[2]]$cond==cc,], 
+                 mapping = aes(x = X1.x, xend = X1.y, y = X2.x, yend = X2.y, size = Freq, alpha = Freq))+
+    geom_point(data = pe_umap_cond_l_mid[[1]], 
+               mapping = aes(x = X1, y = X2, fill = ct_mid), 
+               alpha = 1, pch = 21, size = 4)+
+    scale_size_continuous(range = c(0, 4), limits = range(pe_umap_cond_l_mid[[2]]$Freq))+
+    scale_alpha_continuous(limits = range(pe_umap_cond_l_mid[[2]]$Freq))+
+    labs(title = cc)+
+    guides(size = guide_legend(direction = "horizontal", nrow = 2),
+           alpha = guide_legend(direction = "horizontal", nrow = 2))+
+    theme_classic()
+}
+plt_umap_cond_l_ch[["leg"]] = cowplot::get_legend(plt_umap_cond_l_ch[["healthy"]])
+
+# plot HEALTHY COMPARISON NETWORK median per condition
+cowplot::plot_grid(plt_umap_cond_l_ch[[1]]+theme(legend.position = "none"), 
+                   plt_umap_cond_l_ch[[2]]+theme(legend.position = "none"),
+                   plt_umap_cond_l_ch[[3]]+theme(legend.position = "none"), plt_umap_cond_l_ch$leg, 
+                   ncol = 4, rel_widths = c(1,1,1,0.5))
+```
+
 Save UMAP network objects
 
 ```{r}
-save(edge_cond_umap_df, point_cond_umap_df, file = "results/cell_comm/updt/networks_cond_umap.RData")
+save(edge_cond_umap_df, point_cond_umap_df, 
+     file = "results/cell_comm/updt/networks_cond_umap.RData")
 save(pe_umap_l, pe_umap_cond_l_ch, 
      file = "results/cell_comm/updt/median_networks_cond_umap.RData")
+save(pe_umap_mid_l, pe_umap_cond_l_mid, 
+     file = "results/cell_comm/updt/median_networks_cond_umap_midct.RData")
 ```
 
 
