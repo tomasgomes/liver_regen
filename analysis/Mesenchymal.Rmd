@@ -1,0 +1,362 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+
+Load libraries
+
+```{r}
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+
+source("https://raw.githubusercontent.com/tomasgomes/personal_toolbox/main/R/analysis_Seurat.R")
+```
+
+Load data
+
+```{r}
+load("../data/frozen_tissue_dataset.rdata")
+fresh_dat = readRDS("../data/processed/allcells_css_reannot.RDS")
+
+cols_use = c("Hepatocyte doublets" = "lightpink2", "Hep/Chol\ndoublets" = "lightpink2",
+             "Fibroblasts\n(activated)" = "salmon4", "Fibroblasts" = "salmon3",
+             "Fibroblasts 2" = "salmon3", "Fibroblasts 1" = "salmon3",
+             "Stellate cells" = "peru", "LSEC doublets" = "cadetblue2", 
+             "VSMC" = "aquamarine4")
+```
+
+
+
+# Fresh data
+Subset mesenchymal cells
+
+```{r}
+fresh_mes = fresh_dat[,fresh_dat$allcells_major=="Stellate cells"]
+fresh_mes = basicSeurat(fresh_mes)
+
+fresh_mes = harmony::RunHarmony(fresh_mes, group.by.vars = "Donor", max.iter.harmony = 50)
+fresh_mes = runSeuratClust(fresh_mes, red = "harmony", ncomp = 20)
+```
+
+Plot clusters
+
+```{r}
+DimPlot(fresh_mes, reduction = "umap", group.by = "Donor")+
+  DimPlot(fresh_mes, reduction = "umap", group.by = "Condition")+
+  DimPlot(fresh_mes, reduction = "umap", group.by = "harmony20_res.0.6")+
+  DimPlot(fresh_mes, reduction = "umap", group.by = "harmony20_res.1")
+```
+
+Plot some features
+
+```{r}
+FeaturePlot(fresh_mes, reduction = "umap", 
+            features = c("COLEC11", "CXCL12", "PDGFRB", "PDGFB", "PDGFRA", "PDGFA", "ACTA2",
+                         "DCN", "PPARG", "TGFBI", "TGFB1",  "DES", "VIM", 
+                         "LUM", "TNC", "NCAM1", "LRAT", "S100A6", "CCL2"), order = T, pt.size = 0.8)
+Seurat::VlnPlot(fresh_mes, c("COLEC11", "CXCL12", "PDGFRB", "PDGFB", "PDGFRA", "PDGFA", "ACTA2",
+                           "DCN", "PPARG", "S100A6", "TGFBI", "TGFB1", "DES", "CCL2", "VIM",
+                           "LUM", "GFAP", "TNC", "NCAM1", "LRAT", "RBP1"), 
+                group.by = "harmony20_res.0.6", ncol = 7)
+
+FeaturePlot(fresh_mes, reduction = "umap", 
+            features = c("PDGFRB", "PDGFRA", "LUM", "ACTA2", "SAA1", "PECAM1", "MYL9", "PTPRC", "LYZ"), order = T, pt.size = 0.8)
+```
+
+Calculate DE genes
+
+```{r}
+fresh_deg = presto::wilcoxauc(fresh_mes, group_by = "harmony20_res.0.6", seurat_assay = "SCT")
+fresh_deg = fresh_deg[fresh_deg$padj<=0.05 & fresh_deg$logFC>0.2,]
+
+table(fresh_mes$harmony20_res.0.6, fresh_mes$Condition)
+```
+
+Top genes
+
+```{r}
+n = 5
+topmk = fresh_deg |>
+  group_by(group) |> # for each cluster
+  filter(padj<=0.05) |> # only p-value below 0.05
+  filter(pct_in>(pct_out+10)) |> 
+  top_n(n = n, wt = logFC)
+```
+
+Make prompt for annotation guess
+
+```{r}
+annotationPrompt(fresh_deg, n = 25, pct_diff = 10, 
+                 add_info = list("species" = "human", "tissue" = "liver"))
+```
+
+DE within each cluster
+
+```{r}
+de_cond = list()
+for(cl in unique(fresh_mes$harmony20_res.0.6)){
+  subdat = fresh_mes[,fresh_mes$harmony20_res.0.6==cl]
+  de_cond[[paste0("cl",cl)]] = presto::wilcoxauc(subdat, group_by = "Condition", 
+                                                 seurat_assay = "SCT")
+  de_cond[[paste0("cl",cl)]] = de_cond[[paste0("cl",cl)]][de_cond[[paste0("cl",cl)]]$padj<=0.05 &
+                                                            de_cond[[paste0("cl",cl)]]$logFC>0.2,]
+}
+de_pve = list()
+for(cl in unique(fresh_mes$harmony20_res.0.6)){
+  subdat = fresh_mes[,fresh_mes$harmony20_res.0.6==cl]
+  subdat$pve = subdat$Condition=="healthy"
+  de_pve[[paste0("cl",cl)]] = presto::wilcoxauc(subdat, group_by = "pve", seurat_assay = "SCT")
+  de_pve[[paste0("cl",cl)]] = de_pve[[paste0("cl",cl)]][de_pve[[paste0("cl",cl)]]$padj<=0.05 &
+                                                          de_pve[[paste0("cl",cl)]]$logFC>0.2,]
+}
+```
+
+
+
+```{r}
+fresh_deg_23 = presto::wilcoxauc(fresh_mes[,fresh_mes$harmony20_res.0.6 %in% c(2,3)], 
+                                 group_by = "harmony20_res.0.6", seurat_assay = "SCT")
+fresh_deg_23 = fresh_deg_23[fresh_deg_23$padj<=0.05 & fresh_deg_23$logFC>0.2,]
+fresh_deg_13 = presto::wilcoxauc(fresh_mes[,fresh_mes$harmony20_res.0.6 %in% c(1,3)], 
+                                 group_by = "harmony20_res.0.6", seurat_assay = "SCT")
+fresh_deg_13 = fresh_deg_13[fresh_deg_13$padj<=0.05 & fresh_deg_13$logFC>0.2,]
+fresh_deg_12 = presto::wilcoxauc(fresh_mes[,fresh_mes$harmony20_res.0.6 %in% c(1,2)], 
+                                 group_by = "harmony20_res.0.6", seurat_assay = "SCT")
+fresh_deg_12 = fresh_deg_12[fresh_deg_12$padj<=0.05 & fresh_deg_12$logFC>0.2,]
+```
+
+
+
+
+
+# Frozen data
+Subset and process
+
+```{r}
+frozen_mes = frozen_tissue_dataset[,frozen_tissue_dataset$cell.type=="Mesenchyme"]
+frozen_mes = basicSeurat(frozen_mes)
+
+frozen_mes = harmony::RunHarmony(frozen_mes, group.by.vars = "donor", max.iter.harmony = 50)
+
+frozen_mes = runSeuratClust(frozen_mes, red = "harmony", ncomp = 20)
+```
+
+Plot clusters
+
+```{r}
+DimPlot(frozen_mes, reduction = "umap", group.by = "donor")+
+DimPlot(frozen_mes, reduction = "umap", group.by = "harmony20_res.0.7", label = T)
+```
+
+Plot some markers
+
+```{r}
+FeaturePlot(frozen_mes, reduction = "umap", 
+            features = c("COLEC11", "CXCL12", "PDGFRB", "PDGFRA", "PDGFA", "ACTA2",
+                         "DCN", "PPARG", "S100A6", "TGFBI", "TGFB1", "CLEC4M", "CCL2", "VIM", 
+                         "LUM", "ALB", "TNC", "NCAM1", "LRAT", "RBP1"), order = T, pt.size = 0.6)
+Seurat::VlnPlot(frozen_mes, c("COLEC11", "CXCL12", "PDGFRB", "PDGFB", "PDGFRA", "PDGFA", "ACTA2",
+                           "DCN", "PPARG", "S100A6", "TGFBI", "TGFB1", "DES", "CCL2", "VIM",
+                           "LUM", "GFAP", "TNC", "NCAM1", "LRAT", "RBP1"), 
+                group.by = "harmony20_res.0.7", ncol = 7)
+```
+
+Calculate DE genes
+
+```{r}
+frozen_deg = presto::wilcoxauc(frozen_mes, group_by = "harmony20_res.0.7", seurat_assay = "SCT")
+frozen_deg = frozen_deg[frozen_deg$padj<=0.05 & frozen_deg$logFC>0.2,]
+```
+
+DE pairwise
+
+```{r}
+frozen_deg_24 = presto::wilcoxauc(frozen_mes[,frozen_mes$harmony20_res.0.7 %in% c(2,4)], 
+                                 group_by = "harmony20_res.0.7", seurat_assay = "SCT")
+frozen_deg_24 = frozen_deg_24[frozen_deg_24$padj<=0.05 & frozen_deg_24$logFC>0.2,]
+```
+
+
+Make prompt for annotation guess
+
+```{r}
+annotationPrompt(frozen_deg, n = 20, add_info = list("species" = "human", "tissue" = "liver"))
+```
+
+
+
+# Make figure
+The figure should have:
+ - UMAP for frozen with clusters
+ - genes important for annotation as a heatmap
+ - UMAP for fresh with clusters and conditions
+ - table with cluster proportions per condition
+ - genes important for annotation as a heatmap
+ - signature enrichments
+ ? DE between conditions per cluster
+ 
+UMAPs
+
+```{r}
+fresh_mes$annotation = as.character(fresh_mes$harmony20_res.0.6)
+fresh_mes$annotation[fresh_mes$annotation==0] = "Stellate cells"
+fresh_mes$annotation[fresh_mes$annotation==1] = "Fibroblasts 2" # not much difference with 2
+fresh_mes$annotation[fresh_mes$annotation==2] = "Fibroblasts 1"
+fresh_mes$annotation[fresh_mes$annotation==3] = "Fibroblasts\n(activated)"
+fresh_mes$annotation[fresh_mes$annotation==4] = "Hep/Chol\ndoublets"
+fresh_mes$annotation[fresh_mes$annotation==5] = "VSMC"
+DimPlot(fresh_mes, reduction = "umap", group.by = "annotation", label = T)+
+  scale_colour_manual(values = cols_use)+
+  theme_classic()+
+  theme_void()+
+  theme(title = element_blank(),
+        aspect.ratio = 1)
+
+frozen_mes$annotation = as.character(frozen_mes$harmony20_res.0.7)
+frozen_mes$annotation[frozen_mes$annotation=="0"] = "Stellate cells"
+frozen_mes$annotation[frozen_mes$annotation=="1"] = "Stellate cells"
+frozen_mes$annotation[frozen_mes$annotation=="2"] = "VSMC"
+frozen_mes$annotation[frozen_mes$annotation=="3"] = "Hepatocyte doublets"
+frozen_mes$annotation[frozen_mes$annotation=="4"] = "LSEC doublets"
+frozen_mes$annotation[frozen_mes$annotation=="5"] = "Fibroblasts"
+DimPlot(frozen_mes, reduction = "umap", group.by = "annotation", label = T)+
+  scale_colour_manual(values = cols_use)+
+  theme_classic()+
+  theme_void()+
+  theme(title = element_blank(),
+        aspect.ratio = 1)
+```
+
+
+
+```{r}
+mk_hend = readxl::read_xlsx("../data/other/Mesenchyme_markers_fromCell_Henderson.xlsx")
+mk_per_ct = tapply(mk_hend$gene, mk_hend$cluster, function(x) toupper(x))
+
+n = 150 # broad enough to get some known markers
+top_hen = mk_hend |>
+  group_by(cluster) |> # for each cluster
+  filter(pct.1>(pct.2+0.1)) |> 
+  top_n(n = n, wt = avg_logFC)
+mk_per_ct150 = tapply(top_hen$gene, top_hen$cluster, function(x) sort(toupper(x)))
+```
+
+Module signature
+
+```{r}
+fresh_mes = AddModuleScore(fresh_mes, features = mk_per_ct)
+colnames(fresh_mes@meta.data)[grepl("Cluster", colnames(fresh_mes@meta.data))] = names(mk_per_ct)
+VlnPlot(fresh_mes, features = names(mk_per_ct), group.by = "harmony20_res.0.6")
+fresh_mes = AddModuleScore(fresh_mes, features = mk_per_ct150)
+colnames(fresh_mes@meta.data)[grepl("Cluster", colnames(fresh_mes@meta.data))] = paste0(names(mk_per_ct), "_150")
+VlnPlot(fresh_mes, features = paste0(names(mk_per_ct), "_150"), group.by = "harmony20_res.0.6")
+
+frozen_mes = AddModuleScore(frozen_mes, features = mk_per_ct, nbin = 20, ctrl = 50)
+colnames(frozen_mes@meta.data)[grepl("Cluster", colnames(frozen_mes@meta.data))] = names(mk_per_ct)
+VlnPlot(frozen_mes, features = names(mk_per_ct), group.by = "harmony20_res.0.7")
+frozen_mes = AddModuleScore(frozen_mes, features = mk_per_ct150, nbin = 20, ctrl = 50)
+colnames(frozen_mes@meta.data)[grepl("Cluster", colnames(frozen_mes@meta.data))] = paste0(names(mk_per_ct), "_150")
+VlnPlot(frozen_mes, features = paste0(names(mk_per_ct), "_150"), group.by = "harmony20_res.0.7")
+```
+
+DE gene enrichment
+
+```{r}
+hypergeometricTest <- function(geneSet, backgroundSet, universeSize) {
+  # Calculate the number of genes in the intersection of geneSet and backgroundSet
+  intersectionSize <- length(intersect(geneSet, backgroundSet))
+  
+  # Calculate the number of genes in geneSet
+  geneSetSize <- length(geneSet)
+  
+  # Calculate the number of genes in backgroundSet
+  backgroundSetSize <- length(backgroundSet)
+  
+  # Calculate the number of genes not in either geneSet or backgroundSet
+  notInSetSize <- universeSize - (geneSetSize + backgroundSetSize - intersectionSize)
+  
+  # Perform the hypergeometric test
+  p_value <- phyper(intersectionSize - 1, geneSetSize, notInSetSize, backgroundSetSize, 
+                    lower.tail = FALSE)
+  
+  # Create a result object with relevant information
+  result <- list(
+    geneSetSize = geneSetSize,
+    backgroundSetSize = backgroundSetSize,
+    intersectionSize = intersectionSize,
+    notInSetSize = notInSetSize,
+    p_value = p_value
+  )
+  
+  return(result)
+}
+
+
+fresh_mk_l = tapply(fresh_deg$feature, fresh_deg$group, function(x) x)
+fresh_enr_res = list()
+for(cl in names(fresh_mk_l)){
+  for(n in names(mk_per_ct)){
+    nn = paste0(cl, "_", n)
+    fresh_enr_res[[nn]] = hypergeometricTest(mk_per_ct[[n]], backgroundSet = fresh_mk_l[[cl]],
+                                             universeSize = nrow(fresh_mes))
+  }
+}
+fresh_enr_res = reshape2::melt(fresh_enr_res)
+fresh_enr_res = fresh_enr_res[fresh_enr_res$L2=="p_value",]
+fresh_enr_res$group = sapply(strsplit(fresh_enr_res$L1, "_"), function(x) x[1])
+fresh_enr_res$geneset = sapply(strsplit(fresh_enr_res$L1, "_"), function(x) x[2])
+fresh_enr_res = reshape2::dcast(fresh_enr_res, group ~ geneset, value.var = "value")
+rownames(fresh_enr_res) = fresh_enr_res[,1]
+fresh_enr_res = fresh_enr_res[,-1]
+pheatmap::pheatmap(-log10(fresh_enr_res))
+
+frozen_mk_l = tapply(frozen_deg$feature, frozen_deg$group, function(x) x)
+frozen_enr_res = list()
+for(cl in names(frozen_mk_l)){
+  for(n in names(mk_per_ct)){
+    nn = paste0(cl, "_", n)
+    frozen_enr_res[[nn]] = hypergeometricTest(mk_per_ct[[n]], backgroundSet = frozen_mk_l[[cl]],
+                                             universeSize = nrow(frozen_mes))
+  }
+}
+frozen_enr_res = reshape2::melt(frozen_enr_res)
+frozen_enr_res = frozen_enr_res[frozen_enr_res$L2=="p_value",]
+frozen_enr_res$group = sapply(strsplit(frozen_enr_res$L1, "_"), function(x) x[1])
+frozen_enr_res$geneset = sapply(strsplit(frozen_enr_res$L1, "_"), function(x) x[2])
+frozen_enr_res = reshape2::dcast(frozen_enr_res, group ~ geneset, value.var = "value")
+rownames(frozen_enr_res) = frozen_enr_res[,1]
+frozen_enr_res = frozen_enr_res[,-1]
+pheatmap::pheatmap(-log10(frozen_enr_res))
+```
+
+
+
+
+
+```{r}
+tab_ctCond = table(all_imm_cells$immune_annot, all_imm_cells$Name)
+tab_ctCond = tab_ctCond[!grepl("stress", rownames(tab_ctCond)) & 
+                          !grepl("intera", rownames(tab_ctCond)),]
+imm_cnts = tab_ctCond
+imm_cnts = merge(data.frame(imm_cnts), don_cond_df, by.x = 2, by.y = 1)
+pvals_l = list()
+for(ct in unique(imm_cnts$Var1)){
+  dfct = imm_cnts[imm_cnts$Var1==ct,]
+  dfct$not = tapply(imm_cnts$Freq, imm_cnts$Var2, sum)-dfct$Freq
+  dfct$tot = tapply(imm_cnts$Freq, imm_cnts$Var2, sum)
+  dfct$Condition = factor(dfct$Condition, levels = c("healthy", "embolised", "regenerating"))
+  mod = glm(cbind(Freq, not) ~ Condition + Donor + tot, data = dfct, family = "binomial")
+  pvals_l[[ct]] = summary(mod)$coefficients[c("Conditionembolised", "Conditionregenerating"),
+                                            "Pr(>|z|)"]
+}
+pvals_df = data.frame(t(data.frame(pvals_l)))
+rownames(pvals_df) = names(pvals_l)
+colnames(pvals_df) = gsub("Condition", "", colnames(pvals_df))
+pvals_df$embolised = p.adjust(pvals_df$embolised, method = "fdr")
+pvals_df$regenerating = p.adjust(pvals_df$regenerating, method = "fdr")
+```
+

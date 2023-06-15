@@ -1826,6 +1826,13 @@ mksimp = mksimp[order(mksimp$avg_logFC, decreasing = T),]
 top_genes = readRDS(file = "results/cond_effect/top_genes_mk.RDS")
 
 go_end = readRDS("results/endothelial/GOTerms_correlations.RDS")
+
+endo_col = c("Periportal LSEC" = "aquamarine2",  "Midzonal LSEC" = "aquamarine3",
+             "Pericentral LSEC" = "aquamarine4", "LSEC (fenestr.)" = "darkslategray1",
+             "LSEC (remodelling)" = "cyan4", "LSEC (interferon)" = "darkslateblue",
+             "LSEC (high MT 1)" = "blueviolet", "LSEC (high MT 2)" = "darkviolet",
+             "LSEC (stress)" = "lightblue", "EC non-LSEC" = "forestgreen", 
+             "Lymphatic EC" = "chartreuse3", "Cycling cells" = "grey20")
 ```
 
 UMAPs
@@ -1938,16 +1945,20 @@ dev.off()
 Markers
 
 ```{r}
-mkplot = c("MGP", "AQP1", "CLEC14A", "EDNRB", "CLEC1B", "CLEC4G", "PLVAP", "RBP7", "ANGPT2", "CTGF",
-           "ISG15", "IFIT3", "MRO", "EGR1","PTGDS", "INMT", "PROX1", "CCL21", "TOP2A")
+mkplot = c("MGP", "AQP1", "CLEC14A", "EDNRB", "CLEC1B", "CLEC4G", "PLVAP", 
+           "RBP7", "ANGPT2", "CTGF", "ISG15", "IFIT3", "MRO", "EGR1","PTGDS", "INMT", 
+           "PROX1", "CCL21", "TOP2A")
+mkplot = c("MGP", "AQP1", "CLEC14A", "IGFBP7", "CLEC1B", "CLEC4G", "PLVAP", 
+           "RBP7", "ANGPT2", "CTGF", "ISG15", "IFIT3", "MRO", "EGR1","PTGDS", "INMT", 
+           "PROX1", "CCL21", "TOP2A")
 
-expdf = reshape2::melt(cbind(data.frame(t(only_end_cells@assays$SCT@data[mkplot,]),
+expdf = reshape2::melt(cbind(data.frame(Matrix::t(only_end_cells@assays$SCT@data[mkplot,]),
                                         "endo_simp" = only_end_cells$endo_simp)))
 expdf$endo_simp = factor(expdf$endo_simp, levels = names(endo_col))
 
 vioplt = ggplot(expdf, aes(x = endo_simp, y = value, fill = endo_simp))+
   facet_grid(variable~., scales = "free_y")+
-  geom_violin(scale = "width", colour = "grey82")+
+  geom_violin(scale = "width", colour = "grey82", size = 0.35)+
   scale_fill_manual(values = endo_col)+
   scale_y_continuous(breaks = c(0, 2, 4))+
   labs(y = "Expression")+
@@ -1959,7 +1970,7 @@ vioplt = ggplot(expdf, aes(x = endo_simp, y = value, fill = endo_simp))+
         strip.text.y = element_text(angle = 0, size = 7, margin = margin(0,0,0,0)),
         strip.background = element_rect(colour = "white", fill = "white"))
 
-pdf("figure_panels/fig_endo/violins_mk.pdf", height=5.8, width=3.4, useDingbats = F)
+pdf("figure_panels_rev1/fig_endo/violins_mk_2.pdf", height=5.8, width=3.4, useDingbats = F)
 print(vioplt)
 dev.off()
 
@@ -1977,7 +1988,7 @@ boxplt = ggplot(expdf, aes(x = endo_simp, y = value, fill = endo_simp))+
         strip.text.y = element_text(angle = 0, size = 7, margin = margin(0,0,0,0)),
         strip.background = element_rect(colour = "white", fill = "white"))
 
-pdf("figure_panels/fig_endo/boxes_mk.pdf", height=5.8, width=3.4, useDingbats = F)
+pdf("figure_panels_rev1/fig_endo/boxes_mk_2.pdf", height=5.8, width=3.4, useDingbats = F)
 print(boxplt)
 dev.off()
 ```

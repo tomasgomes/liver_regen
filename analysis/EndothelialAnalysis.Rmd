@@ -871,13 +871,13 @@ genes_endo_l = list("Ding2010_PH" = c("KDR", "VEGFA", "FLT4", "ID1", "AKT1", "HG
 genes_endo = reshape2::melt(genes_endo_l)
 ```
 
-
+Get mean expression
 
 ```{r}
 avg_endo = AverageExpression(only_end_cells, assays = "SCT", group.by = "endo_simp")$SCT
 ```
 
-
+Prepare data
 
 ```{r}
 avg_endo_meta = merge(genes_endo, reshape2::melt(t(scale(t(avg_endo)))), by = 1)
@@ -890,7 +890,7 @@ avg_endo_meta$value = factor(avg_endo_meta$value, levels = hc_rows$labels[hc_row
 avg_endo_meta$Var2 = factor(avg_endo_meta$Var2, levels = hc_cols$labels[hc_cols$order])
 ```
 
-
+Plot all genes
 
 ```{r}
 ggplot(avg_endo_meta, aes(x = Var2, y = value, fill = value.y))+
@@ -904,35 +904,45 @@ ggplot(avg_endo_meta, aes(x = Var2, y = value, fill = value.y))+
         axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
 ```
 
-
+Mean expression per condition
 
 ```{r}
 only_end_cells$endo_simp_cond = paste0(only_end_cells$endo_simp, "..", only_end_cells$Condition)
 avg_endo_cond = AverageExpression(only_end_cells, assays = "SCT", group.by = "endo_simp_cond")$SCT
+avg_endo_cond = avg_endo_cond[,grepl("LSEC ", colnames(avg_endo_cond)) |
+                                grepl(" LSEC", colnames(avg_endo_cond))]
+avg_endo_cond = avg_endo_cond[rowSums(avg_endo_cond)>0,]
 ```
 
-
+Prepare data
 
 ```{r}
 avg_endoc_meta = merge(genes_endo, reshape2::melt(t(scale(t(avg_endo_cond)))), by = 1)
 
+avg_sum_mat = avg_endo_cond[,grepl("heal", colnames(avg_endo_cond))]+avg_endo_cond[,grepl("regen", colnames(avg_endo_cond))]+avg_endo_cond[,grepl("embo", colnames(avg_endo_cond))]
+colnames(avg_sum_mat) = unlist(lapply(strsplit(colnames(avg_sum_mat), "..", fixed = T), function(x) x[1]))
+
 # clustering
-hc_rows = hclust(dist(t(scale(t(avg_endo_cond[unique(avg_endoc_meta$value),])))), method = "ward.D")
-hc_cols = hclust(dist(scale(t(avg_endo_cond[unique(avg_endoc_meta$value),]))), method = "ward.D")
+#hc_rows = hclust(dist(t(scale(t(avg_endo_cond[unique(avg_endoc_meta$value),])))), method = "ward.D2")
+#hc_cols = hclust(dist(scale(t(avg_endo_cond[unique(avg_endoc_meta$value),]))), method = "ward.D2")
+hc_rows = hclust(dist(t(scale(t(avg_sum_mat[unique(avg_endoc_meta$value),])))), method = "ward.D2")
+hc_cols = hclust(dist(scale(t(avg_sum_mat[unique(avg_endoc_meta$value),]))), method = "ward.D2")
 
 avg_endoc_meta$value = factor(avg_endoc_meta$value, levels = hc_rows$labels[hc_rows$order])
-avg_endoc_meta$Var2 = factor(avg_endoc_meta$Var2, levels = hc_cols$labels[hc_cols$order])
+#avg_endoc_meta$Var2 = factor(avg_endoc_meta$Var2, levels = hc_cols$labels[hc_cols$order])
 
 # split cell type and condition
 avg_endoc_meta$endo_simp = unlist(lapply(strsplit(as.character(avg_endoc_meta$Var2), "..", fixed = T),
                                         function(x) x[1]))
-avg_endoc_meta$endo_simp = factor(avg_endoc_meta$endo_simp, levels = unique(avg_endoc_meta$endo_simp))
+#avg_endoc_meta$endo_simp = factor(avg_endoc_meta$endo_simp, levels = unique(avg_endoc_meta$endo_simp))
+avg_endoc_meta$endo_simp = factor(avg_endoc_meta$endo_simp, 
+                                  levels = rev(hc_cols$labels[hc_cols$order]))
 avg_endoc_meta$cond = unlist(lapply(strsplit(as.character(avg_endoc_meta$Var2), "..", fixed = T),
                                    function(x) x[2]))
 avg_endoc_meta$cond = factor(avg_endoc_meta$cond, levels = c("healthy", "regenerating", "embolised"))
 ```
 
-
+Plot all genes per condition
 
 ```{r}
 ggplot(avg_endoc_meta, aes(x = endo_simp, y = value, fill = value.y))+
@@ -946,7 +956,29 @@ ggplot(avg_endoc_meta, aes(x = endo_simp, y = value, fill = value.y))+
         axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
 ```
 
+Plot all genes per condition, no paper
 
+```{r}
+plt_mean = ggplot(avg_endoc_meta, aes(x = endo_simp, y = value, fill = value.y))+
+  facet_grid(.~cond, scales = "free", space = "free")+
+  geom_tile()+
+  scale_x_discrete(expand = c(0,0))+
+  scale_fill_viridis_c(option = "A")+
+  labs(x = "cell types", y = "genes", fill = "scaled\navg. exp.")+
+  theme_classic()+
+  theme(strip.text = element_text(angle = 0, size = 6.5),
+        axis.text = element_text(size = 6, colour = "black"), 
+        axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        axis.title = element_text(size = 6.5),
+        legend.title = element_text(size = 6.5),
+        legend.text = element_text(size = 6))
+
+pdf("figure_panels_rev1/fig_comm/endo_expression_angiocrine.pdf", height = 4.8, width = 6)
+print(plt_mean)
+dev.off()
+```
+
+Get interactions
 
 ```{r}
 inter_df = readRDS(file = "results/cell_comm/updt/cond_diff_interact_DE.RDS")[1:3]
@@ -959,7 +991,7 @@ inter_df_endo = inter_df[inter_df$ct1 %in% unique(only_end_cells$endo_simp) |
                            inter_df$ct2 %in% unique(only_end_cells$endo_simp),]
 ```
 
-
+Strict interactions
 
 ```{r}
 inter_df_str = unique(inter_df_endo[inter_df_endo$gn1 %in% genes_endo$value & 
@@ -967,7 +999,7 @@ inter_df_str = unique(inter_df_endo[inter_df_endo$gn1 %in% genes_endo$value &
                           c("ct_pair", "lr_pair", "value", "L1")])
 ```
 
-
+Plot all strict
 
 ```{r}
 ggplot(inter_df_str, aes(x = L1, y = ct_pair, fill = value))+
@@ -981,7 +1013,7 @@ ggplot(inter_df_str, aes(x = L1, y = ct_pair, fill = value))+
         axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
 ```
 
-
+Plot top of each strict interaction
 
 ```{r}
 inter_df_sub = inter_df_str %>% group_by(lr_pair) %>% top_n(value, n=1)
@@ -998,35 +1030,33 @@ ggplot(inter_df_sub, aes(x = L1, y = ct_pair, fill = value))+
         axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1))
 ```
 
-
+Count angiocrine interactions
 
 ```{r}
 inter_df_endo2 = inter_df[grepl("LSEC ", inter_df$ct1) | grepl(" LSEC", inter_df$ct1),]
 inter_df_sub = unique(inter_df_endo2[inter_df_endo2$gn1 %in% genes_endo$value | 
                                        inter_df_endo2$gn2 %in% genes_endo$value,
-                                     c("ct1", "ct2", "ct_pair", "lr_pair", "value", "L1")])
-inter_df_endo_u = unique(inter_df_endo2[,c("ct1", "ct2", "ct_pair", "lr_pair", "value", "L1")])
+                                     c("ct1", "ct2", "ct_pair", "lr_pair", "value")])
+inter_df_endo_u = unique(inter_df_endo2[,c("ct1", "ct2", "ct_pair", "lr_pair", "value")])
 
 n_angio = table(inter_df_sub$ct1, inter_df_sub$ct2)
-f_angio = n_angio
-for(n in colnames(f_angio)){
-  f_angio[,n] = f_angio[,n]/log10(table(inter_df_endo_u$ct2)[n])
+f_angio_all = n_angio
+for(n in colnames(f_angio_all)){
+  f_angio_all[,n] = f_angio_all[,n]/log10(table(inter_df_endo_u$ct2)[n])
 }
-
-pheatmap::pheatmap(f_angio[order(rowSums(f_angio), decreasing = T),order(colSums(f_angio), decreasing = T)], clustering_method = "ward.D2", cluster_cols = F, cluster_rows = F)
 ```
 
-
+Plot normalised counts
 
 ```{r}
-plot_df = reshape2::melt(f_angio[order(rowSums(f_angio), decreasing = F),
-                                 order(colSums(f_angio), decreasing = T)])
+plot_df = reshape2::melt(f_angio_all[order(rowSums(f_angio_all), decreasing = F),
+                                     order(colSums(f_angio_all), decreasing = T)])
 plot_df$isLSEC = c("other", "LSEC")[(grepl("LSEC ", plot_df$Var2) | grepl(" LSEC", plot_df$Var2))+1]
 
-ggplot(plot_df, aes(x = Var2, y = Var1, fill = value))+
+cnt_int = ggplot(plot_df, aes(x = Var2, y = Var1, fill = value))+
   facet_grid(~isLSEC, scale = "free_x", space = "free_x")+
   geom_tile()+
-  scale_fill_viridis_c(option = "C")+
+  scale_fill_viridis_c(option = "B")+
   scale_x_discrete(expand = c(0,0))+
   scale_y_discrete(expand = c(0,0))+
   labs(fill = "# interactions\n(norm.)", x = "Receiving cell type",
@@ -1039,6 +1069,224 @@ ggplot(plot_df, aes(x = Var2, y = Var1, fill = value))+
         axis.title = element_text(size = 6.5),
         strip.text = element_text(size = 6.5))
 ```
+
+Per condition
+
+```{r}
+inter_df_endo2 = inter_df[grepl("LSEC ", inter_df$ct1) | grepl(" LSEC", inter_df$ct1),]
+inter_df_sub = unique(inter_df_endo2[inter_df_endo2$gn1 %in% genes_endo$value,
+                                     c("ct1", "ct2", "ct_pair", "lr_pair", "value", "L1")])
+inter_df_endo_u = unique(inter_df_endo2[,c("ct1", "ct2", "ct_pair", "lr_pair", "value", "L1")])
+
+f_list = list()
+for(cond in c("healthy", "regenerating", "embolised")){
+  inter_df_sub2 = inter_df_sub[inter_df_sub$L1==cond,]
+  n_angio = table(inter_df_sub2$ct1, inter_df_sub2$ct2)
+  f_angio = n_angio
+  for(n in colnames(f_angio)){
+    f_angio[,n] = f_angio[,n]/log10(table(inter_df_endo_u$ct2)[n])
+  }
+  f_list[[cond]] = f_angio[order(rowSums(f_angio_all), decreasing = F),
+                           order(colSums(f_angio_all), decreasing = T)]
+}
+```
+
+Plot normalised counts (norm per total)
+
+```{r}
+plot_df_cond = reshape2::melt(f_list)
+plot_df_cond$isLSEC = c("other", "LSEC")[(grepl("LSEC ", plot_df_cond$Var2) | 
+                                            grepl(" LSEC", plot_df_cond$Var2))+1]
+plot_df_cond$L1[plot_df_cond$L1=="embolised"] = "embolized"
+plot_df_cond$L1 = factor(plot_df_cond$L1, levels = c("healthy", "regenerating", "embolized"))
+
+cnt_int_cond = ggplot(plot_df_cond, aes(x = Var2, y = Var1, fill = value))+
+  facet_grid(L1~isLSEC, scale = "free_x", space = "free_x")+
+  geom_tile()+
+  scale_fill_viridis_c(option = "B")+
+  scale_x_discrete(expand = c(0,0))+
+  scale_y_discrete(expand = c(0,0))+
+  labs(fill = "# interactions\n(norm.)", x = "Receiving cell type",
+       y = "Sending cell type")+
+  theme_classic()+
+  theme(axis.text = element_text(colour = "black", size = 6),
+        axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1),
+        legend.text = element_text(size = 6),
+        legend.title = element_text(size = 6.5),
+        axis.title = element_text(size = 6.5),
+        strip.text = element_text(size = 6.5))
+
+pdf("figure_panels_rev1/fig_comm/endo_interactions_angiocrine_allInter.pdf", height = 4.45, 
+    width = 6.8)
+print(cnt_int_cond)
+dev.off()
+```
+
+Per condition, unique healthy vs PVE
+
+```{r}
+inter_df_endo2 = inter_df[grepl("LSEC ", inter_df$ct1) | grepl(" LSEC", inter_df$ct1),]
+inter_df_endo2$ct1 = factor(inter_df_endo2$ct1)
+inter_df_endo2$ct2 = factor(inter_df_endo2$ct2)
+inter_df_sub = unique(inter_df_endo2[inter_df_endo2$gn1 %in% genes_endo$value,
+                                     c("ct1", "ct2", "ct_pair", "lr_pair", "value", "L1")])
+inter_df_endo_u = unique(inter_df_endo2[,c("ct1", "ct2", "ct_pair", "lr_pair", "value", "L1")])
+
+int_h = setdiff(inter_df_endo_u[inter_df_endo_u$L1=="healthy", "lr_pair"],
+                inter_df_endo_u[inter_df_endo_u$L1!="healthy", "lr_pair"])
+int_r = setdiff(inter_df_endo_u[inter_df_endo_u$L1!="healthy", "lr_pair"],
+                inter_df_endo_u[inter_df_endo_u$L1=="healthy", "lr_pair"])
+
+f_spec_list = list()
+for(cond in c("healthy", "regenerating", "embolised")){
+  int_use = if(cond=="healthy") int_h else int_r
+  
+  inter_df_sub2 = inter_df_sub[inter_df_sub$L1==cond & inter_df_sub$lr_pair %in% int_use,]
+  inter_df_endo_u2 = inter_df_endo_u[inter_df_endo_u$L1==cond & inter_df_endo_u$lr_pair %in% int_use,]
+  n_angio = table(inter_df_sub2$ct1, inter_df_sub2$ct2)
+  f_angio = n_angio
+  for(n in colnames(f_angio)){
+    f_angio[,n] = f_angio[,n]/log10(table(inter_df_endo_u$ct2)[n])
+  }
+  f_spec_list[[cond]] = f_angio[order(rowSums(f_angio_all), decreasing = F),
+                                order(colSums(f_angio_all), decreasing = T)]
+}
+```
+
+Plot normalised counts (norm per total)
+
+```{r}
+plot_df_spec = reshape2::melt(f_spec_list)
+plot_df_spec$isLSEC = c("other", "LSEC")[(grepl("LSEC ", plot_df_spec$Var2) | 
+                                            grepl(" LSEC", plot_df_spec$Var2))+1]
+plot_df_spec$L1[plot_df_spec$L1=="embolised"] = "embolized"
+plot_df_spec$L1 = factor(plot_df_spec$L1, levels = c("healthy", "regenerating", "embolized"))
+
+cnt_int_spec = ggplot(plot_df_spec, aes(x = Var2, y = Var1, fill = value))+
+  facet_grid(L1~isLSEC, scale = "free_x", space = "free_x")+
+  geom_tile()+
+  scale_fill_viridis_c(option = "B")+
+  scale_x_discrete(expand = c(0,0))+
+  scale_y_discrete(expand = c(0,0))+
+  labs(fill = "# interactions\n(norm.)", x = "Receiving cell type",
+       y = "Sending cell type")+
+  theme_classic()+
+  theme(axis.text = element_text(colour = "black", size = 6),
+        axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1),
+        legend.text = element_text(size = 6),
+        legend.title = element_text(size = 6.5),
+        axis.title = element_text(size = 6.5),
+        strip.text = element_text(size = 6.5))
+
+pdf("figure_panels_rev1/fig_comm/endo_interactions_angiocrine_healthyVSPVE.pdf", height = 4.45, 
+    width = 6.8)
+print(cnt_int_spec)
+dev.off()
+```
+
+Per condition, in 2 cond only
+
+```{r}
+inter_df_endo2 = inter_df[grepl("LSEC ", inter_df$ct1) | grepl(" LSEC", inter_df$ct1),]
+inter_df_endo2$ct1 = factor(inter_df_endo2$ct1)
+inter_df_endo2$ct2 = factor(inter_df_endo2$ct2)
+inter_df_sub = unique(inter_df_endo2[inter_df_endo2$gn1 %in% genes_endo$value,
+                                     c("ct1", "ct2", "ct_pair", "lr_pair", "value", "L1")])
+inter_df_endo_u = unique(inter_df_endo2[,c("ct1", "ct2", "ct_pair", "lr_pair", "value", "L1")])
+
+inter_cond_u = unique(inter_df_endo_u[inter_df_endo_u$lr_pair %in% inter_df_sub$lr_pair,
+                                      c("L1", "lr_pair")])
+int_use = table(inter_cond_u$lr_pair,inter_cond_u$L1)
+int_use = rownames(int_use)[rowSums(int_use)<3]
+
+f_spec2_list = list()
+for(cond in c("healthy", "regenerating", "embolised")){
+  inter_df_sub2 = inter_df_sub[inter_df_sub$L1==cond & inter_df_sub$lr_pair %in% int_use,]
+  inter_df_endo_u2 = inter_df_endo_u[inter_df_endo_u$L1==cond & inter_df_endo_u$lr_pair %in% int_use,]
+  n_angio = table(inter_df_sub2$ct1, inter_df_sub2$ct2)
+  f_angio = n_angio
+  for(n in colnames(f_angio)){
+    f_angio[,n] = f_angio[,n]/log10(table(inter_df_endo_u$ct2)[n])
+  }
+  f_spec2_list[[cond]] = f_angio[order(rowSums(f_angio_all), decreasing = F),
+                                order(colSums(f_angio_all), decreasing = T)]
+}
+```
+
+Plot normalised counts (norm per total)
+
+```{r}
+plot_df_spec2 = reshape2::melt(f_spec2_list)
+plot_df_spec2$isLSEC = c("other", "LSEC")[(grepl("LSEC ", plot_df_spec2$Var2) | 
+                                            grepl(" LSEC", plot_df_spec2$Var2))+1]
+plot_df_spec2$L1[plot_df_spec2$L1=="embolised"] = "embolized"
+plot_df_spec2$L1 = factor(plot_df_spec2$L1, levels = c("healthy", "regenerating", "embolized"))
+
+cnt_int_spec2 = ggplot(plot_df_spec2, aes(x = Var2, y = Var1, fill = value))+
+  facet_grid(L1~isLSEC, scale = "free_x", space = "free_x")+
+  geom_tile()+
+  scale_fill_viridis_c(option = "B")+
+  scale_x_discrete(expand = c(0,0))+
+  scale_y_discrete(expand = c(0,0))+
+  labs(fill = "# interactions\n(norm.)", x = "Receiving cell type",
+       y = "Sending cell type")+
+  theme_classic()+
+  theme(axis.text = element_text(colour = "black", size = 6),
+        axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1),
+        legend.text = element_text(size = 6),
+        legend.title = element_text(size = 6.5),
+        axis.title = element_text(size = 6.5),
+        strip.text = element_text(size = 6.5))
+
+pdf("figure_panels_rev1/fig_comm/endo_interactions_angiocrine_any2cond.pdf", height = 4.45, 
+    width = 6.8)
+print(cnt_int_spec2)
+dev.off()
+```
+
+
+
+```{r}
+inter_df_endo2 = inter_df[grepl("LSEC ", inter_df$ct1) | grepl(" LSEC", inter_df$ct1),]
+inter_df_sub = unique(inter_df_endo2[inter_df_endo2$gn1 %in% genes_endo$value,
+                                     c("ct1", "ct2", "ct_pair", "lr_pair", "value", "L1")])
+inter_df_endo_u = unique(inter_df_endo2[,c("ct1", "ct2", "ct_pair", "lr_pair", "value", "L1")])
+inter_df_cond_u = unique(inter_df_sub[,c("lr_pair", "L1")])
+
+write.csv(inter_df_sub, file = "figure_panels_rev1/fig_comm/endo_interactions_angiocrine.csv",
+          row.names = F, quote = F)
+
+gradexpcol = c("#f3edff", "#ecc8fa", "#9e42d4", "#792f91")
+plt_i_l = list()
+for(ii in unique(inter_df_sub$lr_pair)){
+  plt_i_l[[ii]] = ggplot(inter_df_sub[inter_df_sub$lr_pair==ii,], 
+                         aes(y = ct_pair, x = L1, fill = value))+
+      facet_grid(lr_pair~., scales = "free_y", space = "free_y")+
+      geom_tile(size = 0.4)+
+      scale_x_discrete(expand = c(0,0))+
+      scale_fill_gradientn(colors = gradexpcol)+
+      scale_colour_manual(values = c("white", "black"))+
+      guides(fill = guide_colourbar(barheight = unit(0.4, "cm")),
+             colour = guide_none())+
+      labs(x = "Condition", y = "Cell type", fill = "mean exp")+
+      theme_classic()+
+      theme(axis.text.y = element_text(colour = "black", size = 7, 
+                                       angle = 0, hjust = 1, vjust = 0.5),
+            axis.text.x = element_text(colour = "black", size = 6.5, 
+                                       angle = 35, hjust=1, vjust=1),
+            axis.title = element_text(size = 7),
+            axis.line = element_blank(),
+            legend.position = "bottom",
+            legend.title = element_text(size = 7),
+            legend.box.margin = margin(0,0,0,0),
+            legend.text = element_text(size = 6),
+            strip.text.y = element_text(angle = 0, size = 7, margin = margin(0,0,3,0), 
+                                        hjust = 0.5, vjust = 0.5, face = "bold"),
+            strip.background = element_blank())
+}
+```
+
+
 
 
 
