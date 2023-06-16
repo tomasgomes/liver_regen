@@ -11,7 +11,9 @@ Load libraries
 ```{r}
 library(Seurat)
 library(ggplot2)
+library(ggh4x)
 library(dplyr)
+library(RColorBrewer)
 
 source("https://raw.githubusercontent.com/tomasgomes/personal_toolbox/main/R/analysis_Seurat.R")
 ```
@@ -22,11 +24,13 @@ Load data
 load("../data/frozen_tissue_dataset.rdata")
 fresh_dat = readRDS("../data/processed/allcells_css_reannot.RDS")
 
-cols_use = c("Hepatocyte doublets" = "lightpink2", "Hep/Chol\ndoublets" = "lightpink2",
+cols_use = c("Hepatocyte\ndoublets" = "lightpink2", "Hep/Chol\ndoublets" = "lightpink2",
              "Fibroblasts\n(activated)" = "salmon4", "Fibroblasts" = "salmon3",
-             "Fibroblasts 2" = "salmon3", "Fibroblasts 1" = "salmon3",
-             "Stellate cells" = "peru", "LSEC doublets" = "cadetblue2", 
-             "VSMC" = "aquamarine4")
+             "Fibroblasts 2" = "salmon3", "Fibroblasts 1" = "salmon3", 
+             "Fibroblasts 3" = "salmon3", "Stellate cells" = "peru", 
+             "LSEC\ndoublets" = "cadetblue2", "VSMC" = "aquamarine4")
+colcond = c("healthy" = "orange", "regenerating" = "salmon", 
+            "embolised" = "darkred", "embolized" = "darkred")
 ```
 
 
@@ -191,76 +195,169 @@ annotationPrompt(frozen_deg, n = 20, add_info = list("species" = "human", "tissu
 
 # Make figure
 The figure should have:
- - UMAP for frozen with clusters
- - genes important for annotation as a heatmap
- - UMAP for fresh with clusters and conditions
  - table with cluster proportions per condition
- - genes important for annotation as a heatmap
  - signature enrichments
- ? DE between conditions per cluster
- 
+
 UMAPs
 
 ```{r}
 fresh_mes$annotation = as.character(fresh_mes$harmony20_res.0.6)
-fresh_mes$annotation[fresh_mes$annotation==0] = "Stellate cells"
-fresh_mes$annotation[fresh_mes$annotation==1] = "Fibroblasts 2" # not much difference with 2
-fresh_mes$annotation[fresh_mes$annotation==2] = "Fibroblasts 1"
-fresh_mes$annotation[fresh_mes$annotation==3] = "Fibroblasts\n(activated)"
-fresh_mes$annotation[fresh_mes$annotation==4] = "Hep/Chol\ndoublets"
-fresh_mes$annotation[fresh_mes$annotation==5] = "VSMC"
-DimPlot(fresh_mes, reduction = "umap", group.by = "annotation", label = T)+
+fresh_mes$annotation[fresh_mes$annotation=="0"] = "Stellate cells"
+fresh_mes$annotation[fresh_mes$annotation=="1"] = "Fibroblasts 1" # not much difference with 2
+fresh_mes$annotation[fresh_mes$annotation=="2"] = "Fibroblasts 2"
+fresh_mes$annotation[fresh_mes$annotation=="3"] = "Fibroblasts 3"
+fresh_mes$annotation[fresh_mes$annotation=="4"] = "Hep/Chol\ndoublets"
+fresh_mes$annotation[fresh_mes$annotation=="5"] = "VSMC"
+fresh_umap = DimPlot(fresh_mes, reduction = "umap", group.by = "annotation", 
+                     label = T, pt.size = 0.4, label.size = 2.5)+
   scale_colour_manual(values = cols_use)+
   theme_classic()+
   theme_void()+
   theme(title = element_blank(),
-        aspect.ratio = 1)
+        aspect.ratio = 1,
+        legend.position = "none", 
+        plot.background = element_rect(colour = "transparent"))
+
+fresh_mes$Cond2 = fresh_mes$Condition
+fresh_mes$Cond2[fresh_mes$Cond2=="embolised"] = "embolized"
+fresh_mes$Cond2 = factor(fresh_mes$Cond2, levels = c("healthy", "regenerating", "embolized"))
+fresh_umap_cond = DimPlot(fresh_mes, reduction = "umap", group.by = "Cond2", pt.size = 0.4)+
+  scale_colour_manual(values = colcond)+
+  theme_classic()+
+  theme_void()+
+  theme(title = element_blank(),
+        aspect.ratio = 1,
+        legend.key.size = unit(0.4, "cm"),
+        legend.text = element_text(size = 6.5),
+        legend.position = c(0,1),legend.justification = c(0,1),
+        plot.background = element_rect(colour = "transparent"))
 
 frozen_mes$annotation = as.character(frozen_mes$harmony20_res.0.7)
 frozen_mes$annotation[frozen_mes$annotation=="0"] = "Stellate cells"
 frozen_mes$annotation[frozen_mes$annotation=="1"] = "Stellate cells"
 frozen_mes$annotation[frozen_mes$annotation=="2"] = "VSMC"
-frozen_mes$annotation[frozen_mes$annotation=="3"] = "Hepatocyte doublets"
-frozen_mes$annotation[frozen_mes$annotation=="4"] = "LSEC doublets"
+frozen_mes$annotation[frozen_mes$annotation=="3"] = "Hepatocyte\ndoublets"
+frozen_mes$annotation[frozen_mes$annotation=="4"] = "LSEC\ndoublets"
 frozen_mes$annotation[frozen_mes$annotation=="5"] = "Fibroblasts"
-DimPlot(frozen_mes, reduction = "umap", group.by = "annotation", label = T)+
+frozen_umap = DimPlot(frozen_mes, reduction = "umap", group.by = "annotation", 
+                      label = T, pt.size = 0.4, label.size = 2.5)+
   scale_colour_manual(values = cols_use)+
   theme_classic()+
   theme_void()+
   theme(title = element_blank(),
-        aspect.ratio = 1)
+        aspect.ratio = 1,
+        legend.position = "none", 
+        plot.background = element_rect(colour = "transparent"))
+
+pdf("../figure_panels_rev2/fresh_umap.pdf", height = 2.9, width = 2.9)
+print(fresh_umap)
+dev.off()
+pdf("../figure_panels_rev2/fresh_umap_cond.pdf", height = 1.8, width = 1.8)
+print(fresh_umap_cond)
+dev.off()
+pdf("../figure_panels_rev2/frozen_umap.pdf", height = 2.9, width = 2.9)
+print(frozen_umap)
+dev.off()
 ```
 
+Marker heatmaps
 
+```{r}
+n = 7
+top_fresh_mk = fresh_deg |>
+  group_by(group) |> # for each cluster
+  filter(padj<=0.05) |> # only p-value below 0.05
+  filter(pct_in>(pct_out+10)) |> 
+  top_n(n = n, wt = logFC)
+top_frozen_mk = frozen_deg |>
+  group_by(group) |> # for each cluster
+  filter(padj<=0.05) |> # only p-value below 0.05
+  filter(pct_in>(pct_out+10)) |> 
+  top_n(n = n, wt = logFC)
+genes_use = union(top_fresh_mk$feature, top_frozen_mk$feature)
+
+avg_fresh = AverageExpression(fresh_mes, assays = "SCT", features = genes_use,
+                              group.by = "annotation", slot = "data")$SCT
+avg_fresh = t(scale(t(avg_fresh)))
+avg_frozen = AverageExpression(frozen_mes, assays = "SCT", features = genes_use,
+                              group.by = "annotation", slot = "data")$SCT
+avg_frozen = t(scale(t(avg_frozen)))
+
+pdf("../figure_panels_rev2/heatmap_mes_fresh.pdf", height = 6.5, width = 2.2)
+annot_col = data.frame(row.names = unique(fresh_mes$annotation), 
+                       "cell.type" = unique(fresh_mes$annotation))
+pheatmap::pheatmap(avg_fresh, clustering_method = "ward.D2", treeheight_row = 0, 
+                   treeheight_col = 10, fontsize_row = 5.5, fontsize_col = 5.5,fontsize = 5.5,
+                   annotation_col = annot_col,
+                   annotation_colors = list("cell.type" = cols_use),annotation_legend = F,
+                   color = colorRampPalette(rev(brewer.pal(n = 9, name = "RdBu")))(100))
+dev.off()
+
+pdf("../figure_panels_rev2/heatmap_mes_frozen.pdf", height = 6.5, width = 2.2)
+annot_col = data.frame(row.names = unique(frozen_mes$annotation), 
+                       "cell.type" = unique(frozen_mes$annotation))
+pheatmap::pheatmap(avg_frozen, clustering_method = "ward.D2", treeheight_row = 0, 
+                   treeheight_col = 10, fontsize_row = 5.5, fontsize_col = 5.5,fontsize = 5.5,
+                   annotation_col = annot_col,
+                   annotation_colors = list("cell.type" = cols_use),annotation_legend = F,
+                   color = colorRampPalette(rev(brewer.pal(n = 9, name = "RdBu")))(100))
+dev.off()
+```
+
+Proportions heatmap
+
+```{r}
+fresh_mes$annotation2 = fresh_mes$annotation
+fresh_mes$annotation2[grepl("Fibrob", fresh_mes$annotation2)] = "Fibroblasts"
+tab_cnt = table(fresh_mes$annotation, fresh_mes$Cond2)
+tab_ctCond = prop.table(table(fresh_mes$annotation, fresh_mes$Cond2), margin = 2)
+hcr = hclust(dist(tab_ctCond), method = "ward.D2")
+tab_ctCond = reshape2::melt(tab_ctCond)
+tab_ctCond$Var1 = factor(tab_ctCond$Var1, levels = hcr$labels[hcr$order])
+tab_cnt = reshape2::melt(tab_cnt)
+
+plt_prop = ggplot()+
+  geom_tile(data = tab_ctCond, mapping = aes(x = Var1, y = Var2, fill = value))+
+  geom_text(data = tab_cnt, mapping = aes(x = Var1, y = Var2, label = value), 
+             size = 2.5, colour = "gray20")+
+  labs(x = "cell type", y = "condition", fill = "% (condition)")+
+  scale_x_discrete(expand = c(0,0))+
+  scale_y_discrete(expand = c(0,0))+
+  theme_classic()+
+  theme(axis.text = element_text(colour = "black", size = 6),
+        axis.text.x = element_text(angle = 30, hjust = 1, vjust = 1),
+        axis.title = element_text(size = 6.5),
+        axis.line = element_blank(),
+        legend.text = element_text(size = 6, colour = "black"),
+        legend.title = element_text(size = 6.5),
+        legend.margin = margin(0,0,0,0),
+        legend.box.spacing = unit(0.3, "cm"),
+        legend.key.width = unit(0.35, "cm"))
+
+pdf("../figure_panels_rev2/prop_fresh_ct.pdf", height = 2, width = 3.25)
+print(plt_prop)
+dev.off()
+```
+
+Signatures
 
 ```{r}
 mk_hend = readxl::read_xlsx("../data/other/Mesenchyme_markers_fromCell_Henderson.xlsx")
 mk_per_ct = tapply(mk_hend$gene, mk_hend$cluster, function(x) toupper(x))
-
-n = 150 # broad enough to get some known markers
-top_hen = mk_hend |>
-  group_by(cluster) |> # for each cluster
-  filter(pct.1>(pct.2+0.1)) |> 
-  top_n(n = n, wt = avg_logFC)
-mk_per_ct150 = tapply(top_hen$gene, top_hen$cluster, function(x) sort(toupper(x)))
 ```
 
 Module signature
 
 ```{r}
-fresh_mes = AddModuleScore(fresh_mes, features = mk_per_ct)
+#fresh_mes@meta.data = fresh_mes@meta.data[,-which(colnames(fresh_mes@meta.data) %in% names(mk_per_ct))]
+fresh_mes = AddModuleScore(fresh_mes, features = mk_per_ct, assay = "SCT")
 colnames(fresh_mes@meta.data)[grepl("Cluster", colnames(fresh_mes@meta.data))] = names(mk_per_ct)
-VlnPlot(fresh_mes, features = names(mk_per_ct), group.by = "harmony20_res.0.6")
-fresh_mes = AddModuleScore(fresh_mes, features = mk_per_ct150)
-colnames(fresh_mes@meta.data)[grepl("Cluster", colnames(fresh_mes@meta.data))] = paste0(names(mk_per_ct), "_150")
-VlnPlot(fresh_mes, features = paste0(names(mk_per_ct), "_150"), group.by = "harmony20_res.0.6")
+VlnPlot(fresh_mes, features = names(mk_per_ct), group.by = "annotation")
 
-frozen_mes = AddModuleScore(frozen_mes, features = mk_per_ct, nbin = 20, ctrl = 50)
+#frozen_mes@meta.data = frozen_mes@meta.data[,-which(colnames(frozen_mes@meta.data) %in% names(mk_per_ct))]
+frozen_mes = AddModuleScore(frozen_mes, features = mk_per_ct, nbin = 22, ctrl = 50, assay = "SCT")
 colnames(frozen_mes@meta.data)[grepl("Cluster", colnames(frozen_mes@meta.data))] = names(mk_per_ct)
-VlnPlot(frozen_mes, features = names(mk_per_ct), group.by = "harmony20_res.0.7")
-frozen_mes = AddModuleScore(frozen_mes, features = mk_per_ct150, nbin = 20, ctrl = 50)
-colnames(frozen_mes@meta.data)[grepl("Cluster", colnames(frozen_mes@meta.data))] = paste0(names(mk_per_ct), "_150")
-VlnPlot(frozen_mes, features = paste0(names(mk_per_ct), "_150"), group.by = "harmony20_res.0.7")
+VlnPlot(frozen_mes, features = names(mk_per_ct), group.by = "annotation")
 ```
 
 DE gene enrichment
@@ -312,7 +409,7 @@ fresh_enr_res$geneset = sapply(strsplit(fresh_enr_res$L1, "_"), function(x) x[2]
 fresh_enr_res = reshape2::dcast(fresh_enr_res, group ~ geneset, value.var = "value")
 rownames(fresh_enr_res) = fresh_enr_res[,1]
 fresh_enr_res = fresh_enr_res[,-1]
-pheatmap::pheatmap(-log10(fresh_enr_res))
+
 
 frozen_mk_l = tapply(frozen_deg$feature, frozen_deg$group, function(x) x)
 frozen_enr_res = list()
@@ -329,34 +426,93 @@ frozen_enr_res$group = sapply(strsplit(frozen_enr_res$L1, "_"), function(x) x[1]
 frozen_enr_res$geneset = sapply(strsplit(frozen_enr_res$L1, "_"), function(x) x[2])
 frozen_enr_res = reshape2::dcast(frozen_enr_res, group ~ geneset, value.var = "value")
 rownames(frozen_enr_res) = frozen_enr_res[,1]
-frozen_enr_res = frozen_enr_res[,-1]
-pheatmap::pheatmap(-log10(frozen_enr_res))
+frozen_enr_res = frozen_enr_res[-2,-1] # removing the second HSC cluster
+
+
+annot_fresh = unique(fresh_mes$annotation)
+names(annot_fresh) = unique(as.character(fresh_mes$harmony20_res.0.6))
+annot_frozen = c("LSEC\ndoublets", "VSMC", "Stellate cells", "Stellate cells", 
+                 "Fibroblasts", "Hepatocyte\ndoublets")
+names(annot_frozen) = c("4", "2", "0", "1", "5", "3")
+
+rownames(fresh_enr_res) = annot_fresh[rownames(fresh_enr_res)]
+rownames(frozen_enr_res) = annot_frozen[rownames(frozen_enr_res)]
+
+fresh_pval_df = reshape2::melt(t(fresh_enr_res))
+fresh_pval_df$Var2 = factor(fresh_pval_df$Var2, levels = sort(unique(fresh_mes$annotation)))
+frozen_pval_df = reshape2::melt(t(frozen_enr_res))
+frozen_pval_df$Var2 = factor(frozen_pval_df$Var2, levels = sort(unique(frozen_mes$annotation)))
 ```
 
-
-
-
+Combined plot
 
 ```{r}
-tab_ctCond = table(all_imm_cells$immune_annot, all_imm_cells$Name)
-tab_ctCond = tab_ctCond[!grepl("stress", rownames(tab_ctCond)) & 
-                          !grepl("intera", rownames(tab_ctCond)),]
-imm_cnts = tab_ctCond
-imm_cnts = merge(data.frame(imm_cnts), don_cond_df, by.x = 2, by.y = 1)
-pvals_l = list()
-for(ct in unique(imm_cnts$Var1)){
-  dfct = imm_cnts[imm_cnts$Var1==ct,]
-  dfct$not = tapply(imm_cnts$Freq, imm_cnts$Var2, sum)-dfct$Freq
-  dfct$tot = tapply(imm_cnts$Freq, imm_cnts$Var2, sum)
-  dfct$Condition = factor(dfct$Condition, levels = c("healthy", "embolised", "regenerating"))
-  mod = glm(cbind(Freq, not) ~ Condition + Donor + tot, data = dfct, family = "binomial")
-  pvals_l[[ct]] = summary(mod)$coefficients[c("Conditionembolised", "Conditionregenerating"),
-                                            "Pr(>|z|)"]
-}
-pvals_df = data.frame(t(data.frame(pvals_l)))
-rownames(pvals_df) = names(pvals_l)
-colnames(pvals_df) = gsub("Condition", "", colnames(pvals_df))
-pvals_df$embolised = p.adjust(pvals_df$embolised, method = "fdr")
-pvals_df$regenerating = p.adjust(pvals_df$regenerating, method = "fdr")
+plot_scores = rbind(fresh_mes@meta.data[,c("annotation", "FB", "HSC", "VSMC")], 
+                    frozen_mes@meta.data[,c("annotation", "FB", "HSC", "VSMC")])
+plot_scores$protocol = c(rep("fresh", ncol(fresh_mes)), rep("frozen", ncol(frozen_mes)))
+plot_scores = reshape2::melt(plot_scores)
+
+scores_plt = ggplot(plot_scores, aes(x = annotation, y = value, colour = annotation))+
+  ggh4x::facet_grid2(variable ~ protocol, independent = "y", scales = "free")+
+  ggbeeswarm::geom_quasirandom(size = 0.4)+
+  scale_colour_manual(values = cols_use)+
+  theme_bw()+
+  theme(axis.text = element_text(colour = "black", size = 6),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+        axis.title = element_text(size = 6.5),
+        axis.line = element_blank(),
+        axis.title.x = element_blank(),
+        strip.text = element_text(size = 7),
+        legend.position = "none")
+fresh_heat = ggplot(fresh_pval_df, aes(y = Var1, x = Var2, fill = -log10(value)))+
+  geom_tile()+
+  labs(fill = "-log10(p-value)", y = "gene signatures")+
+  scale_x_discrete(expand = c(0,0))+
+  scale_y_discrete(expand = c(0,0))+
+  guides(fill = guide_colourbar(title.position="top", title.hjust = 0))+
+  theme_classic()+
+  theme(axis.text.y = element_text(colour = "black", size = 6),
+        axis.title.y = element_text(colour = "black", size = 7),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "bottom",
+        legend.text = element_text(size = 6, colour = "black"),
+        legend.title = element_text(size = 6.5, vjust = 1),
+        legend.margin = margin(0,0,0,0),
+        legend.box.margin = margin(0,0,0,0),
+        legend.box.spacing = unit(0.25, "cm"),
+        legend.key.height = unit(0.35, "cm"),
+        legend.key.width = unit(0.45, "cm"))
+frozen_heat = ggplot(frozen_pval_df, aes(y = Var1, x = Var2, fill = -log10(value)))+
+  geom_tile()+
+  labs(fill = "-log10(p-value)", y = "gene signatures")+
+  scale_x_discrete(expand = c(0,0))+
+  scale_y_discrete(expand = c(0,0))+
+  guides(fill = guide_colourbar(title.position="top", title.hjust = 0))+
+  theme_classic()+
+  theme(axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.line = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "bottom",
+        legend.text = element_text(size = 6, colour = "black"),
+        legend.title = element_text(size = 6.5, vjust = 1),
+        legend.margin = margin(0,0,0,0),
+        legend.box.margin = margin(0,0,0,0),
+        legend.box.spacing = unit(0.25, "cm"),
+        legend.key.height = unit(0.35, "cm"),
+        legend.key.width = unit(0.45, "cm"))
+
+sc_plt_all = scores_plt+(fresh_heat+frozen_heat)+patchwork::plot_layout(heights = c(5, 1), 
+                                                                        nrow = 2)
+pdf("../figure_panels_rev2/scores_signatures.pdf", height = 5, width = 3.25)
+print(sc_plt_all)
+dev.off()
 ```
+
+
 
