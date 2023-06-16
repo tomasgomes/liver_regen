@@ -514,5 +514,28 @@ print(sc_plt_all)
 dev.off()
 ```
 
+Save DE genes
+
+```{r}
+fresh_deg$annotation = as.character(fresh_deg$group)
+fresh_deg$annotation[fresh_deg$annotation=="0"] = "Stellate cells"
+fresh_deg$annotation[fresh_deg$annotation=="1"] = "Fibroblasts 1" # not much difference with 2
+fresh_deg$annotation[fresh_deg$annotation=="2"] = "Fibroblasts 2"
+fresh_deg$annotation[fresh_deg$annotation=="3"] = "Fibroblasts 3"
+fresh_deg$annotation[fresh_deg$annotation=="4"] = "Hep/Chol\ndoublets"
+fresh_deg$annotation[fresh_deg$annotation=="5"] = "VSMC"
+write.csv(fresh_deg, file = "../figure_panels_rev2/mes_fresh_deg.csv", quote = F, row.names = F)
+
+frozen_deg$annotation = as.character(frozen_deg$group)
+frozen_deg$annotation[frozen_deg$annotation=="0"] = "Stellate cells"
+frozen_deg$annotation[frozen_deg$annotation=="1"] = "Stellate cells"
+frozen_deg$annotation[frozen_deg$annotation=="2"] = "VSMC"
+frozen_deg$annotation[frozen_deg$annotation=="3"] = "Hepatocyte\ndoublets"
+frozen_deg$annotation[frozen_deg$annotation=="4"] = "LSEC\ndoublets"
+frozen_deg$annotation[frozen_deg$annotation=="5"] = "Fibroblasts"
+write.csv(frozen_deg, file = "../figure_panels_rev2/mes_frozen_deg.csv", quote = F, row.names = F)
+```
+
+
 
 
