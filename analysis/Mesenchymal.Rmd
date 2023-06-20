@@ -16,6 +16,7 @@ library(dplyr)
 library(RColorBrewer)
 
 source("https://raw.githubusercontent.com/tomasgomes/personal_toolbox/main/R/analysis_Seurat.R")
+source("https://raw.githubusercontent.com/tomasgomes/personal_toolbox/main/R/gene_expression.R")
 ```
 
 Load data
@@ -363,36 +364,6 @@ VlnPlot(frozen_mes, features = names(mk_per_ct), group.by = "annotation")
 DE gene enrichment
 
 ```{r}
-hypergeometricTest <- function(geneSet, backgroundSet, universeSize) {
-  # Calculate the number of genes in the intersection of geneSet and backgroundSet
-  intersectionSize <- length(intersect(geneSet, backgroundSet))
-  
-  # Calculate the number of genes in geneSet
-  geneSetSize <- length(geneSet)
-  
-  # Calculate the number of genes in backgroundSet
-  backgroundSetSize <- length(backgroundSet)
-  
-  # Calculate the number of genes not in either geneSet or backgroundSet
-  notInSetSize <- universeSize - (geneSetSize + backgroundSetSize - intersectionSize)
-  
-  # Perform the hypergeometric test
-  p_value <- phyper(intersectionSize - 1, geneSetSize, notInSetSize, backgroundSetSize, 
-                    lower.tail = FALSE)
-  
-  # Create a result object with relevant information
-  result <- list(
-    geneSetSize = geneSetSize,
-    backgroundSetSize = backgroundSetSize,
-    intersectionSize = intersectionSize,
-    notInSetSize = notInSetSize,
-    p_value = p_value
-  )
-  
-  return(result)
-}
-
-
 fresh_mk_l = tapply(fresh_deg$feature, fresh_deg$group, function(x) x)
 fresh_enr_res = list()
 for(cl in names(fresh_mk_l)){
@@ -536,6 +507,21 @@ frozen_deg$annotation[frozen_deg$annotation=="5"] = "Fibroblasts"
 write.csv(frozen_deg, file = "../figure_panels_rev2/mes_frozen_deg.csv", quote = F, row.names = F)
 ```
 
+Save data and annotations (both)
 
+```{r}
+saveRDS(fresh_mes, file = "../data/processed/mesenchymal_fresh.RDS")
+saveRDS(frozen_mes, file = "../data/processed/mesenchymal_frozen.RDS")
+
+fresh_mes$annotation = gsub("\n", " ", fresh_mes$annotation)
+fresh_mes$annotation2 = gsub("\n", " ", fresh_mes$annotation2)
+write.csv(fresh_mes@meta.data[,c("harmony20_res.0.6", "annotation", "annotation2")], 
+          file = "../data/processed/mesenchymal_fresh_annot.csv",
+          quote = F, row.names = T)
+frozen_mes$annotation = gsub("\n", " ", frozen_mes$annotation)
+write.csv(frozen_mes@meta.data[,c("harmony20_res.0.7", "annotation")], 
+          file = "../data/processed/mesenchymal_frozen_annot.csv",
+          quote = F, row.names = T)
+```
 
 
