@@ -973,7 +973,7 @@ plt_mean = ggplot(avg_endoc_meta, aes(x = endo_simp, y = value, fill = value.y))
         legend.title = element_text(size = 6.5),
         legend.text = element_text(size = 6))
 
-pdf("figure_panels_rev1/fig_comm/endo_expression_angiocrine.pdf", height = 4.8, width = 6)
+pdf("figure_panels_rev2/fig_comm/endo_expression_angiocrine.pdf", height = 4.8, width = 6)
 print(plt_mean)
 dev.off()
 ```
@@ -981,7 +981,7 @@ dev.off()
 Get interactions
 
 ```{r}
-inter_df = readRDS(file = "results/cell_comm/updt/cond_diff_interact_DE.RDS")[1:3]
+inter_df = readRDS(file = "results/cell_comm/v3/cond_diff_interact_DE.RDS")[1:3]
 inter_df = reshape2::melt(lapply(inter_df, function(x) x[,c(1:8)]), 
                           id.vars = colnames(inter_df$healthy[,c(1:8)]))
 inter_df$ct_pair = paste0(inter_df$ct1, "..", inter_df$ct2)
@@ -1116,7 +1116,7 @@ cnt_int_cond = ggplot(plot_df_cond, aes(x = Var2, y = Var1, fill = value))+
         axis.title = element_text(size = 6.5),
         strip.text = element_text(size = 6.5))
 
-pdf("figure_panels_rev1/fig_comm/endo_interactions_angiocrine_allInter.pdf", height = 4.45, 
+pdf("figure_panels_rev2/fig_comm/endo_interactions_angiocrine_allInter.pdf", height = 4.45, 
     width = 6.8)
 print(cnt_int_cond)
 dev.off()
@@ -1178,7 +1178,7 @@ cnt_int_spec = ggplot(plot_df_spec, aes(x = Var2, y = Var1, fill = value))+
         axis.title = element_text(size = 6.5),
         strip.text = element_text(size = 6.5))
 
-pdf("figure_panels_rev1/fig_comm/endo_interactions_angiocrine_healthyVSPVE.pdf", height = 4.45, 
+pdf("figure_panels_rev2/fig_comm/endo_interactions_angiocrine_healthyVSPVE.pdf", height = 4.45, 
     width = 6.8)
 print(cnt_int_spec)
 dev.off()
@@ -1238,7 +1238,7 @@ cnt_int_spec2 = ggplot(plot_df_spec2, aes(x = Var2, y = Var1, fill = value))+
         axis.title = element_text(size = 6.5),
         strip.text = element_text(size = 6.5))
 
-pdf("figure_panels_rev1/fig_comm/endo_interactions_angiocrine_any2cond.pdf", height = 4.45, 
+pdf("figure_panels_rev2/fig_comm/endo_interactions_angiocrine_any2cond.pdf", height = 4.45, 
     width = 6.8)
 print(cnt_int_spec2)
 dev.off()
@@ -1253,7 +1253,7 @@ inter_df_sub = unique(inter_df_endo2[inter_df_endo2$gn1 %in% genes_endo$value,
 inter_df_endo_u = unique(inter_df_endo2[,c("ct1", "ct2", "ct_pair", "lr_pair", "value", "L1")])
 inter_df_cond_u = unique(inter_df_sub[,c("lr_pair", "L1")])
 
-write.csv(inter_df_sub, file = "figure_panels_rev1/fig_comm/endo_interactions_angiocrine.csv",
+write.csv(inter_df_sub, file = "figure_panels_rev2/fig_comm/endo_interactions_angiocrine.csv",
           row.names = F, quote = F)
 
 gradexpcol = c("#f3edff", "#ecc8fa", "#9e42d4", "#792f91")

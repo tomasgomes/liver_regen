@@ -3445,7 +3445,6 @@ dev.off()
 
 
 
-
 # Panels cirrhosis
 UMAP Immune cells
 
@@ -3735,7 +3734,7 @@ plt = ggplot(sub_plot_df, aes(x = endo_simp, y = value, fill = Condition))+
         legend.text = element_text(size = 6.5),
         legend.title = element_text(size = 7))
 
-pdf("figure_panels_rev1/fig_cir/endo_sig_vio.pdf", height = 2.8, width = 11)
+pdf("figure_panels_rev2/fig_cir/endo_sig_vio.pdf", height = 2.8, width = 11)
 print(plt)
 dev.off()
 ```
