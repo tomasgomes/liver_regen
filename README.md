@@ -2,8 +2,8 @@
 
 **Description**: This repository contains the code used for the scRNA-seq data analysis in _Brazovskaja, Gomes, et al._  
 
- - **Manuscript** ▶️ _TBD_  
+ - **Manuscript** ▶️ https://www.nature.com/articles/s41467-024-49236-7
 
- - **Processed data files** ▶️ https://data.mendeley.com/drafts/yp3txzw64c  
+ - **Processed data files** ▶️ https://data.mendeley.com/datasets/yp3txzw64c/1
 
 
